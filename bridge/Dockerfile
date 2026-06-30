@@ -1,0 +1,16 @@
+# Document Intelligence Studio — zero-dependency image. No npm install, no build step:
+# the service is the Node standard library plus TypeScript run natively. Non-root user.
+FROM node:22-slim AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+
+# Source + UI only — there are no node_modules to copy.
+COPY package.json ./
+COPY tsconfig.json ./
+COPY src ./src
+COPY public ./public
+
+USER node
+EXPOSE 8080
+# --experimental-transform-types lets Node execute the .ts sources directly.
+CMD ["node", "--experimental-transform-types", "src/index.ts"]

@@ -1,0 +1,17 @@
+{
+  "name": "arag-doc-processing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Document Intelligence Studio — visual-LLM extraction, data-augmentation agents, and JSON/XML/CSV standardization on Progress Agentic RAG. Dependency-free: runs on bare Node (native TypeScript), no npm install.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "comment": "npm is intentionally NOT used. Prefer the Makefile (`make test`, `make dev`, `make start`). These aliases call Node directly so `node --run <name>` works without npm.",
+  "scripts": {
+    "test": "node --experimental-transform-types --test bridge/test/*.test.ts",
+    "dev": "node --experimental-transform-types --watch bridge/src/index.ts",
+    "start": "node --experimental-transform-types bridge/src/index.ts",
+    "smoke": "node --experimental-transform-types scripts/smoke.ts"
+  }
+}

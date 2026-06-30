@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "doc-studio",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--experimental-transform-types", "bridge/src/index.ts"],
+      "port": 8080
+    }
+  ]
+}

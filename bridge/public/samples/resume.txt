@@ -1,0 +1,28 @@
+JORDAN REYES
+Senior Solutions Engineer
+Melbourne, VIC, Australia  ·  jordan.reyes@example.com  ·  +61 4 1234 5678
+linkedin.com/in/jordanreyes
+
+PROFESSIONAL SUMMARY
+Solutions engineer with 9 years' experience designing and demonstrating enterprise AI search,
+RAG, and knowledge-management platforms for regulated industries. Closes complex technical
+deals by translating product capability into measurable business outcomes.
+
+EXPERIENCE
+Progress Software — Senior Solutions Engineer (2023–present)
+  - Led technical pre-sales for the Agentic RAG platform across ANZ; supported USD $4.2M pipeline.
+  - Built 20+ vertical demos (legal, healthcare, commerce) used by the global GTM team.
+
+Elastic — Solutions Architect (2019–2023)
+  - Designed search and observability architectures for Fortune 500 customers.
+
+IBM — Software Engineer (2016–2019)
+  - Built data-ingestion pipelines for Watson Discovery.
+
+EDUCATION
+  - B.Sc. Computer Science, University of Melbourne (2016)
+  - AWS Certified Solutions Architect – Professional
+
+SKILLS
+Retrieval-Augmented Generation, vector search, Python, TypeScript, Elasticsearch, LLM evaluation,
+solution architecture, technical storytelling, enterprise demos.

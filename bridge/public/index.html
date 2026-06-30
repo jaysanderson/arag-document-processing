@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Document Intelligence Studio · Progress Agentic RAG</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">◆</div>
+        <div>
+          <div class="brand-title">Document Intelligence Studio</div>
+          <div class="brand-sub">Visual-LLM extraction · augmentation agents · standardized output — on <strong>Progress Agentic RAG</strong></div>
+        </div>
+      </div>
+      <div class="kb-status" id="kbStatus" title="Knowledge Box status">
+        <span class="dot" id="kbDot"></span><span id="kbText">connecting…</span>
+      </div>
+    </header>
+
+    <main>
+      <!-- LEFT: input + pipeline -->
+      <section class="col col-left">
+        <div class="card dropzone" id="dropzone">
+          <input type="file" id="fileInput" hidden />
+          <div class="dz-inner">
+            <div class="dz-icon">⤓</div>
+            <div class="dz-title">Drop a document here</div>
+            <div class="dz-hint">PDF · image · DOCX · TXT — or click to browse</div>
+            <button class="btn ghost" id="browseBtn" type="button">Choose file</button>
+          </div>
+        </div>
+
+        <div class="samples">
+          <span class="samples-label">Try a sample:</span>
+          <button class="chip" data-sample="invoice">Invoice</button>
+          <button class="chip" data-sample="contract">Contract</button>
+          <button class="chip" data-sample="resume">Résumé</button>
+        </div>
+
+        <div class="card pipeline" id="pipelineCard">
+          <div class="card-head"><h3>Pipeline</h3><span class="muted" id="fileLabel">no document</span></div>
+          <ol class="stages" id="stages">
+            <li data-stage="ingest"><span class="st-ic"></span><span class="st-name">Ingest</span><span class="st-meta"></span></li>
+            <li data-stage="process"><span class="st-ic"></span><span class="st-name">Process (OCR · visual · layout)</span><span class="st-meta"></span></li>
+            <li data-stage="classify"><span class="st-ic"></span><span class="st-name">Classify document type</span><span class="st-meta"></span></li>
+            <li data-stage="extract"><span class="st-ic"></span><span class="st-name">Visual-LLM extraction</span><span class="st-meta"></span></li>
+            <li data-stage="entities"><span class="st-ic"></span><span class="st-name">Entity enrichment</span><span class="st-meta"></span></li>
+            <li data-stage="summary"><span class="st-ic"></span><span class="st-name">Summarize &amp; tag</span><span class="st-meta"></span></li>
+            <li data-stage="validate"><span class="st-ic"></span><span class="st-name">Validate &amp; normalize</span><span class="st-meta"></span></li>
+            <li data-stage="standardize"><span class="st-ic"></span><span class="st-name">Standardize (JSON · XML · CSV)</span><span class="st-meta"></span></li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- RIGHT: results -->
+      <section class="col col-right">
+        <div class="card result" id="resultCard">
+          <div class="result-empty" id="resultEmpty">
+            <div class="re-icon">⌘</div>
+            <p>Extracted, augmented, and standardized document data will appear here.</p>
+          </div>
+
+          <div class="result-body" id="resultBody" hidden>
+            <div class="result-head">
+              <div>
+                <span class="badge" id="docTypeBadge">document</span>
+                <span class="conf" id="docConf"></span>
+              </div>
+              <div class="exports">
+                <button class="btn sm" data-fmt="json">JSON</button>
+                <button class="btn sm" data-fmt="xml">XML</button>
+                <button class="btn sm" data-fmt="csv">CSV</button>
+              </div>
+            </div>
+
+            <p class="summary" id="summary"></p>
+            <div class="tags" id="tags"></div>
+
+            <div class="issues" id="issues"></div>
+
+            <h4>Extracted fields</h4>
+            <table class="fields" id="fieldsTable"><tbody></tbody></table>
+
+            <h4>Entities</h4>
+            <div class="entities" id="entities"></div>
+
+            <div class="ask">
+              <h4>Ask this document</h4>
+              <div class="ask-row">
+                <input type="text" id="askInput" placeholder="e.g. What is the total due and when?" />
+                <button class="btn" id="askBtn">Ask</button>
+              </div>
+              <div class="ask-answer" id="askAnswer" hidden></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

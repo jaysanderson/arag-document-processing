@@ -1,0 +1,35 @@
+MASTER SERVICES AGREEMENT
+
+This Master Services Agreement ("Agreement") is entered into and effective as of
+1 March 2026 ("Effective Date") by and between:
+
+(1) Progress Software Corporation, a Delaware corporation with offices at 14 Oak Park,
+    Bedford, MA 01730 ("Provider"); and
+(2) Meridian Health Networks Ltd, an Australian company (ACN 612 998 114) with offices at
+    Level 9, 200 George Street, Sydney NSW 2000 ("Customer").
+
+1. TERM. This Agreement commences on the Effective Date and continues for an initial term
+   of thirty-six (36) months, renewing automatically for successive twelve (12) month terms
+   unless either party gives ninety (90) days' written notice of non-renewal.
+
+2. SERVICES & FEES. Provider will deliver the Agentic RAG platform subscription and
+   professional services described in each Statement of Work. Total contract value over the
+   initial term is USD $1,440,000, invoiced quarterly in advance.
+
+3. TERMINATION. Either party may terminate for material breach not cured within thirty (30)
+   days of written notice. Customer may terminate for convenience with sixty (60) days' notice,
+   subject to payment for services rendered.
+
+4. GOVERNING LAW. This Agreement is governed by the laws of the State of Delaware, USA,
+   without regard to its conflict-of-laws principles.
+
+5. KEY OBLIGATIONS.
+   - Provider shall maintain 99.9% platform uptime measured monthly.
+   - Provider shall complete onboarding within 45 days of the Effective Date.
+   - Customer shall designate a technical point of contact and provide data access.
+   - Both parties shall keep Confidential Information secret for five (5) years.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.
+
+Provider: Progress Software Corporation      Customer: Meridian Health Networks Ltd
+By: Nick Albanese, VP Sales                   By: Dr. Priya Nair, CTO

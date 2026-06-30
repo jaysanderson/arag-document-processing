@@ -1,0 +1,42 @@
+# Fly.io deployment for the Document Intelligence Studio bridge.
+# Co-locate primary_region with the ARAG KB region to minimise the network hop.
+# Set secrets out-of-band, never in this file:
+#   fly secrets set ARAG_TOKEN=… ARAG_KB_URL=…
+
+app = "arag-doc-processing"
+primary_region = "iad"   # US-east — near the KB host (aws-us-east-2); cuts the hop.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  ARAG_GENERATIVE_MODEL = "chatgpt-azure-4o"
+  ARAG_RERANKER = "predict"
+  ARAG_TIMEOUT_MS = "60000"
+  LOG_LEVEL = "info"
+  # ARAG_KB_URL and ARAG_TOKEN are set via `fly secrets set …`.
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1   # keep one warm so the first demo upload isn't a cold start.
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 30
+    hard_limit = 50
+
+[[http_service.checks]]
+  interval = "15s"
+  timeout = "2s"
+  grace_period = "5s"
+  method = "GET"
+  path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

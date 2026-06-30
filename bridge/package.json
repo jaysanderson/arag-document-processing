@@ -1,0 +1,8 @@
+{
+  "name": "arag-doc-processing-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "comment": "Dependency-free. Run via the repo Makefile or: node --experimental-transform-types src/index.ts"
+}
