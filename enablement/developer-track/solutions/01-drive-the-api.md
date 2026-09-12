@@ -72,8 +72,12 @@ curl -sS -X POST "http://localhost:8080/api/v1/documents/$ID/ask" \
 ```
 
 ```bash
-# 6. Delete and confirm
-curl -sS -o /dev/null -w '%{http_code}\n' -X DELETE "http://localhost:8080/api/v1/documents/$ID"
+# 6. Delete and confirm — DELETE destroys shared state (the KB resource too), so it
+#    needs a credential even though everything above didn't. A session cookie is the
+#    lowest-friction one: bootstrap it once, reuse it for any later write in this lab.
+curl -sS -c /tmp/dip-cookies.txt -X POST http://localhost:8080/api/v1/session > /dev/null
+curl -sS -b /tmp/dip-cookies.txt -o /dev/null -w '%{http_code}\n' \
+     -X DELETE "http://localhost:8080/api/v1/documents/$ID"
 curl -sS -o /dev/null -w '%{http_code}\n' "http://localhost:8080/api/v1/documents/$ID"
 ```
 
@@ -83,6 +87,13 @@ curl -sS -o /dev/null -w '%{http_code}\n' "http://localhost:8080/api/v1/document
 ```
 
 ## Notes on the choices
+
+- **Why `DELETE` needs a session cookie but nothing before it did**: uploads, reads,
+  exports and `ask` all stay anonymous-friendly by design, so the quickstart and the
+  demo work with zero setup — but `DELETE` also deletes the underlying Knowledge Box
+  resource, a genuine write to shared state, so it goes through the `requireWriter`
+  guard (`src/routes/guards.ts`) even when `API_KEYS` is left unset. Any of an admin
+  token, an API key, or this session cookie satisfies it.
 
 - **Why `?config=auto`**: it's the default, and it exercises the classifier, not just
   the extractor — the record you get back demonstrates the whole pipeline, not a

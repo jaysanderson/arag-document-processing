@@ -450,10 +450,19 @@ export const openapi = buildOpenApi({
       delete: {
         operationId: "cancelJob",
         tags: ["jobs"],
-        summary: "Cancel a running job",
+        summary: "Cancel a queued or running job",
         description:
-          "Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.",
-        responses: { 204: { description: "Cancelled" }, ...standardResponses },
+          "Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a " +
+          "same-origin session cookie from `POST /api/v1/session`. A job that has already finished " +
+          "cannot be cancelled and answers 409.",
+        responses: {
+          204: { description: "Cancelled" },
+          409: {
+            description: "The job already finished (succeeded, failed or cancelled)",
+            content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
+          },
+          ...standardResponses,
+        },
         security: apiSecurity,
       },
     },

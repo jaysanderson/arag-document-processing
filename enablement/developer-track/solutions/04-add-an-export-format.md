@@ -166,7 +166,9 @@ ACME ROBOTICS PTY LTD …
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' "http://localhost:8080/api/v1/documents/$ID/export?format=bogus"
 # 400 — the FORMATS Set in routes/documents.ts still rejects unknown values first
-curl -sS -o /dev/null -w '%{http_code}\n' -X DELETE "http://localhost:8080/api/v1/documents/$ID"
+curl -sS -c /tmp/dip-cookies.txt -X POST http://localhost:8080/api/v1/session > /dev/null
+curl -sS -b /tmp/dip-cookies.txt -o /dev/null -w '%{http_code}\n' -X DELETE "http://localhost:8080/api/v1/documents/$ID"
+# 204 — DELETE needs a session/API-key/admin credential (requireWriter); everything above didn't
 ```
 
 ## Why these choices

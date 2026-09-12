@@ -25,8 +25,12 @@ export default defineConfig({
   webServer: {
     // Mock ARAG: deterministic, no credentials, no LLM spend. A short processing delay
     // makes the live pipeline visible (and recordable) rather than instantaneous.
+    // ENV_FILE=/dev/null: never read the developer's .env. Without it a local run would
+    // inherit real credentials and DIP_EXTRACT_STRATEGY, so the recording would differ
+    // between machines and could put a real strategy id on screen.
     command:
-      `ARAG_MOCK=1 ADMIN_TOKEN=e2e-admin-token DATA_DIR=./data/${showcase ? "showcase" : "e2e"} ` +
+      `ENV_FILE=/dev/null ARAG_MOCK=1 ADMIN_TOKEN=e2e-admin-token ` +
+      `DATA_DIR=./data/${showcase ? "showcase" : "e2e"} ` +
       `LOG_LEVEL=info RATE_LIMIT_RPS=0 PORT=${port} node src/index.ts`,
     url: `http://127.0.0.1:${port}/healthz`,
     reuseExistingServer: !process.env.CI,

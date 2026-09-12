@@ -5,6 +5,7 @@
  */
 import {
   type App,
+  conflict,
   type JobManager,
   type JobStatus,
   notFound,
@@ -42,8 +43,13 @@ export function registerJobRoutes(app: App, deps: { jobs: JobManager }): void {
     "/api/v1/jobs/:id",
     (ctx) => {
       requireWriter(ctx);
-      if (!deps.jobs.get(ctx.params.id!)) throw notFound("Job");
-      deps.jobs.cancel(ctx.params.id!);
+      const job = deps.jobs.get(ctx.params.id!);
+      if (!job) throw notFound("Job");
+      // `cancel()` is a no-op on a finished job; say so rather than report success for
+      // something that did not happen.
+      if (!deps.jobs.cancel(job.id)) {
+        throw conflict(`Job ${job.id} already ${job.status} and cannot be cancelled`);
+      }
       ctx.noContent();
     },
     { auth: "api", operationId: "cancelJob" },
@@ -73,8 +79,9 @@ export function registerJobRoutes(app: App, deps: { jobs: JobManager }): void {
       });
       sse.onClose(unsub);
     },
-    // Rate-limited like any other route: an SSE *open* costs a token, so an anonymous
-    // client cannot hold unbounded concurrent streams (the stream itself is not throttled).
-    { auth: "api", operationId: "jobEvents" },
+    // An SSE *open* costs a token from its own generous bucket (the stream itself is never
+    // throttled): a demo that watches several pipelines at once must not trip the shared
+    // public limit, but an anonymous client still cannot hold unbounded concurrent streams.
+    { auth: "api", rateLimit: { rps: 2, burst: 30 }, operationId: "jobEvents" },
   );
 }

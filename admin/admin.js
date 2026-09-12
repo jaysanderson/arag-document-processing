@@ -189,8 +189,13 @@ async function openJob(id) {
 $("#reloadJobs").addEventListener("click", loadJobs);
 $("#cancelJob").addEventListener("click", async () => {
   if (!selectedJob) return;
-  await api(`/api/v1/jobs/${selectedJob.id}`, { method: "DELETE" });
-  toast("Job cancelled");
+  try {
+    await api(`/api/v1/jobs/${selectedJob.id}`, { method: "DELETE" });
+    toast("Job cancelled");
+  } catch (e) {
+    // 409 when the job finished between the panel rendering and the click.
+    toast(e.message, "error");
+  }
   loadJobs();
   openJob(selectedJob.id);
 });

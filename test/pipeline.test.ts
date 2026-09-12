@@ -193,6 +193,8 @@ test("a queued job can be cancelled", async () => {
   assert.equal((await c.request("DELETE", `/api/v1/jobs/${job.id}`, { headers: writer })).status, 204);
   const cancelled = product.jobs.get(job.id)!;
   assert.equal(cancelled.status, "cancelled");
+  // A second cancel cannot succeed — the job is already in a terminal state.
+  assert.equal((await c.request("DELETE", `/api/v1/jobs/${job.id}`, { headers: writer })).status, 409);
   // The SSE stream for a finished job replays and closes immediately.
   const stream = await c.get(`/api/v1/jobs/${job.id}/events`);
   assert.match(stream.text, /"status":"cancelled"/);

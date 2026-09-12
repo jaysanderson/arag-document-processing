@@ -68,12 +68,21 @@ git checkout -- src/ test/                # optional, discard lab edits when you
 git clone <repo-url> arag-doc-processing   # skip if you already have the clone
 cd arag-doc-processing
 make install        # bun installs dev tooling only (no npm, ever)
+cp .env.example .env
+```
+
+`.env.example` ships with `ADMIN_TOKEN` blank, which locks `/admin` and every
+`/api/v1/admin/*` route (including one this lab uses in Section 3). Set a local dev
+token before your first `make dev`:
+
+```bash
+printf '\nADMIN_TOKEN=lab-admin-token\n' >> .env
 make dev             # http://localhost:8080
 ```
 
-`make dev` copies `.env.example` to `.env` on first run, checks whether `ARAG_API_KEY`
-is set, and — since it isn't — starts with `ARAG_MOCK=1` automatically. You get the
-whole pipeline running against an in-process fake Knowledge Box.
+`make dev` checks whether `ARAG_API_KEY` is set in `.env`, and — since it isn't —
+starts with `ARAG_MOCK=1` automatically. You get the whole pipeline running against an
+in-process fake Knowledge Box, with no ARAG account needed.
 
 Leave that terminal running and, in a second terminal, tour the three surfaces:
 
@@ -84,11 +93,10 @@ Leave that terminal running and, in a second terminal, tour the three surfaces:
 | API docs | <http://localhost:8080/api/v1/docs> | Redoc (and `/api/v1/swagger` to try it out) |
 
 Open the demo, drop in `public/samples/invoice.txt` (drag it into the browser window),
-and watch the pipeline stages light up in real time. Then open the admin panel — the
-default admin token in `.env.example` for local dev is whatever you set as
-`ADMIN_TOKEN` (a running instance for this lab uses `dev-admin-token`) — and look at the
-**Configs** tab: eleven built-in extraction configs, each backed by a stored ARAG search
-configuration named `dip_<schema name>`.
+and watch the pipeline stages light up in real time. Then open the admin panel, sign in
+with `lab-admin-token` (or whatever you set above), and look at the **Configs** tab:
+eleven built-in extraction configs, each backed by a stored ARAG search configuration
+named `dip_<schema name>`.
 
 Now run the test suite once, before you change anything, so you know what "green" looks
 like:

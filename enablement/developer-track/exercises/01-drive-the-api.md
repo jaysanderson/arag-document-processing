@@ -26,7 +26,8 @@ Using only `curl` (no browser, no admin panel), against your locally running ins
       `text/csv; charset=utf-8`).
 - [ ] The `ask` call returns a non-empty `answer` and a `sources` array containing
       `receipt.txt`.
-- [ ] `DELETE` returns `204`; the follow-up `GET` returns `404`.
+- [ ] `DELETE` (with a session cookie — see the hint below) returns `204`; the
+      follow-up `GET` returns `404`.
 
 ## Hints
 
@@ -34,6 +35,10 @@ Using only `curl` (no browser, no admin panel), against your locally running ins
   capture one id from the upload response.
 - `jq -r .document.id` / `jq -r .job.id` pull the two ids you need out of the upload
   response in one line each.
+- Everything up to and including the `ask` call is anonymous-friendly — no credential
+  needed. `DELETE`, though, destroys shared state (it deletes the KB resource too), so
+  it requires one: `curl -c cookies.txt -X POST .../api/v1/session` once, then pass
+  `-b cookies.txt` on the `DELETE` call.
 - The SSE stream (`GET /api/v1/jobs/{id}/events`) closes itself once the job reaches a
   terminal status — you don't need to `Ctrl-C` it, but on a slow terminal `curl -sN`
   without a timeout is fine too since the mock finishes in milliseconds.

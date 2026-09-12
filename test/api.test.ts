@@ -364,8 +364,10 @@ test("jobs are listable, fetchable and cancellable", async () => {
   assert.deepEqual(testing.checkResponse(openapi, "/api/v1/jobs/{id}", "get", 200, one.json), []);
   assert.equal((await c.get("/api/v1/jobs/missing")).status, 404);
   assert.equal((await c.request("DELETE", "/api/v1/jobs/missing", { headers: writer })).status, 404);
-  // Cancelling a finished job is a no-op that still answers 204.
-  assert.equal((await c.request("DELETE", `/api/v1/jobs/${jobs[0]!.id}`, { headers: writer })).status, 204);
+  // Cancelling a job that already finished is a conflict, not a silent success.
+  const late = await c.request("DELETE", `/api/v1/jobs/${jobs[0]!.id}`, { headers: writer });
+  assert.equal(late.status, 409);
+  assert.match((late.json as { detail: string }).detail, /already succeeded/);
 });
 
 // ─── admin ────────────────────────────────────────────────────────────────────

@@ -191,12 +191,9 @@
   }
 }
 
-/* Platform UI-kit gap (arag-ui.css v0.1.2): several kit classes set an explicit `display`
-   (`.arag-grid` → grid, `.arag-row` and `.arag-modal-backdrop` → flex), which beats the
-   `hidden` attribute's UA rule. The visible symptoms were an invisible full-screen modal
-   backdrop swallowing every click, the admin panel showing all six tab sections at once,
-   and the demo's export buttons appearing before a record existed. Reported upstream;
-   until the kit ships `[hidden]{display:none!important}` itself, this is the workaround. */
-[hidden] {
-  display: none !important;
-}
+/* The `[hidden]` fix that used to live here is now in the UI kit itself (arag-ui.css
+   v0.1.4) — several kit classes set an explicit `display`, which beat the attribute's UA
+   rule and left an invisible modal backdrop swallowing clicks, every admin tab on screen
+   at once, and the export buttons visible before a record existed. Kept as an e2e
+   assertion on both surfaces so a future kit regression fails the build rather than the
+   demo. */

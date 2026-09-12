@@ -6,10 +6,14 @@
  * file's own `s()`, `money()`, `n()` and `arr()` helpers are private to that module —
  * once you paste this in, use them directly rather than re-importing anything).
  *
- * Don't forget the other two edits Section 2 walks through:
- *   1. src/types.ts        — add "insurance_card" to the `DocType` union
- *   2. src/openapi.ts      — add "insurance_card" to the local `DOC_TYPES` array
- * …and the three test-count updates in Section 2.5 once you've done that.
+ * Don't forget the other edit Section 2 walks through first:
+ *   1. src/types.ts — add "insurance_card" to `DOC_TYPE_VALUES` (the single source of
+ *      truth `DocType` is derived from — `src/openapi.ts` builds its enums from the
+ *      same array, so there is no separate spec-side list to edit, and no test count to
+ *      update either: the suite asserts against `DOC_TYPE_VALUES.length`, not a
+ *      literal number).
+ * Do step 1 on its own first and run `tsc --noEmit` — it will fail with a missing-key
+ * error on `SCHEMAS` until you also do step 2 below. That failure is the point.
  */
 import type { DocType } from "../../../src/types.ts";
 

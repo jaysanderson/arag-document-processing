@@ -1,28 +1,47 @@
 # Solution 2 — Add a new document type (`insurance_card`)
 
-## 1. `src/types.ts` — extend the `DocType` union
+## 1. `src/types.ts` — extend the single source of truth
 
 ```ts
-export type DocType =
-  | "invoice"
-  | "receipt"
-  | "contract"
-  | "resume"
-  | "purchase_order"
-  | "medical_claim"
-  | "preauthorisation"
-  | "bank_statement"
-  | "form"
-  | "report"
-  | "generic"
-  | "insurance_card";
+export const DOC_TYPE_VALUES = [
+  "invoice",
+  "receipt",
+  "contract",
+  "resume",
+  "purchase_order",
+  "medical_claim",
+  "preauthorisation",
+  "bank_statement",
+  "form",
+  "report",
+  "generic",
+  "insurance_card",
+] as const;
+
+export type DocType = (typeof DOC_TYPE_VALUES)[number];
 ```
+
+`DocType` is a derived type, not a hand-written union — `DOC_TYPE_VALUES` is the one
+place this list is spelled out. `src/openapi.ts` imports `DOC_TYPE_VALUES` directly and
+builds every `docType` enum in the spec from it, and `SCHEMAS` in `schemas.ts` is typed
+`Record<DocType, ExtractionSchema>`. **Stop here and run `tsc --noEmit -p tsconfig.json`
+before doing anything else** — it fails with something like:
+
+```
+src/services/schemas.ts(58,14): error TS2741: Property 'insurance_card' is missing in
+type '{ invoice: {...}; ... }' but required in type 'Record<... | "insurance_card",
+ExtractionSchema>'.
+```
+
+This is the guard rail working exactly as designed: the compiler itself refuses to
+build until `SCHEMAS` has an entry for the type you just added — there is no way to
+half-add a document type and have it silently compile.
 
 ## 2. `src/services/schemas.ts` — add the schema
 
-Add this entry to the `SCHEMAS` object (placed just before `generic:` in the file, to
-match its existing "specific types first, catch-alls last" ordering — order doesn't
-matter functionally, `SCHEMAS` is a plain object keyed by `DocType`):
+Add this entry to the `SCHEMAS` object (placed just before `generic:`, matching the
+file's existing "specific types first, catch-alls last" order — functionally the
+position doesn't matter, `SCHEMAS` is a plain object):
 
 ```ts
 insurance_card: {
@@ -66,72 +85,36 @@ insurance_card: {
   instruction the model itself receives, since `description` is sent verbatim as part
   of the `answer_json_schema`.
 
-## 3. `src/openapi.ts` — extend the local `DOC_TYPES`
+Now `tsc --noEmit -p tsconfig.json` passes.
 
-```ts
-const DOC_TYPES = [
-  "invoice", "receipt", "contract", "resume", "purchase_order", "medical_claim",
-  "preauthorisation", "bank_statement", "form", "report", "generic",
-  "insurance_card",
-] as const;
+## 3. Confirm the spec and schema catalogue updated themselves
+
+```bash
+curl -sS http://localhost:8080/api/v1/schemas | jq '.items | length'          # 12
+curl -sS http://localhost:8080/api/v1/openapi.json \
+  | jq '.components.schemas.Document.properties.docType.enum'
 ```
 
-This is a **second, independent** list from the one in `src/types.ts` — `openapi.ts`
-does not import `DocType`, by design (the OpenAPI document is meant to be
-self-describing and buildable without the rest of the product's types). Both lists
-must be kept in sync by hand; nothing enforces it automatically except the fact that a
-document classified as your new type would otherwise fail `checkResponse()`'s
-schema validation against `Document.properties.docType.enum` the next time a test
-exercises it.
-
-## 4. Update the three hardcoded counts
-
-Search each test file for a bare `11` used as an exact-equality/count assertion (not
-`>= 11`, which is a different, looser check that does not need to change):
-
-**`test/api.test.ts`**, in `"extraction configs: built-ins listed, custom created +
-provisioned + deletable"`:
-
-```ts
-// before
-assert.equal(builtins.filter((c2) => c2.builtin).length, 11);
-// after
-assert.equal(builtins.filter((c2) => c2.builtin).length, 12);
+```json
+["invoice","receipt","contract","resume","purchase_order","medical_claim",
+ "preauthorisation","bank_statement","form","report","generic","insurance_card"]
 ```
 
-**`test/api.test.ts`**, in `"the schema catalogue lists every document type and its
-fields"`:
+No edit to `src/openapi.ts` was needed — it builds this enum from `DOC_TYPE_VALUES`
+(imported from `types.ts`), so step 1 alone already fixed the spec. This is the entire
+point of the single-source-of-truth refactor: before it existed, `openapi.ts` kept its
+own independent copy of this list, and it was easy to update `schemas.ts` and forget the
+spec (or vice versa) — see the note at the end of this document for what that used to
+look like.
 
-```ts
-// before
-assert.equal(items.length, 11);
-// after
-assert.equal(items.length, 12);
-```
-
-**`test/e2e/admin.spec.ts`**, in `"admin: login is required, then health, configs, jobs,
-logs and retention are usable"`:
-
-```ts
-// before
-await expect(page.locator("#cfgTable tbody tr")).toHaveCount(11);
-// after
-await expect(page.locator("#cfgTable tbody tr")).toHaveCount(12);
-```
-
-Leave `assert.ok(out.ok >= 11);` in the `"admin provision re-creates every ARAG search
-configuration"` test alone — it is a lower bound, not an exact count, and is still true
-at 12.
-
-## 5. Confirm the generic consistency test already covers you
+## 4. Confirm the generic consistency test already covers you
 
 `test/agents.test.ts`'s `"every schema is internally consistent"` test iterates
-`DOC_TYPES` (from `schemas.ts`, which is derived from `Object.keys(SCHEMAS)`, so it
-already includes `insurance_card` once you've done step 2) and checks, for every
-schema, that every `required` key exists in `properties` and every `properties` key has
-a `labels` entry. You don't need to write a new test for this — you need to confirm
-this one still passes for your addition, which it will if you copied the shape above
-correctly. Run it in isolation to be sure:
+`DOC_TYPES` (from `schemas.ts`, itself `[...DOC_TYPE_VALUES]`, so it already includes
+`insurance_card` once you've done step 2) and checks, for every schema, that every
+`required` key exists in `properties` and every `properties` key has a `labels` entry.
+You don't need to write a new test for this — you need to confirm this one still passes
+for your addition, which it will if you copied the shape above correctly:
 
 ```bash
 node --test --test-reporter=spec test/agents.test.ts
@@ -140,17 +123,28 @@ node --test --test-reporter=spec test/agents.test.ts
 ## Verifying the whole thing
 
 ```bash
-node --test --test-reporter=spec 'test/*.test.ts'   # fail 0
+node --test --test-reporter=spec 'test/*.test.ts'   # fail 0 — no test file touched
 make check                                            # lint + typecheck + coverage, green
 curl -sS http://localhost:8080/api/v1/schemas | jq '.items | length'   # 12
 ```
 
-## Why the count assertions exist at all
+Every one of these passes **without editing a single test file.** `test/api.test.ts`'s
+extraction-config and schema-catalogue tests, and `test/e2e/admin.spec.ts`'s admin
+config-table assertion, all import `DOC_TYPE_VALUES` from `src/types.ts` and assert
+against `DOC_TYPE_VALUES.length` — the count moves with the source of truth.
 
-It would be easy to read "you have to go fix two unrelated-looking test failures" as
-lab friction. It isn't: `assert.equal(items.length, 11)` (now `12`) is the thing that
-would have caught a *regression* — someone accidentally deleting a built-in schema, or
-a refactor that silently dropped one from `DOC_TYPES` — long before it reached
-production. Adding a document type is supposed to be a deliberate, visible change to the
-public contract; a test suite that let the count drift silently would be a worse test
-suite, not a more convenient one.
+## Why this is worth noticing
+
+Earlier versions of this product kept the document-type list in three unsynced places:
+a hand-written `DocType` union in `types.ts`, a duplicate array in `openapi.ts`, and a
+literal `11` baked into three test assertions. Adding a type meant four coordinated
+edits, and forgetting any one of them either broke the build (a missing `SCHEMAS` key),
+silently drifted the public spec from the code (a stale `openapi.ts` enum), or left a
+regression-catching test looking green when it had actually stopped checking anything
+meaningful. Collapsing the list to one array (`DOC_TYPE_VALUES`) that everything else
+derives from doesn't remove the compiler's guard rail (`SCHEMAS` is still
+`Record<DocType, ExtractionSchema>`, so a missing schema still fails to compile) — it
+just removes the *manual, easy-to-forget* synchronisation that used to be needed
+alongside it. This is a good general lesson: a hardcoded count in a test is often a
+symptom of a missing single source of truth in the code it's testing, not a permanent
+fact of life to work around by hand every time.
