@@ -552,7 +552,8 @@ export class App {
   private async parseBody(ctx: Ctx, opts: RouteOptions): Promise<void> {
     const mode = opts.body ?? "auto";
     if (mode === "none" || ctx.method === "GET" || ctx.method === "HEAD") return;
-    const ct = (ctx.header("content-type") ?? "").toLowerCase();
+    const rawCt = ctx.header("content-type") ?? "";
+    const ct = rawCt.toLowerCase(); // for type checks only — the multipart boundary is case-sensitive
     const limit = opts.bodyLimit ?? this.env.maxBodyBytes;
     if (
       mode === "raw" ||
@@ -567,7 +568,7 @@ export class App {
     const raw = await this.readBody(ctx, limit);
     ctx.rawBody = raw;
     if (mode === "multipart" || ct.startsWith("multipart/form-data")) {
-      const parsed = parseMultipart(raw, ct);
+      const parsed = parseMultipart(raw, rawCt);
       ctx.files = parsed.files;
       ctx.body = parsed.fields;
       return;
