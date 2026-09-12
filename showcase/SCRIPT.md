@@ -16,12 +16,19 @@ samples: it is `showcase/fixtures/invoice-review.txt`, a deliberately imperfect 
 (the printed subtotal and tax do not add up to the printed total) so the validation-issues
 part of the canonical record has something real to show.
 
+The page itself says, plainly, that this recording is running against the mock Knowledge
+Box: a note under the sample buttons explains that extraction comes from deterministic
+fixtures rather than a model actually reading the page, so nobody watching the video
+mistakes fixture-driven output for genuine visual extraction. Read it out at the image
+sample beat below — that's where the distinction actually matters.
+
 ---
 
 ### 00:00–00:15 — The problem
 
 **On screen:** the demo home page, freshly loaded. Dropzone empty, "no document" label,
-canonical-record panel showing its empty state, no export buttons yet.
+canonical-record panel showing its empty state, no export buttons yet — and, under the
+sample buttons, the in-page note that this deployment is running the mock Knowledge Box.
 **Screenshot:** `01-home.png`
 
 > "Most business documents — invoices, purchase orders, claim forms, receipts — arrive as
@@ -96,16 +103,22 @@ queryable.
 
 **On screen:** an image (scanned) purchase order is processed with a forced
 `purchase_order` config; the preview shows the actual image, and the record panel shows
-"auto-classification skipped" alongside the extracted fields.
+"auto-classification skipped" alongside the extracted fields. The in-page note from card 1
+is still visible, right under the sample buttons.
 **Screenshot:** `05-image-sample.png`
 
 > "This isn't limited to text. A scanned or photographed purchase order goes through the
 > same pipeline using visual extraction — and here I've forced the purchase-order config
 > directly, so classification is skipped and the fields it must return are pinned in
-> advance."
+> advance. One honest caveat: this recording is running against the mock Knowledge Box, so
+> what you're seeing here comes from a deterministic fixture, not a model reading this
+> particular page — the note on screen says so. Point it at a real Knowledge Box and a
+> multimodal model reads the page itself."
 
 *Why this matters:* proves the visual (image/PDF) path is real, and shows the second way
-of choosing a schema — forcing it — versus auto-detect.
+of choosing a schema — forcing it — versus auto-detect. The caveat matters more than it
+might seem: it's the difference between a demo that's honest about what the mock can and
+can't prove, and one that quietly oversells it.
 
 ---
 

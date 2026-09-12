@@ -42,6 +42,9 @@ test("showcase walkthrough", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("arag-shell .product")).toContainText("Document Processing");
   await expect(page.locator("#configSelect option")).not.toHaveCount(0);
+  // The demo says plainly, in-page, that it is running against the mock Knowledge Box —
+  // so nobody watching mistakes fixture-driven extraction for genuine visual extraction.
+  await expect(page.locator("#mockNote")).toBeVisible({ timeout: 10_000 });
   await pause(1800);
   await shot(page, "01-home");
 
@@ -94,6 +97,9 @@ test("showcase walkthrough", async ({ page }) => {
   await expect(page.locator("#docConf")).toContainText("auto-classification skipped");
   await expect(page.locator("#docTypeBadge")).toContainText("purchase order");
   await expect(page.locator("#fieldsTable")).toContainText("PO-55218");
+  // The mock note (card #1) is still on screen here too — the fields shown do not come
+  // from reading the pixels of this particular image, and the note says so plainly.
+  await expect(page.locator("#mockNote")).toBeVisible();
   await pause(1500);
   await shot(page, "05-image-sample");
 
