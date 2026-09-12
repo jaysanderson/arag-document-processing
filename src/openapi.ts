@@ -5,6 +5,7 @@
  * if a route is missing from this document or a response drifts from its schema.
  */
 import {
+  BrandingSchema,
   buildOpenApi,
   jsonBody,
   jsonResponse,
@@ -309,6 +310,7 @@ export const openapi = buildOpenApi({
     ExtractionConfigCreate,
     Schema,
     ProvisionResult,
+    Branding: BrandingSchema,
   },
   paths: {
     "/api/v1/documents": {
@@ -601,6 +603,22 @@ export const openapi = buildOpenApi({
           ...standardResponses,
         },
         security: apiSecurity,
+      },
+    },
+    "/api/v1/branding": {
+      get: {
+        operationId: "getBranding",
+        tags: ["system"],
+        summary: "Effective white-label branding for this deployment",
+        description:
+          "Public and secret-free — it contains only what a visitor already sees. Both UIs " +
+          "fetch it before they paint; a partner's own front end can too. Configured with " +
+          "`BRAND_*` environment variables; assets live in `DATA_DIR/branding/` and are served " +
+          "from `/branding/`. See `docs/developer/white-label.md`.",
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/Branding" }),
+          ...standardResponses,
+        },
       },
     },
     "/api/v1/session": {

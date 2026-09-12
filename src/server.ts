@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import {
   App,
   AragClient,
+  type Branding,
   cors,
   log as defaultLog,
   healthRoutes,
@@ -14,6 +15,7 @@ import {
   type Logger,
   type MockAragServer,
   type PlatformEnv,
+  readBranding,
   Store,
   securityHeaders,
   startMockArag,
@@ -49,6 +51,8 @@ export interface Usage {
 export interface Product {
   name: string;
   version: string;
+  /** Effective white-label branding (BRAND_* env, platform defaults). */
+  branding: Branding;
   app: App;
   arag: AragClient;
   store: Store;
@@ -91,6 +95,13 @@ export function readProductEnv(src: NodeJS.ProcessEnv = process.env): {
 
 export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}): Promise<Product> {
   const log = opts.log ?? defaultLog;
+  // White-label: a partner rebrands a deployment with environment variables alone.
+  // The OpenAPI document keeps its own title — the API contract is not the brand.
+  const branding = readBranding(process.env, {
+    productName: "Document Processing",
+    tagline: "Documents in, validated records out",
+    docsUrl: "/api/v1/docs",
+  });
   const usage: Usage = {
     startedAt: Date.now(),
     requests: 0,
@@ -202,7 +213,12 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     version: VERSION,
     extractStrategy: product.extractStrategy,
     generativeModel: product.generativeModel,
+    branding,
   });
+
+  // Branding is public: both UIs fetch it before they paint, and so may a partner's own
+  // front end. It contains no secrets — only what a visitor already sees on the page.
+  app.get("/api/v1/branding", () => branding, { operationId: "getBranding", noRateLimit: true });
 
   // Session for the demo UI when API keys are enforced (rate-limited like any public route).
   app.post(
@@ -216,6 +232,9 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
 
   // Static surfaces: UI kit, admin panel, demo app. Both UIs consume only /api/v1.
   app.static("/ui", resolve(HERE, "vendor/arag-platform/ui"), { cache: "public, max-age=300" });
+  // Partner logos and other brand assets, dropped into DATA_DIR/branding (a Fly volume in
+  // production) so rebranding never needs a rebuild. Missing directory is simply a 404.
+  app.static("/branding", resolve(env.dataDir, "branding"), { cache: "public, max-age=300" });
   app.static("/admin", resolve(HERE, "admin"));
   app.static("/", resolve(HERE, "public"));
 
@@ -229,6 +248,7 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
   return {
     name: "arag-doc-processing",
     version: VERSION,
+    branding,
     app,
     arag,
     store,

@@ -2,6 +2,7 @@
 import {
   type App,
   type AragClient,
+  type Branding,
   constantTimeEqual,
   describeEnv,
   forbidden,
@@ -29,6 +30,7 @@ export interface AdminDeps {
   version: string;
   extractStrategy: string;
   generativeModel: string;
+  branding: Branding;
 }
 
 export function registerAdminRoutes(app: App, deps: AdminDeps): void {
@@ -69,6 +71,14 @@ export function registerAdminRoutes(app: App, deps: AdminDeps): void {
     "/api/v1/admin/config",
     () => ({
       env: describeEnv(deps.env),
+      branding: {
+        effective: deps.branding,
+        howToChange:
+          "Set BRAND_* environment variables (BRAND_PRODUCT_NAME, BRAND_TAGLINE, BRAND_LOGO_URL, " +
+          "BRAND_PRIMARY_COLOR, BRAND_ACCENT_COLOR, BRAND_POWERED_BY, BRAND_FOOTER_TEXT, " +
+          "BRAND_DOCS_URL, BRAND_SUPPORT_URL) and restart. Logos and other assets go in " +
+          "DATA_DIR/branding/ and are served from /branding/. See docs/developer/white-label.md.",
+      },
       product: {
         version: deps.version,
         extractStrategy: deps.extractStrategy || null,

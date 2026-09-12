@@ -120,3 +120,20 @@ The MVP job runner processes documents in a single in-process worker, which is a
 
 **"Are we locking ourselves into Progress Agentic RAG?"**
 Yes, deliberately. The reliable parts of this product — full_resource grounding, stored search configurations, the searchable-gate timing — are ARAG-specific behaviours learned the hard way, not a generic LLM wrapper. If you're already investing in ARAG as a knowledge platform, that's a feature; if you need a backend-agnostic tool, this isn't it.
+
+## Partner-ready by construction
+
+The audience for this product is Progress and its ISV partner network, so the things a
+partner needs are features, not afterthoughts:
+
+- **White-label by configuration.** `BRAND_*` environment variables change the product
+  name, tagline, logo, colours, footer and docs link, and can hide the "Built on Progress
+  Agentic RAG" credit entirely. No fork, no rebuild, no code change — and the licence
+  obligations are spelled out rather than left to guesswork.
+  See [`../developer/white-label.md`](../developer/white-label.md).
+- **Extend without forking.** New extraction fields are a runtime API call
+  (`POST /api/v1/extraction-configs`); a partner's own front end only needs `/api/v1`.
+- **Fork cleanly when you must.** [`../developer/build-your-own.md`](../developer/build-your-own.md)
+  is an ordered guide from "add a document type" to "replace the storage layer", with the
+  quality bar (`make check`, `make e2e`, mock-ARAG development) intact.
+- **Apache-2.0, zero runtime dependencies.** Nothing to license onward, nothing to audit.

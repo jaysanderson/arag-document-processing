@@ -238,7 +238,7 @@ Auth: ApiKey or Bearer
 
 ### `DELETE /api/v1/jobs/{id}`
 
-**Cancel a running job** — Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.
+**Cancel a queued or running job** — Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`. A job that has already finished cannot be cancelled and answers 409.
 
 Parameters:
 
@@ -253,6 +253,7 @@ Responses:
 - `401` Authentication required — `application/problem+json` [Problem](#problem)
 - `403` Forbidden — `application/problem+json` [Problem](#problem)
 - `404` Not found — `application/problem+json` [Problem](#problem)
+- `409` The job already finished (succeeded, failed or cancelled) — `application/problem+json` [Problem](#problem)
 - `429` Rate limited — `application/problem+json` [Problem](#problem)
 - `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
 
@@ -385,6 +386,23 @@ Responses:
 Auth: ApiKey or Bearer
 
 ## system
+
+### `GET /api/v1/branding`
+
+**Effective white-label branding for this deployment** — Public and secret-free — it contains only what a visitor already sees. Both UIs fetch it before they paint; a partner's own front end can too. Configured with `BRAND_*` environment variables; assets live in `DATA_DIR/branding/` and are served from `/branding/`. See `docs/developer/white-label.md`.
+
+Responses:
+
+- `200` OK — `application/json` [Branding](#branding)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: public
+
 
 ### `POST /api/v1/session`
 
@@ -641,6 +659,19 @@ RFC 9457 problem details
 | `type` | string | yes | PERSON | ORG | DATE | MONEY | LOCATION | EMAIL | PHONE | ID | OTHER |
 | `salience` | number |  |  |
 
+### Evidence
+
+A verbatim quote from the document supporting one extracted field, checked against the document's own extracted text rather than taken on trust.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `field` | string | yes | The `ExtractedField.key` this quote supports |
+| `quote` | string | yes | The quote exactly as the model returned it |
+| `verified` | string (`exact`, `normalised`, `unverified`) | yes | `exact`: the quote appears character-for-character in the document. `normalised`: it appears once case, whitespace and punctuation are normalised. `unverified`: it does not appear — treat the field as ungrounded. |
+| `paragraphId` | string |  | ARAG retrieval paragraph containing the quote (`<rid>/<type>/<field>/<start>-<end>`) |
+| `start` | integer |  | Offset into the extracted text (exact matches only) |
+| `end` | integer |  |  |
+
 ### ValidationIssue
 
 | Field | Type | Required | Description |
@@ -669,6 +700,7 @@ Canonical, format-agnostic record for one document.
 | `summary` | string |  |  |
 | `tags` | array of string | yes |  |
 | `issues` | array of [ValidationIssue](#validationissue) | yes |  |
+| `evidence` | array of [Evidence](#evidence) | yes |  |
 | `error` | string |  |  |
 | `meta` | object | yes |  |
 | `createdAt` | string | yes |  |
@@ -756,4 +788,18 @@ Canonical, format-agnostic record for one document.
 | `aragConfig` | string | yes |  |
 | `ok` | boolean | yes |  |
 | `error` | string |  |  |
+
+### Branding
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `productName` | string | yes |  |
+| `tagline` | string |  |  |
+| `logoUrl` | string |  |  |
+| `primaryColor` | string |  |  |
+| `accentColor` | string |  |  |
+| `poweredBy` | boolean | yes |  |
+| `footerText` | string |  |  |
+| `docsUrl` | string |  |  |
+| `supportUrl` | string |  |  |
 

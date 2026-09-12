@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Document Processing · admin</title>
+  <link rel="icon" href="/ui/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/ui/arag-ui.css" />
   <link rel="stylesheet" href="/app.css" />
   <script type="module" src="/ui/arag-ui.js"></script>
@@ -144,6 +145,16 @@
 
       <!-- configuration -->
       <section data-panel="config" hidden style="margin-top:16px">
+        <div class="arag-card pad" style="margin-bottom:16px">
+          <h3>Branding (white-label)</h3>
+          <p class="muted small">
+            Set with <code>BRAND_*</code> environment variables and applied to both UIs at
+            boot; logos and other assets go in <code>DATA_DIR/branding/</code> and are served
+            from <code>/branding/</code>. Full reference:
+            <code>docs/developer/white-label.md</code>.
+          </p>
+          <dl class="arag-kv" id="brandingKv" style="margin-top:10px"></dl>
+        </div>
         <div class="arag-card pad">
           <h3>Effective configuration (secrets redacted)</h3>
           <arag-json id="configJson" src="/api/v1/admin/config"></arag-json>

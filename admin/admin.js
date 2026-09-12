@@ -18,6 +18,7 @@ function show(authed) {
   loadUsage();
   loadConfigs();
   loadJobs();
+  loadBranding();
 }
 
 async function check() {
@@ -128,6 +129,32 @@ $("#testKb").addEventListener("click", async () => {
     toast(e.message, "error");
   }
 });
+
+// ── branding (white-label) ──────────────────────────────────────────────────
+async function loadBranding() {
+  try {
+    const b = await api("/api/v1/branding");
+    const rows = [
+      ["Product name", b.productName, "BRAND_PRODUCT_NAME"],
+      ["Tagline", b.tagline, "BRAND_TAGLINE"],
+      ["Logo", b.logoUrl, "BRAND_LOGO_URL"],
+      ["Primary colour", b.primaryColor, "BRAND_PRIMARY_COLOR"],
+      ["Accent colour", b.accentColor, "BRAND_ACCENT_COLOR"],
+      ["Powered-by credit", b.poweredBy ? "shown" : "hidden", "BRAND_POWERED_BY"],
+      ["Footer text", b.footerText, "BRAND_FOOTER_TEXT"],
+      ["Docs URL", b.docsUrl, "BRAND_DOCS_URL"],
+      ["Support URL", b.supportUrl, "BRAND_SUPPORT_URL"],
+    ];
+    $("#brandingKv").innerHTML = rows
+      .map(
+        ([label, value, key]) =>
+          `<dt>${esc(label)}</dt><dd>${value ? esc(String(value)) : '<span class="subtle">default</span>'} <code class="small">${esc(key)}</code></dd>`,
+      )
+      .join("");
+  } catch (e) {
+    $("#brandingKv").innerHTML = `<dd class="arag-alert error">${esc(e.message)}</dd>`;
+  }
+}
 
 // ── extraction configs ──────────────────────────────────────────────────────
 async function loadConfigs() {

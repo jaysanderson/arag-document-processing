@@ -13,6 +13,8 @@ Build with the API, run it locally, extend it.
 | [`developer/examples.md`](developer/examples.md) | Every request shape (multipart/raw upload, SSE, every export format, ask, custom configs, `config=agent`, pagination, errors), plus minimal Node and Python clients. |
 | [`developer/extension-points.md`](developer/extension-points.md) | Where to add a document type, a pipeline stage, an export format, a route, swap the store, or hook mock ARAG behaviour in tests. |
 | [`developer/local-dev.md`](developer/local-dev.md) | Repo layout, every `make` target, how the mock ARAG works, running one test, `DATA_DIR`, debugging. |
+| [`developer/white-label.md`](developer/white-label.md) | Rebrand a deployment with `BRAND_*` configuration alone — every key, asset requirements, rebranding the docs and showcase, and the licence/trademark obligations. |
+| [`developer/build-your-own.md`](developer/build-your-own.md) | For partners going further than configuration: adding a document type, changing the agents, extending the API, replacing storage, staying on the platform. |
 | [`developer/contributing.md`](developer/contributing.md) | The API-first and vendored-platform rules, conventional commits, the `make check`/`make e2e` bar — points at the root [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the rest. |
 
 ## Architecture
