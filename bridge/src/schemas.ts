@@ -198,6 +198,109 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
     },
   },
 
+  medical_claim: {
+    name: "medical_claim_extraction",
+    docType: "medical_claim",
+    description: "Structured fields from a medical/health insurance claim or claims remittance advice.",
+    properties: {
+      claim_number: s("Claim number or identifier"),
+      scheme: s("Medical scheme / insurer name"),
+      member_number: s("Member / policy number"),
+      patient_name: s("Patient name"),
+      provider: s("Treating provider or facility that rendered the service"),
+      service_date: s("Date of service in ISO 8601 if determinable"),
+      diagnosis_code: s("Primary diagnosis code (e.g. ICD-10)"),
+      procedure_code: s("Procedure / tariff code (e.g. CPT)"),
+      currency: s("ISO 4217 currency code"),
+      amount_claimed: money("Total amount claimed"),
+      amount_paid: money("Total amount paid"),
+      member_liability: money("Amount for the member's account / co-payment"),
+      status: s("Claim status, e.g. paid in full, partially paid, rejected"),
+    },
+    required: ["provider"],
+    labels: {
+      claim_number: "Claim #",
+      scheme: "Scheme / Insurer",
+      member_number: "Member #",
+      patient_name: "Patient",
+      provider: "Provider",
+      service_date: "Service Date",
+      diagnosis_code: "Diagnosis (ICD-10)",
+      procedure_code: "Procedure / Tariff",
+      currency: "Currency",
+      amount_claimed: "Amount Claimed",
+      amount_paid: "Amount Paid",
+      member_liability: "Member Liability",
+      status: "Status",
+    },
+  },
+
+  preauthorisation: {
+    name: "preauthorisation_extraction",
+    docType: "preauthorisation",
+    description: "Structured fields from a hospital/medical pre-authorisation request or outcome.",
+    properties: {
+      authorisation_number: s("Authorisation number, if issued"),
+      reference: s("Form / request reference number"),
+      scheme: s("Medical scheme name"),
+      benefit_option: s("Benefit option / plan"),
+      member_number: s("Membership number"),
+      patient_name: s("Patient name"),
+      provider: s("Treating provider / practitioner"),
+      facility: s("Hospital / facility name"),
+      admission_date: s("Proposed admission date in ISO 8601 if determinable"),
+      length_of_stay: s("Approved or requested length of stay"),
+      procedure: s("Procedure description and/or code"),
+      diagnosis_code: s("Primary diagnosis code (e.g. ICD-10)"),
+      status: s("Authorisation status, e.g. approved, declined, pending"),
+      co_payment: s("Co-payment applicable, if any"),
+    },
+    required: ["member_number"],
+    labels: {
+      authorisation_number: "Authorisation #",
+      reference: "Reference",
+      scheme: "Scheme",
+      benefit_option: "Benefit Option",
+      member_number: "Member #",
+      patient_name: "Patient",
+      provider: "Provider",
+      facility: "Facility",
+      admission_date: "Admission Date",
+      length_of_stay: "Length of Stay",
+      procedure: "Procedure",
+      diagnosis_code: "Diagnosis (ICD-10)",
+      status: "Status",
+      co_payment: "Co-payment",
+    },
+  },
+
+  bank_statement: {
+    name: "bank_statement_extraction",
+    docType: "bank_statement",
+    description: "Header/summary fields from a bank or financial account statement.",
+    properties: {
+      bank_name: s("Bank / financial institution name"),
+      account_holder: s("Account holder name"),
+      account_number: s("Account number (may be masked)"),
+      statement_period: s("Statement period / date range"),
+      currency: s("ISO 4217 currency code"),
+      opening_balance: money("Opening balance"),
+      closing_balance: money("Closing balance"),
+      transactions: arr("Notable transactions, one per entry as 'date — description — amount'"),
+    },
+    required: ["bank_name", "account_holder"],
+    labels: {
+      bank_name: "Bank",
+      account_holder: "Account Holder",
+      account_number: "Account #",
+      statement_period: "Statement Period",
+      currency: "Currency",
+      opening_balance: "Opening Balance",
+      closing_balance: "Closing Balance",
+      transactions: "Transactions",
+    },
+  },
+
   form: {
     name: "form_extraction",
     docType: "form",
@@ -283,3 +386,105 @@ export function schemaFor(docType: DocType): ExtractionSchema {
 
 /** All doc types the classifier may choose from. */
 export const DOC_TYPES: DocType[] = Object.keys(SCHEMAS) as DocType[];
+
+// ─── Config catalog (for the UI selector / manager) ────────────────────────────
+
+export interface ConfigField {
+  key: string;
+  label: string;
+  type: "string" | "number" | "array";
+  description?: string;
+  required?: boolean;
+}
+
+export interface ConfigSummary {
+  id: string; // built-in: the docType; custom: a generated id
+  name: string; // human label
+  docType: string;
+  description: string;
+  builtin: boolean;
+  /** Name of the stored ARAG search_configuration backing this config. */
+  aragConfig: string;
+  fields: ConfigField[];
+}
+
+/** Project a schema to the flat field list the UI shows in the config manager. */
+export function schemaToFields(schema: ExtractionSchema): ConfigField[] {
+  return Object.entries(schema.properties).map(([key, prop]) => ({
+    key,
+    label: schema.labels[key] ?? key,
+    type: prop.type === "boolean" ? "string" : prop.type,
+    description: prop.description,
+    required: schema.required.includes(key),
+  }));
+}
+
+/** The built-in configs, as summaries for the UI. */
+export function builtinConfigs(): ConfigSummary[] {
+  return DOC_TYPES.map((dt) => {
+    const schema = SCHEMAS[dt];
+    return {
+      id: dt,
+      name: dt.replace(/_/g, " "),
+      docType: dt,
+      description: schema.description,
+      builtin: true,
+      aragConfig: `dip_${schema.name}`,
+      fields: schemaToFields(schema),
+    };
+  });
+}
+
+/** Sanitize an arbitrary label into a stable machine key. */
+function toKey(label: string): string {
+  return (
+    label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "field"
+  );
+}
+
+export interface CustomConfigInput {
+  name: string;
+  description?: string;
+  fields: Array<{ key?: string; label: string; type?: "string" | "number" | "array"; description?: string; required?: boolean }>;
+}
+
+/**
+ * Build a valid ExtractionSchema from a user-defined config. Money/number fields are
+ * declared as strings + normalized downstream, consistent with the built-in schemas;
+ * here a "number" field is captured as a string and parsed by validateNormalize only if
+ * its key is a known amount key, so custom numbers stay literal unless clearly monetary.
+ */
+export function buildCustomSchema(input: CustomConfigInput): ExtractionSchema {
+  const properties: Record<string, JsonProp> = {};
+  const labels: Record<string, string> = {};
+  const required: string[] = [];
+  const usedKeys = new Set<string>();
+
+  for (const f of input.fields) {
+    if (!f.label?.trim()) continue;
+    let key = (f.key && f.key.trim()) || toKey(f.label);
+    while (usedKeys.has(key)) key = `${key}_2`;
+    usedKeys.add(key);
+    const type = f.type === "number" ? "number" : f.type === "array" ? "array" : "string";
+    properties[key] =
+      type === "array"
+        ? { type: "array", description: f.description, items: { type: "string" } }
+        : { type, description: f.description };
+    labels[key] = f.label.trim();
+    if (f.required) required.push(key);
+  }
+
+  const safeName = toKey(input.name) || "custom";
+  return {
+    name: `custom_${safeName}`,
+    docType: "generic",
+    description: input.description?.trim() || `Custom extraction config: ${input.name}`,
+    properties,
+    required,
+    labels,
+  };
+}

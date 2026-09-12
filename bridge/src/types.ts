@@ -44,6 +44,9 @@ export type DocType =
   | "contract"
   | "resume"
   | "purchase_order"
+  | "medical_claim"
+  | "preauthorisation"
+  | "bank_statement"
   | "form"
   | "report"
   | "generic";
@@ -77,6 +80,10 @@ export interface DocRecord {
     model: string; // generative model
     sourceChars?: number; // length of extracted source text
     durationsMs: Record<string, number>; // per-stage timings
+    /** Human label of the extraction config used (e.g. "invoice" or "Insurance Card"). */
+    config?: string;
+    /** True when the config was forced (auto-classification skipped). */
+    forced?: boolean;
   };
 }
 

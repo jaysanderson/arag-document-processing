@@ -52,7 +52,13 @@ export async function upload(
   filename: string,
   contentType: string,
 ): Promise<UploadResult> {
-  const url = `${config.aragKbUrl}/upload`;
+  // Attach the ingestion-time visual-LLM extract strategy for documents where it adds
+  // value (images and PDFs). Text/office files use ARAG's default processing.
+  const useStrategy =
+    !!config.extractStrategy && (contentType.startsWith("image/") || contentType === "application/pdf");
+  const url = useStrategy
+    ? `${config.aragKbUrl}/upload?extract_strategy=${encodeURIComponent(config.extractStrategy)}`
+    : `${config.aragKbUrl}/upload`;
   let res: Response;
   try {
     res = await fetch(url, {
@@ -73,7 +79,7 @@ export async function upload(
   }
   const json = (await res.json()) as { uuid?: string; field_id?: string };
   if (!json.uuid) throw new AragError("upload returned no resource uuid", "http", res.status);
-  log.info("arag.upload.ok", { resourceId: json.uuid, filename, contentType });
+  log.info("arag.upload.ok", { resourceId: json.uuid, filename, contentType, extractStrategy: useStrategy ? config.extractStrategy : null });
   return { resourceId: json.uuid, fieldId: json.field_id ?? "" };
 }
 
@@ -186,6 +192,97 @@ export async function waitSearchable(
   return false;
 }
 
+/**
+ * Create or replace a stored search configuration in the KB.
+ * `body` is the Nuclia shape: { kind: "ask", config: { generative_model, reranker,
+ * rag_strategies, prompt, answer_json_schema, … } }.
+ */
+export async function putSearchConfig(name: string, body: unknown): Promise<void> {
+  const url = `${config.aragKbUrl}/search_configurations/${encodeURIComponent(name)}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(config.aragTimeoutMs),
+    });
+  } catch (err) {
+    throw new AragError(`search-config put network error: ${(err as Error).message}`, "network");
+  }
+  // 201 created / 200 updated; some deployments return 409 if it exists — treat as ok.
+  if (!res.ok && res.status !== 409) {
+    const detail = await res.text().catch(() => "");
+    throw new AragError(`search-config put HTTP ${res.status}: ${detail.slice(0, 300)}`, "http", res.status);
+  }
+}
+
+export async function deleteSearchConfig(name: string): Promise<void> {
+  const url = `${config.aragKbUrl}/search_configurations/${encodeURIComponent(name)}`;
+  try {
+    await fetch(url, { method: "DELETE", headers: authHeaders(), signal: AbortSignal.timeout(config.aragTimeoutMs) });
+  } catch (err) {
+    log.warn("arag.search-config.delete.fail", { name, message: (err as Error).message });
+  }
+}
+
+/**
+ * Read structured fields a Data Augmentation "ask" agent persisted onto a resource.
+ *
+ * Such agents (configured in the dashboard) write their JSON output as either a JSON
+ * **text field** (`value.body` / extracted text that parses as a JSON object) or a
+ * **key-value field**. We scan every field category except the original `files`/`generics`
+ * and return the first JSON object found (preferring a field whose id matches `destination`).
+ * Returns null when no agent output is present (so callers can fall back).
+ */
+export async function readPersistedFields(
+  resourceId: string,
+  destination?: string,
+): Promise<Record<string, unknown> | null> {
+  const r = (await getResource(resourceId, "show=values&show=extracted&extracted=text")) as unknown as {
+    data?: Record<string, Record<string, Record<string, unknown>> | undefined>;
+  };
+  const data = r.data ?? {};
+  const candidates: Array<[string, Record<string, unknown>]> = [];
+  for (const [cat, fields] of Object.entries(data)) {
+    if (cat === "files" || cat === "generics" || !fields) continue;
+    for (const [fid, f] of Object.entries(fields)) {
+      // Key-value field: value.keyvalues = [{key,value}, …]
+      const value = (f as Record<string, unknown>).value as Record<string, unknown> | undefined;
+      const kvs = value?.keyvalues;
+      if (Array.isArray(kvs) && kvs.length) {
+        const obj: Record<string, unknown> = {};
+        for (const kv of kvs as Array<Record<string, unknown>>) {
+          if (kv && typeof kv.key === "string") obj[kv.key] = kv.value;
+        }
+        if (Object.keys(obj).length) candidates.push([fid, obj]);
+        continue;
+      }
+      // JSON text field: value.body or extracted text that parses to an object.
+      const extracted = (f as Record<string, unknown>).extracted as Record<string, unknown> | undefined;
+      const text =
+        (typeof value?.body === "string" && value.body) ||
+        (typeof (extracted?.text as Record<string, unknown>)?.text === "string" &&
+          ((extracted!.text as Record<string, unknown>).text as string)) ||
+        "";
+      if (text) {
+        try {
+          const o = JSON.parse(text);
+          if (o && typeof o === "object" && !Array.isArray(o)) candidates.push([fid, o]);
+        } catch {
+          /* not JSON — ignore */
+        }
+      }
+    }
+  }
+  if (candidates.length === 0) return null;
+  if (destination) {
+    const match = candidates.find(([fid]) => fid === destination);
+    if (match) return match[1];
+  }
+  return candidates[0]![1];
+}
+
 export async function deleteResource(resourceId: string): Promise<void> {
   const url = `${config.aragKbUrl}/resource/${resourceId}`;
   try {
@@ -213,6 +310,12 @@ export interface AskParams {
    * paragraph the sub-query wouldn't retrieve. Requires `resourceId`.
    */
   fullResource?: boolean;
+  /**
+   * Name of a stored ARAG search_configuration. When set it OWNS the model, RAG
+   * strategy, reranker, prompt, and answer_json_schema — the inline equivalents are
+   * not sent. Per-request `resourceId`, `query`, and `maxTokens` still apply.
+   */
+  searchConfiguration?: string;
   timeoutMs?: number;
 }
 
@@ -275,17 +378,26 @@ export async function ask(params: AskParams, signal?: AbortSignal): Promise<AskR
     query: params.query,
     features: ["keyword", "semantic"],
   };
-  // citations + answer_json_schema together are rejected (422); only request citations
-  // when not doing structured extraction.
-  if (!params.answerJsonSchema) body.citations = true;
-  if (params.prompt) body.prompt = params.prompt;
-  if (params.answerJsonSchema) body.answer_json_schema = params.answerJsonSchema;
-  body.reranker = params.reranker ?? config.reranker;
-  if (typeof params.maxTokens === "number") body.max_tokens = params.maxTokens;
-  body.temperature = typeof params.temperature === "number" ? params.temperature : 0;
-  body.generative_model = params.generativeModel ?? config.generativeModel;
-  if (params.resourceId) body.resource_filters = [params.resourceId];
-  if (params.fullResource) body.rag_strategies = [{ name: "full_resource" }];
+  if (params.searchConfiguration) {
+    // A stored ARAG search configuration owns the model, RAG strategy, reranker,
+    // grounding prompt, and answer_json_schema. We send only the per-request bits.
+    body.search_configuration = params.searchConfiguration;
+    if (params.resourceId) body.resource_filters = [params.resourceId];
+    if (typeof params.maxTokens === "number") body.max_tokens = params.maxTokens;
+    body.temperature = typeof params.temperature === "number" ? params.temperature : 0;
+  } else {
+    // citations + answer_json_schema together are rejected (422); only request citations
+    // when not doing structured extraction.
+    if (!params.answerJsonSchema) body.citations = true;
+    if (params.prompt) body.prompt = params.prompt;
+    if (params.answerJsonSchema) body.answer_json_schema = params.answerJsonSchema;
+    body.reranker = params.reranker ?? config.reranker;
+    if (typeof params.maxTokens === "number") body.max_tokens = params.maxTokens;
+    body.temperature = typeof params.temperature === "number" ? params.temperature : 0;
+    body.generative_model = params.generativeModel ?? config.generativeModel;
+    if (params.resourceId) body.resource_filters = [params.resourceId];
+    if (params.fullResource) body.rag_strategies = [{ name: "full_resource" }];
+  }
 
   const timeout = AbortSignal.timeout(params.timeoutMs ?? config.aragTimeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;

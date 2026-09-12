@@ -14,20 +14,75 @@
  * one resource via `resourceId`). Temperature 0 keeps demos repeatable.
  */
 
-import { ask } from "./arag.ts";
+import { ask, putSearchConfig } from "./arag.ts";
 import { config } from "./config.ts";
 import { log } from "./logger.ts";
 import {
   type ExtractionSchema,
   toAnswerJsonSchema,
   DOC_TYPES,
+  SCHEMAS,
 } from "./schemas.ts";
 import { parseAmount, parseDateISO, normalizeCurrency } from "./normalize.ts";
 import type { DocRecord, DocType, Entity, ExtractedField, ValidationIssue } from "./types.ts";
 
-const GROUNDING =
+export const GROUNDING =
   "You are a precise document-data extraction engine. Use ONLY the content of the provided document. " +
   "Do not invent values. If a field is not present, omit it or leave it empty. Return values exactly as written in the document unless asked to normalize.";
+
+// ─── ARAG-side extraction configs ──────────────────────────────────────────────
+// Each extraction schema is provisioned as a stored ARAG search_configuration that
+// specifies the generative model (the multimodal LLM used for visual processing), the
+// full_resource RAG strategy, the reranker, the grounding prompt (rules), and the
+// answer_json_schema. Extraction then runs through that stored config via /ask.
+
+/** Deterministic ARAG search_configuration name for a schema. */
+export function aragConfigName(schema: ExtractionSchema): string {
+  return `dip_${schema.name}`;
+}
+
+/** Build the Nuclia search_configuration body (kind:"ask") for a schema. */
+export function toSearchConfig(schema: ExtractionSchema): unknown {
+  return {
+    kind: "ask",
+    config: {
+      generative_model: config.generativeModel,
+      reranker: config.reranker,
+      rag_strategies: [{ name: "full_resource" }],
+      prompt: { system: GROUNDING },
+      answer_json_schema: toAnswerJsonSchema(schema),
+    },
+  };
+}
+
+const provisioned = new Set<string>();
+
+/** Ensure a schema's search_configuration exists in ARAG (idempotent, cached). */
+export async function ensureExtractionConfig(schema: ExtractionSchema): Promise<string> {
+  const name = aragConfigName(schema);
+  if (provisioned.has(name)) return name;
+  await putSearchConfig(name, toSearchConfig(schema));
+  provisioned.add(name);
+  log.info("arag.config.provisioned", { name });
+  return name;
+}
+
+/** Provision all built-in extraction configs in ARAG (called at startup). */
+export async function provisionBuiltinConfigs(): Promise<{ ok: number; failed: number }> {
+  let ok = 0;
+  let failed = 0;
+  for (const dt of DOC_TYPES) {
+    try {
+      await ensureExtractionConfig(SCHEMAS[dt]);
+      ok++;
+    } catch (err) {
+      failed++;
+      log.warn("arag.config.provision.fail", { docType: dt, message: (err as Error).message });
+    }
+  }
+  log.info("arag.config.provision.done", { ok, failed });
+  return { ok, failed };
+}
 
 /**
  * Build a retrieval query "seed" from the document's own extracted text.
@@ -104,12 +159,14 @@ export async function extractFields(
   schema: ExtractionSchema,
   querySeed: string,
 ): Promise<ExtractedField[]> {
+  // Extraction runs through the schema's STORED ARAG search configuration, which
+  // owns the model (visual LLM), full_resource RAG strategy, reranker, prompt, and
+  // answer_json_schema. Provision it on first use (idempotent).
+  const configName = await ensureExtractionConfig(schema);
   const res = await ask({
     query: querySeed,
     resourceId,
-    fullResource: true,
-    prompt: { system: GROUNDING },
-    answerJsonSchema: toAnswerJsonSchema(schema),
+    searchConfiguration: configName,
     temperature: 0,
     maxTokens: 1500,
   });
@@ -233,7 +290,17 @@ export async function summarize(
 // ─── validateNormalize (deterministic, no model) ────────────────────────────────
 
 /** Keys whose values are monetary amounts (normalized to numbers). */
-const AMOUNT_KEYS = new Set(["subtotal", "tax", "total", "total_value"]);
+const AMOUNT_KEYS = new Set([
+  "subtotal",
+  "tax",
+  "total",
+  "total_value",
+  "amount_claimed",
+  "amount_paid",
+  "member_liability",
+  "opening_balance",
+  "closing_balance",
+]);
 
 /**
  * Normalize known field types in place and emit validation issues:
@@ -310,6 +377,43 @@ function numVal(f?: ExtractedField): number | null {
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
+}
+
+/**
+ * Map a JSON object persisted by a Data Augmentation agent into normalized fields.
+ * Keys are user-defined (the agent's schema), so labels are derived from the key and
+ * values are lightly normalized by key heuristics (amounts → numbers, dates → ISO).
+ */
+export function fieldsFromObject(obj: Record<string, unknown>): ExtractedField[] {
+  const out: ExtractedField[] = [];
+  for (const [key, raw] of Object.entries(obj)) {
+    if (raw === null || raw === undefined || raw === "") continue;
+    if (typeof raw === "string" && isSentinel(raw)) continue;
+    const label = key
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+    let value = raw as ExtractedField["value"];
+    let rawStr: string | undefined;
+    const lower = key.toLowerCase();
+    if (typeof value === "string") {
+      if (/(amount|total|subtotal|tax|balance|price|value|due)/.test(lower)) {
+        const n = parseAmount(value);
+        if (n !== null) {
+          rawStr = value;
+          value = n;
+        }
+      } else if (/(date|_at$|dob)/.test(lower)) {
+        const iso = parseDateISO(value);
+        if (iso && iso !== value) {
+          rawStr = value;
+          value = iso;
+        }
+      }
+    }
+    out.push({ key, label, value, raw: rawStr });
+  }
+  return out;
 }
 
 /** Build a fresh canonical record skeleton. */

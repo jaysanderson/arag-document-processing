@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Document Intelligence Studio · Progress Agentic RAG</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%230e9f6e'/%3E%3Cstop offset='1' stop-color='%230ea5e9'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='Arial'%3E%E2%97%86%3C/text%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -35,11 +36,25 @@
         </div>
 
         <div class="samples">
-          <span class="samples-label">Try a sample:</span>
+          <span class="samples-label">Text samples:</span>
           <button class="chip" data-sample="invoice">Invoice</button>
           <button class="chip" data-sample="contract">Contract</button>
           <button class="chip" data-sample="resume">Résumé</button>
         </div>
+        <div class="samples">
+          <span class="samples-label">Image samples:</span>
+          <button class="chip img" data-image="invoice">🖼 Invoice</button>
+          <button class="chip img" data-image="purchase-order">🖼 Purchase order</button>
+          <button class="chip img" data-image="preauth-form">🖼 Pre-auth form</button>
+          <button class="chip img" data-image="remittance-statement">🖼 Remittance</button>
+        </div>
+
+        <div class="config-bar">
+          <label for="configSelect">Extraction config</label>
+          <select id="configSelect" title="Which extraction config to use"></select>
+          <button class="btn sm ghost" id="manageConfigsBtn" type="button">Manage…</button>
+        </div>
+        <div class="vis-note" id="visNote" hidden>🖼 Images &amp; PDFs are read by a visual LLM at ingestion (ARAG extract strategy <code id="visStrategy"></code>)</div>
 
         <div class="card pipeline" id="pipelineCard">
           <div class="card-head"><h3>Pipeline</h3><span class="muted" id="fileLabel">no document</span></div>
@@ -64,7 +79,16 @@
             <p>Extracted, augmented, and standardized document data will appear here.</p>
           </div>
 
+          <div class="result-processing" id="resultProcessing" hidden>
+            <div class="proc-caption"><span class="spin"></span> <span id="procStage">Uploading…</span></div>
+            <div class="doc-preview" id="procPreview"></div>
+          </div>
+
           <div class="result-body" id="resultBody" hidden>
+            <details class="source" id="sourceWrap" open>
+              <summary>Source document — <span id="sourceName"></span></summary>
+              <div class="doc-preview small" id="srcPreview"></div>
+            </details>
             <div class="result-head">
               <div>
                 <span class="badge" id="docTypeBadge">document</span>
@@ -100,6 +124,36 @@
         </div>
       </section>
     </main>
+
+    <section class="generate">
+      <div class="gen-head">
+        <h2>Generate your own test documents</h2>
+        <p>Paste a prompt into an image model — <strong>GPT-5.2</strong> (image), Google <strong>Gemini “Nano Banana”</strong>, Grok, etc. — download the result, then drop it into the dropzone above. Each prompt is written to produce a realistic, single-page, OCR-legible document with fictional data.</p>
+      </div>
+      <div class="prompt-grid" id="promptGrid"></div>
+    </section>
+
+    <div class="modal-backdrop" id="configModal" hidden>
+      <div class="modal">
+        <div class="modal-head">
+          <h2>Extraction configs</h2>
+          <button class="modal-close" id="closeConfigsBtn" type="button" aria-label="Close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="cfg-list" id="cfgList"></div>
+          <div class="cfg-new">
+            <h3>Create a custom config</h3>
+            <p class="muted">Define the fields you want extracted. Selecting this config forces the model to return exactly these fields, grounded in the document.</p>
+            <input type="text" id="cfgName" class="cfg-input" placeholder="Config name (e.g. Insurance Card)" />
+            <div class="cfg-fields" id="cfgFields"></div>
+            <button class="btn sm ghost" id="addFieldBtn" type="button">+ Add field</button>
+            <div class="cfg-actions">
+              <button class="btn" id="saveConfigBtn" type="button">Save config</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div class="toast" id="toast" hidden></div>
     <script src="/app.js"></script>

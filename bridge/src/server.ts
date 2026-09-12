@@ -17,6 +17,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, extname, normalize } from "node:path";
 
@@ -24,6 +25,15 @@ import { config, kbId } from "./config.ts";
 import { log } from "./logger.ts";
 import { upload, ask, AragError } from "./arag.ts";
 import { runPipeline } from "./pipeline.ts";
+import { ensureExtractionConfig, aragConfigName } from "./agents.ts";
+import {
+  SCHEMAS,
+  builtinConfigs,
+  buildCustomSchema,
+  schemaToFields,
+  type ExtractionSchema,
+  type DocType,
+} from "./schemas.ts";
 import { serialize, MIME, type Format } from "./formats.ts";
 import type { DocRecord, StageEvent } from "./types.ts";
 
@@ -32,6 +42,19 @@ const PUBLIC_DIR = resolve(__dirname, "..", "public");
 
 /** In-memory store of finished records (resourceId → record). */
 const records = new Map<string, DocRecord>();
+
+/** In-memory store of custom extraction configs (id → {schema,label}). */
+const customConfigs = new Map<string, { schema: ExtractionSchema; label: string }>();
+
+/** Resolve a `config` param to a forced schema + label, or null for auto-detect. */
+function resolveConfig(configParam: string | null): { schema: ExtractionSchema; label: string } | null {
+  if (!configParam || configParam === "auto") return null;
+  if (configParam in SCHEMAS) {
+    const dt = configParam as DocType;
+    return { schema: SCHEMAS[dt], label: dt.replace(/_/g, " ") };
+  }
+  return customConfigs.get(configParam) ?? null;
+}
 
 const STATIC_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -117,6 +140,9 @@ function handleProcess(req: IncomingMessage, res: ServerResponse): void {
   const filename = url.searchParams.get("filename") ?? "document";
   const contentType = url.searchParams.get("type") ?? "application/octet-stream";
   if (!id) return sendJson(res, 400, { error: "missing id" });
+  const configParam = url.searchParams.get("config");
+  const useAgentFields = configParam === "agent";
+  const forced = useAgentFields ? null : resolveConfig(configParam);
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -138,7 +164,10 @@ function handleProcess(req: IncomingMessage, res: ServerResponse): void {
     res.write(`data: ${JSON.stringify(e)}\n\n`);
   };
 
-  runPipeline({ resourceId: id, filename, contentType }, emit)
+  runPipeline(
+    { resourceId: id, filename, contentType, forcedSchema: forced?.schema, configLabel: forced?.label, useAgentFields },
+    emit,
+  )
     .then((record) => {
       records.set(record.id, record);
       if (!closed) {
@@ -183,6 +212,56 @@ function handleExport(req: IncomingMessage, res: ServerResponse): void {
   res.end(body);
 }
 
+/** List all extraction configs (built-in + registered custom) for the UI. */
+function handleConfigs(_req: IncomingMessage, res: ServerResponse): void {
+  const custom = [...customConfigs.entries()].map(([id, { schema, label }]) => ({
+    id,
+    name: label,
+    docType: schema.docType,
+    description: schema.description,
+    builtin: false,
+    aragConfig: aragConfigName(schema),
+    fields: schemaToFields(schema),
+  }));
+  sendJson(res, 200, { configs: [...builtinConfigs(), ...custom] });
+}
+
+/** Register a custom extraction config; returns an id usable as ?config=<id>. */
+async function handleCreateConfig(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  let body: { name?: string; description?: string; fields?: Array<Record<string, unknown>> };
+  try {
+    body = JSON.parse((await readBody(req, 200_000)).toString("utf8") || "{}");
+  } catch {
+    return sendJson(res, 400, { error: "invalid JSON body" });
+  }
+  const name = (body.name ?? "").trim();
+  const fields = Array.isArray(body.fields) ? body.fields : [];
+  if (!name) return sendJson(res, 400, { error: "config name is required" });
+  const cleanFields = fields
+    .map((f) => ({
+      label: String(f.label ?? "").trim(),
+      type: (["string", "number", "array"].includes(String(f.type)) ? f.type : "string") as "string" | "number" | "array",
+      description: f.description ? String(f.description) : undefined,
+      required: Boolean(f.required),
+    }))
+    .filter((f) => f.label);
+  if (cleanFields.length === 0) return sendJson(res, 400, { error: "at least one field with a label is required" });
+
+  const schema = buildCustomSchema({ name, description: body.description, fields: cleanFields });
+  const id = `cfg_${randomUUID().slice(0, 8)}`;
+  customConfigs.set(id, { schema, label: name });
+  // Provision the config in ARAG as a stored search_configuration (the LLM + rules
+  // live server-side in the Knowledge Box, not just in the bridge).
+  let aragConfig = aragConfigName(schema);
+  try {
+    aragConfig = await ensureExtractionConfig(schema);
+  } catch (err) {
+    log.warn("config.create.provision.fail", { id, message: (err as Error).message });
+  }
+  log.info("config.create", { id, name, fields: cleanFields.length, aragConfig });
+  sendJson(res, 201, { id, name, aragConfig, fields: schemaToFields(schema) });
+}
+
 async function handleAsk(req: IncomingMessage, res: ServerResponse): Promise<void> {
   let body: { question?: string; resourceId?: string };
   try {
@@ -223,8 +302,16 @@ export function buildServer() {
     log.debug("http", { route });
 
     if (pathname === "/api/health" && method === "GET") {
-      return sendJson(res, 200, { ok: true, kb: kbId(), model: config.generativeModel, records: records.size });
+      return sendJson(res, 200, {
+        ok: true,
+        kb: kbId(),
+        model: config.generativeModel,
+        extractStrategy: config.extractStrategy || null,
+        records: records.size,
+      });
     }
+    if (pathname === "/api/configs" && method === "GET") return handleConfigs(req, res);
+    if (pathname === "/api/extract-config" && method === "POST") return void handleCreateConfig(req, res);
     if (pathname === "/api/ingest" && method === "POST") return void handleIngest(req, res);
     if (pathname === "/api/process" && method === "GET") return handleProcess(req, res);
     if (pathname === "/api/record" && method === "GET") return handleRecord(req, res);

@@ -65,6 +65,11 @@ export interface AppConfig {
   generativeModel: string;
   /** Reranker: "predict" | "noop". */
   reranker: string;
+  /**
+   * Optional ARAG extract_strategy id. When set, image/PDF uploads are processed with
+   * this ingestion-time visual-LLM extract strategy (Nuclia "Extract configuration").
+   */
+  extractStrategy: string;
   aragTimeoutMs: number;
   maxUploadBytes: number;
 }
@@ -76,6 +81,7 @@ export const config: AppConfig = {
   aragToken: str("ARAG_TOKEN"),
   generativeModel: str("ARAG_GENERATIVE_MODEL", "chatgpt-azure-4o"),
   reranker: str("ARAG_RERANKER", "predict"),
+  extractStrategy: str("ARAG_EXTRACT_STRATEGY"),
   aragTimeoutMs: num("ARAG_TIMEOUT_MS", 60000),
   maxUploadBytes: num("MAX_UPLOAD_BYTES", 26214400),
 };

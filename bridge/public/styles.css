@@ -21,6 +21,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Ensure the `hidden` attribute always wins over component display rules
+   (e.g. .modal-backdrop / .result-processing use display:flex). */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -100,6 +103,31 @@ main {
   padding: 6px 13px; border-radius: 999px; font-size: 12px; cursor: pointer; transition: 0.12s;
 }
 .chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.img:hover { border-color: var(--accent-2); color: var(--accent-2); }
+.samples + .samples { margin-top: -6px; }
+
+/* ── Generate-documents section ─────────────────────────── */
+.generate { max-width: 1500px; margin: 8px auto 40px; padding: 0 26px; }
+.gen-head h2 { font-size: 18px; margin: 0 0 6px; }
+.gen-head p { color: var(--muted); font-size: 13px; max-width: 880px; margin: 0 0 18px; line-height: 1.6; }
+.gen-head strong { color: var(--accent); font-weight: 600; }
+.prompt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+.prompt-card { background: linear-gradient(180deg, var(--panel), var(--bg-2)); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.pc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.pc-title { font-weight: 700; font-size: 14px; }
+.pc-text { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; line-height: 1.6; color: #c2cbdc; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 11px 12px; margin: 0; max-height: 230px; overflow: auto; }
+
+/* ── Config bar ─────────────────────────────────────────── */
+.config-bar { display: flex; align-items: center; gap: 10px; padding: 2px; flex-wrap: wrap; }
+.config-bar label { color: var(--muted); font-size: 12px; }
+.config-bar select {
+  flex: 1; min-width: 160px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 9px; padding: 8px 11px; font-size: 13px; outline: none;
+}
+.config-bar select:focus { border-color: var(--accent-2); }
+.vis-note { font-size: 11.5px; color: var(--muted); background: rgba(56,189,248,0.07); border: 1px solid rgba(56,189,248,0.2);
+  border-radius: 8px; padding: 7px 11px; }
+.vis-note code { color: var(--accent-2); font-size: 11px; }
 
 /* ── Buttons ────────────────────────────────────────────── */
 .btn {
@@ -134,6 +162,9 @@ main {
 .stages li.ok .st-ic::after { content: "✓"; }
 .stages li.error .st-ic { border-color: var(--err); background: var(--err); color: #2a0a0a; }
 .stages li.error .st-ic::after { content: "!"; }
+.stages li.skip { color: var(--muted-2); }
+.stages li.skip .st-ic { border-style: dashed; border-color: var(--muted-2); }
+.stages li.skip .st-ic::after { content: "–"; color: var(--muted-2); }
 .st-name { flex: 1; font-size: 13px; }
 .st-meta { font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(56,189,248,0.4); } 50% { box-shadow: 0 0 0 5px rgba(56,189,248,0); } }
@@ -142,6 +173,32 @@ main {
 .result { padding: 18px; min-height: 420px; }
 .result-empty { text-align: center; color: var(--muted); padding: 90px 20px; }
 .re-icon { font-size: 36px; color: var(--muted-2); margin-bottom: 10px; }
+
+/* ── Document preview (while processing + as source) ────── */
+.result-processing { display: flex; flex-direction: column; gap: 14px; }
+.proc-caption { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.doc-preview { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #0a0e16;
+  display: flex; align-items: flex-start; justify-content: center; max-height: 620px; overflow-y: auto; position: relative; }
+.result-processing .doc-preview::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgba(56,189,248,0.10) 50%, transparent 70%);
+  background-size: 220% 100%; animation: shimmer 1.4s infinite; }
+@keyframes shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.doc-img { width: 100%; height: auto; display: block; }
+.doc-embed { width: 100%; height: 600px; border: 0; background: #fff; }
+.doc-text { margin: 0; padding: 16px 18px; white-space: pre-wrap; word-break: break-word; font-size: 12px;
+  line-height: 1.6; color: #cdd6e8; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.doc-file { padding: 40px; color: var(--muted); font-size: 14px; }
+
+.source { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.source > summary { cursor: pointer; padding: 11px 14px; font-size: 12px; color: var(--muted); list-style: none;
+  text-transform: uppercase; letter-spacing: .6px; user-select: none; }
+.source > summary::-webkit-details-marker { display: none; }
+.source > summary::before { content: "▸ "; color: var(--accent-2); }
+.source[open] > summary::before { content: "▾ "; }
+.source #sourceName { color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; }
+.source .doc-preview { margin: 0 12px 12px; max-height: 360px; }
+.source .doc-embed { height: 340px; }
 
 .result-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .badge {
@@ -200,3 +257,41 @@ h4 { margin: 16px 0 8px; font-size: 12px; text-transform: uppercase; letter-spac
 
 .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--line); border-top-color: var(--accent-2); border-radius: 50%; animation: rot 0.7s linear infinite; vertical-align: -2px; }
 @keyframes rot { to { transform: rotate(360deg); } }
+
+/* ── Config manager modal ───────────────────────────────── */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(6, 9, 14, 0.7); backdrop-filter: blur(3px);
+  display: flex; align-items: flex-start; justify-content: center; padding: 6vh 20px; z-index: 30; }
+.modal { width: min(720px, 100%); max-height: 86vh; overflow: auto; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px;
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+.modal-head h2 { margin: 0; font-size: 16px; }
+.modal-close { background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); border-radius: 8px;
+  width: 30px; height: 30px; cursor: pointer; font-size: 14px; }
+.modal-close:hover { color: var(--text); border-color: var(--accent); }
+.modal-body { padding: 18px 20px 22px; }
+
+.cfg-group { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin: 4px 0 8px; }
+.cfg-list { display: flex; flex-direction: column; gap: 9px; margin-bottom: 22px; }
+.cfg-card { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; background: var(--bg-2); }
+.cfg-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.cfg-card-head b { font-size: 13.5px; text-transform: capitalize; }
+.cfg-tag { font-size: 10px; color: var(--muted-2); text-transform: uppercase; letter-spacing: .5px; }
+.cfg-del { background: transparent; border: none; color: var(--muted-2); cursor: pointer; font-size: 13px; }
+.cfg-del:hover { color: var(--err); }
+.cfg-flds { display: flex; flex-wrap: wrap; gap: 6px; }
+.cfg-chip { font-size: 11px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 2px 8px; }
+
+.cfg-new { border-top: 1px solid var(--line); padding-top: 16px; }
+.cfg-new h3 { margin: 0 0 4px; font-size: 14px; }
+.cfg-new p { margin: 0 0 12px; }
+.cfg-input { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 9px; padding: 9px 11px; font-size: 13px; outline: none; }
+.cfg-input:focus { border-color: var(--accent-2); }
+.cfg-fields { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.cfg-field-row { display: flex; gap: 8px; align-items: center; }
+.cfg-field-row .fld-label { flex: 1; }
+.cfg-field-row .fld-type { width: 140px; flex: none; }
+.fld-req { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cfg-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
