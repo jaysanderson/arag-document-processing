@@ -19,6 +19,7 @@ import {
   icon,
   jobChip,
   navigate,
+  onLeave,
   openDrawer,
   skeletonRows,
   toast,
@@ -99,6 +100,7 @@ export async function renderJobs(main, { query, stale }) {
 
   // Auto-refresh is a pause switch for demos and screenshots, not a poll-interval control.
   const auto = $("#auto", main);
+  onLeave(stop);
   const arm = () => {
     stop();
     if (auto.checked)

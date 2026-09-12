@@ -244,6 +244,28 @@ export function navigate(path, query = {}, { replace = false } = {}) {
  * Route table: `[pattern, handler]` where a pattern segment starting with `:` binds a
  * parameter. First match wins, so order the table from most to least specific.
  */
+/**
+ * Teardown registered by a screen for whatever it started — a poll timer, an SSE stream —
+ * and run by the router before the next screen renders. Without it a document left open
+ * while its pipeline runs keeps a stream alive for the rest of the session.
+ */
+const leavers = new Set();
+
+export function onLeave(fn) {
+  leavers.add(fn);
+}
+
+export function runLeavers() {
+  for (const fn of leavers) {
+    try {
+      fn();
+    } catch {
+      /* a broken teardown must not stop the next screen rendering */
+    }
+  }
+  leavers.clear();
+}
+
 export function createRouter(routes, { fallback } = {}) {
   const compiled = routes.map(([pattern, handler]) => ({
     parts: pattern.split("/").filter(Boolean),
@@ -268,10 +290,12 @@ export function createRouter(routes, { fallback } = {}) {
       }
       if (!ok) continue;
       const mine = ++token;
+      runLeavers();
       // A slow render must never paint over a newer navigation.
       await route.handler({ params, query, path, stale: () => mine !== token });
       return;
     }
+    runLeavers();
     await fallback?.({ path, query });
   }
   window.addEventListener("hashchange", () => {

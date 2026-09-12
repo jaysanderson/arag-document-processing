@@ -24,6 +24,7 @@ import {
   label,
   menuButton,
   navigate,
+  onLeave,
   pct,
   skeletonRows,
   statusChip,
@@ -131,6 +132,7 @@ export async function renderDocuments(main, { query, stale, keepEmpty = false })
   // to move on its own or the user learns to hammer the browser's reload.
   const busy = page.items.some((d) => d.status === "pending" || d.status === "processing");
   if (busy) {
+    onLeave(stopLive);
     liveTimer = setInterval(async () => {
       if (!document.getElementById("docsTable")) return stopLive();
       try {

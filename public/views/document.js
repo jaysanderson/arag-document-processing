@@ -26,6 +26,7 @@ import {
   label,
   menuButton,
   navigate,
+  onLeave,
   pct,
   popover,
   sse,
@@ -169,8 +170,13 @@ export async function renderDocument(main, { params, query, stale }, tab = "") {
   else if (tab === "json") renderJson(panel, doc);
   else renderRecord(panel, doc);
 
-  // A document that is still moving should move on screen too.
+  // A document that is still moving should move on screen too — and the stream is closed
+  // when the screen is left, not only when this screen renders again.
   if ((doc.status === "pending" || doc.status === "processing") && doc.jobId) {
+    onLeave(() => {
+      closeStream?.();
+      closeStream = null;
+    });
     closeStream = sse(`/api/v1/jobs/${doc.jobId}/events`, {
       job: (payload) => {
         const j = payload.job ?? payload;
