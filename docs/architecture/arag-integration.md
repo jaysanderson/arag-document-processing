@@ -108,3 +108,10 @@ to RFC 9457 problems by the platform: timeouts → 504, upstream failures → 50
 that names `ARAG_API_KEY` without leaking it. Pipeline stages are `soft`: a failing stage is
 recorded as a stage error and the run continues with the best record it has, so one flaky
 agent never loses the whole extraction.
+
+## Further reading
+
+For the system-level view (module map, request lifecycle, job/SSE model), a document's
+end-to-end journey, and real-world throughput built on the timings above, see
+[`architecture.md`](architecture.md), [`data-flow.md`](data-flow.md) and
+[`scaling.md`](scaling.md).

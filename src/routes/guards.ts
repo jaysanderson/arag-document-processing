@@ -6,12 +6,16 @@ import type { Ctx } from "../../vendor/arag-platform/src/index.ts";
 import { unauthorized } from "../../vendor/arag-platform/src/index.ts";
 
 /**
- * Destructive verbs always need a credential, even when the public API is otherwise open.
+ * Writes that change shared state always need a credential, even when the public API is
+ * otherwise open: the three `DELETE`s, and `POST /api/v1/extraction-configs` (which
+ * provisions a real stored ARAG search configuration in the Knowledge Box).
  *
- * Reads and uploads stay anonymous-friendly so the demo, the docs and `curl` quickstarts
- * work with no setup; but deleting a document also deletes the Knowledge Box resource, and
- * an anonymous caller must not be able to destroy another tenant's data just because
- * `API_KEYS` was left empty. Any of these satisfies the guard:
+ * Reads and document uploads stay anonymous-friendly so the demo, the docs and `curl`
+ * quickstarts work with no setup — an upload only adds the caller's own document, and is
+ * rate-limited. But deleting a document also deletes the Knowledge Box resource, and
+ * creating a config writes into the KB's own configuration; an anonymous caller must not
+ * be able to destroy or pollute shared state just because `API_KEYS` was left empty.
+ * Any of these satisfies the guard:
  *
  *   - `ADMIN_TOKEN` (bearer or the `arag_admin` cookie)
  *   - an `X-API-Key` / bearer API key, when `API_KEYS` is configured
@@ -23,7 +27,7 @@ import { unauthorized } from "../../vendor/arag-platform/src/index.ts";
 export function requireWriter(ctx: Ctx): void {
   if (ctx.auth.admin || ctx.auth.apiKey || ctx.auth.session) return;
   throw unauthorized(
-    "Destructive operations require a credential: send an API key (X-API-Key or Authorization: Bearer), " +
+    "This operation requires a credential: send an API key (X-API-Key or Authorization: Bearer), " +
       "the admin token, or call POST /api/v1/session first to obtain a same-origin session cookie.",
   );
 }

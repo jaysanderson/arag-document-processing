@@ -15,6 +15,9 @@ export function registerConfigRoutes(app: App, deps: { configs: ConfigsService }
   app.post(
     "/api/v1/extraction-configs",
     async (ctx) => {
+      // Creating a config provisions a stored search configuration in the Knowledge Box —
+      // a write to shared state, so it needs the same credential as the deletes.
+      requireWriter(ctx);
       const created = await deps.configs.create(ctx.body as CustomConfigInput);
       ctx.json(201, created, { Location: `/api/v1/extraction-configs/${created.id}` });
     },

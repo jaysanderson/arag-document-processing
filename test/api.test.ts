@@ -284,14 +284,18 @@ test("extraction configs: built-ins listed, custom created + provisioned + delet
   assert.ok(builtins.some((c2) => c2.id === "bank_statement"));
   assert.ok(builtins.every((c2) => c2.aragConfig.startsWith("dip_")));
 
-  const created = await c.post("/api/v1/extraction-configs", {
-    name: "Insurance Card",
-    fields: [
-      { label: "Policy Number", required: true },
-      { label: "Insurer" },
-      { label: "Benefits", type: "array" },
-    ],
-  });
+  const created = await c.post(
+    "/api/v1/extraction-configs",
+    {
+      name: "Insurance Card",
+      fields: [
+        { label: "Policy Number", required: true },
+        { label: "Insurer" },
+        { label: "Benefits", type: "array" },
+      ],
+    },
+    writer,
+  );
   assert.equal(created.status, 201, created.text);
   assert.deepEqual(
     testing.checkResponse(openapi, "/api/v1/extraction-configs", "post", 201, created.json),
@@ -331,7 +335,7 @@ test("extraction configs: built-ins listed, custom created + provisioned + delet
   );
   assert.equal((await c.get(`/api/v1/extraction-configs/${cfg.id}`)).status, 404);
 
-  const badCfg = await c.post("/api/v1/extraction-configs", { name: "", fields: [] });
+  const badCfg = await c.post("/api/v1/extraction-configs", { name: "", fields: [] }, writer);
   assert.equal(badCfg.status, 400);
 });
 
@@ -429,6 +433,12 @@ test("destructive verbs reject anonymous callers even when API_KEYS is unset", a
   assert.match((anon.json as { detail: string }).detail, /POST \/api\/v1\/session/);
   assert.equal((await c.request("DELETE", "/api/v1/jobs/anything")).status, 401);
   assert.equal((await c.request("DELETE", "/api/v1/extraction-configs/invoice")).status, 401);
+  // Creating a config provisions a stored ARAG search configuration — also a shared write.
+  const anonCfg = await c.post("/api/v1/extraction-configs", {
+    name: "Anon Probe",
+    fields: [{ label: "Anything" }],
+  });
+  assert.equal(anonCfg.status, 401);
   // The admin token is also a writer credential.
   assert.equal(
     (

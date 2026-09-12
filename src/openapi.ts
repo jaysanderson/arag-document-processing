@@ -510,7 +510,9 @@ export const openapi = buildOpenApi({
         description:
           "Persists the config and provisions a stored ARAG search configuration (kind `ask`) " +
           "that pins the model, the full_resource RAG strategy, the grounding prompt and the " +
-          "answer_json_schema built from these fields.",
+          "answer_json_schema built from these fields. Because it writes into the Knowledge Box, " +
+          "it requires a credential even when `API_KEYS` is unset: an API key, the admin token, " +
+          "or a same-origin session cookie from `POST /api/v1/session`.",
         requestBody: jsonBody({ $ref: "#/components/schemas/ExtractionConfigCreate" }),
         responses: {
           201: jsonResponse({ $ref: "#/components/schemas/ExtractionConfig" }, "Created"),

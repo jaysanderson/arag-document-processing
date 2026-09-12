@@ -1,0 +1,24 @@
+GLOBEX SUPPLY CO PTY LTD
+Level 3, 88 Collins Street, Melbourne VIC 3000, Australia
+
+TAX INVOICE
+
+Invoice Number: INV-2026-1188
+Invoice Date: 03/08/2026
+Due Date: 02/09/2026
+Currency: AUD
+
+Bill To:
+Meridian Health Networks Ltd
+Level 9, 200 George Street, Sydney NSW 2000, Australia
+
+Description                          Qty   Unit Price   Amount
+Annual platform licence                1   $18,000.00   $18,000.00
+Onboarding services                    1    $4,500.00    $4,500.00
+
+Purchase Order: PO-77341
+Subtotal: $22,500.00
+GST (10%): $2,250.00
+TOTAL DUE: $25,750.00
+
+Payment due within 30 days to account BSB 083-004 Acc 512 774 331.

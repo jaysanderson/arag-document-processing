@@ -47,8 +47,10 @@ curl -sS "http://localhost:8080/api/v1/documents/$ID/export?format=csv"
 curl -sS -X POST "http://localhost:8080/api/v1/documents/$ID/ask" \
      -H 'Content-Type: application/json' -d '{"question":"What is the total due?"}' | jq .
 
-# 5. Clean up — deletes the record and the KB resource.
-curl -sS -X DELETE "http://localhost:8080/api/v1/documents/$ID"
+# 5. Clean up — deletes the record and the KB resource. Destructive verbs always need a
+#    credential, so pick one up first (an API key or the admin token work too).
+curl -sS -c /tmp/dip.jar -X POST http://localhost:8080/api/v1/session > /dev/null
+curl -sS -b /tmp/dip.jar -X DELETE "http://localhost:8080/api/v1/documents/$ID"
 ```
 
 ## What it extracts
@@ -80,12 +82,12 @@ Everything lives under `/api/v1` and is described by [`src/openapi.ts`](src/open
 | `GET` | `/documents/{id}` | The canonical record |
 | `GET` | `/documents/{id}/export` | `?format=json\|xml\|csv` |
 | `POST` | `/documents/{id}/ask` | Grounded Q&A over one document |
-| `DELETE` | `/documents/{id}` | Delete the record **and** the KB resource |
+| `DELETE` | `/documents/{id}` | Delete the record **and** the KB resource (needs a credential) |
 | `GET` | `/jobs`, `/jobs/{id}` | Processing jobs |
 | `GET` | `/jobs/{id}/events` | Server-sent events for a running job |
-| `DELETE` | `/jobs/{id}` | Cancel |
+| `DELETE` | `/jobs/{id}` | Cancel (needs a credential) |
 | `GET`/`POST` | `/extraction-configs` | List / create |
-| `GET`/`DELETE` | `/extraction-configs/{id}` | Read / delete (built-ins are not deletable) |
+| `GET`/`DELETE` | `/extraction-configs/{id}` | Read / delete (needs a credential; built-ins are not deletable) |
 | `GET` | `/schemas` | Document types and their fields |
 | `POST` | `/session` | Same-origin session cookie for the demo UI |
 | `GET` | `/admin/health`, `/admin/config`, `/admin/usage`, `/admin/logs` | Operator views |
@@ -94,6 +96,11 @@ Everything lives under `/api/v1` and is described by [`src/openapi.ts`](src/open
 Errors are RFC 9457 `application/problem+json` with a `requestId` that ties back to the
 logs. Uploads are limited by a MIME allowlist (pdf, png, jpeg, webp, tiff, txt, md, csv,
 docx) and a size cap; filenames are sanitised.
+
+Reads and uploads are open by default (rate-limited per IP) so the demo and these examples
+work with no setup. **Destructive verbs always require a credential** — an API key, the
+admin token, or a same-origin session cookie from `POST /api/v1/session` — even when
+`API_KEYS` is unset. Set `API_KEYS` for anything reachable from the internet.
 
 ## Configuration
 
@@ -115,9 +122,9 @@ Full list with comments: [`.env.example`](.env.example).
 ## Development
 
 ```bash
-make check          # Biome + tsc --noEmit + tests with the 80 % coverage gate
+make check          # Biome + tsc --noEmit + tests with the 80 % coverage gate + dependency audit
 make e2e            # Playwright: demo + admin against a mock-backed server
-make docs           # regenerate docs/developer/api-reference.md from the OpenAPI document
+make docs           # regenerate docs/developer/api-reference.md and check every doc link
 make showcase       # record the 2–3 minute walkthrough into showcase/out/
 make smoke          # OPT-IN live run against the real KB (uploads, processes, deletes)
 make docker         # build the container image
@@ -140,7 +147,7 @@ product marketing, hands-on enablement labs, and the showcase script.
 
 ```bash
 fly secrets set ARAG_KB_ID=… ARAG_API_KEY=… ARAG_REGION=aws-us-east-2-1 \
-                ADMIN_TOKEN=… DIP_EXTRACT_STRATEGY=…
+                ADMIN_TOKEN=… DIP_EXTRACT_STRATEGY=… API_KEYS=…
 fly deploy
 ```
 
