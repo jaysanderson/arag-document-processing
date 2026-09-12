@@ -82,6 +82,12 @@ export async function runPipeline(
   //    the resource is actually searchable. A resource's status flips to PROCESSED a few
   //    seconds BEFORE retrieval is ready — extracting too early yields empty results, so
   //    the pipeline gates on a cheap /find poll (`waitSearchable`) as well.
+  //
+  //    The extracted text is fetched in between: it is available as soon as the resource is
+  //    PROCESSED, it is the query seed every later stage uses, and probing searchability
+  //    with the document's own words hits far sooner than a generic probe query does.
+  let sourceText = "";
+  let seed = buildQuerySeed("", input.filename);
   await stage(
     "process",
     "Progress Agentic RAG is processing the document (OCR, visual layout, embeddings)…",
@@ -92,23 +98,20 @@ export async function runPipeline(
         onPoll: (status, attempt) =>
           ctx.emit("process", "progress", { message: `status: ${status} (poll ${attempt})` }),
       });
+      sourceText = await deps.arag.extractedText(resourceId, { signal: ctx.signal }).catch(() => "");
+      record.meta.sourceChars = sourceText.length;
+      seed = buildQuerySeed(sourceText, input.filename);
       const searchable = await deps.arag.waitSearchable(resourceId, {
+        query: seed,
         intervalMs: 1200,
         signal: ctx.signal,
         onPoll: () =>
           ctx.emit("process", "progress", { message: "indexing — waiting for search readiness…" }),
       });
-      return { searchable };
+      return { searchable, sourceChars: sourceText.length };
     },
     { soft: true, progress: 0.2 },
   );
-
-  // Seed for all retrieval queries, taken from the document's own extracted text. With
-  // the full_resource strategy the model gets the whole document, but retrieval still
-  // runs first to locate it — seeding with real vocabulary guarantees that hit.
-  const sourceText = await deps.arag.extractedText(resourceId, { signal: ctx.signal }).catch(() => "");
-  record.meta.sourceChars = sourceText.length;
-  const seed = buildQuerySeed(sourceText, input.filename);
 
   // 2a. Native path: read fields a Data Augmentation agent already persisted on the
   //     resource (configured in the ARAG dashboard). Falls back to live extraction.

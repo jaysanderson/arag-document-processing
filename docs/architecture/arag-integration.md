@@ -41,6 +41,10 @@ repeated verbatim as a comment next to the code that depends on it.
 4. **`PROCESSED` ≠ searchable.** A resource's status flips to `PROCESSED` a few seconds
    before it becomes retrievable. Extracting too early yields empty results, so the
    pipeline gates on `waitSearchable` (a cheap `/find` poll) after `waitProcessed`.
+   Probe it with the document's *own* opening words, not a generic query: against the live
+   KB a generic probe took about twenty polls (≈ 38 s) to register a hit on the same
+   resource that a seeded probe found on the first attempt (≈ 7 s end to end for the whole
+   process stage). Same reasoning as mechanic 3, applied to the readiness gate.
 
 5. **Scope with `resource_filters` on `/ask`, never `POST /resource/{id}/ask`.** The
    per-resource ask endpoint rejects `rag_strategies: [{ name: "full_resource" }]`
