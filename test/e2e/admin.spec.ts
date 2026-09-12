@@ -18,6 +18,11 @@ test("admin: login is required, then health, configs, jobs, logs and retention a
   await page.fill("#token", TOKEN);
   await page.click("#signin");
   await expect(page.locator("#panel")).toBeVisible();
+  // Only the selected tab's section is on screen.
+  await expect(page.locator('[data-panel="overview"]')).toBeVisible();
+  for (const tab of ["configs", "jobs", "logs", "config", "retention"]) {
+    await expect(page.locator(`[data-panel="${tab}"]`)).toBeHidden();
+  }
 
   // Overview: KB connection test, extract strategy, model.
   await expect(page.locator("arag-health")).toContainText("connected", { timeout: 20_000 });

@@ -7,6 +7,13 @@ test("demo: sample → live pipeline → canonical record → exports → ask", 
   await page.goto("/");
   await expect(page.locator("arag-shell .product")).toContainText("Document Processing");
 
+  // Nothing that depends on a record is on screen yet (the UI kit sets an explicit
+  // `display` on several classes, which used to defeat the `hidden` attribute).
+  await expect(page.locator("#exports")).toBeHidden();
+  await expect(page.locator("#resultBody")).toBeHidden();
+  await expect(page.locator("#configModal")).toBeHidden();
+  await expect(page.locator("#askBtn")).toBeDisabled();
+
   // The extraction-config selector is populated from /api/v1/extraction-configs.
   await expect(page.locator("#configSelect option")).not.toHaveCount(0);
   await expect(page.locator("#configSelect")).toHaveValue("auto");

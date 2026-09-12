@@ -181,9 +181,12 @@
   }
 }
 
-/* Platform UI-kit gap (arag-ui.css v0.1.2): `.arag-modal-backdrop` sets `display:flex`,
-   which overrides the `hidden` attribute — the invisible full-screen overlay then
-   swallows every click on the page. Reported upstream; this is the local workaround. */
-.arag-modal-backdrop[hidden] {
-  display: none;
+/* Platform UI-kit gap (arag-ui.css v0.1.2): several kit classes set an explicit `display`
+   (`.arag-grid` → grid, `.arag-row` and `.arag-modal-backdrop` → flex), which beats the
+   `hidden` attribute's UA rule. The visible symptoms were an invisible full-screen modal
+   backdrop swallowing every click, the admin panel showing all six tab sections at once,
+   and the demo's export buttons appearing before a record existed. Reported upstream;
+   until the kit ships `[hidden]{display:none!important}` itself, this is the workaround. */
+[hidden] {
+  display: none !important;
 }
