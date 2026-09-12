@@ -239,10 +239,15 @@ outside the document is answered "I don't have that information" per the system 
 
 ## Custom extraction configs
 
-Define exactly the fields you want, independent of the 11 built-in document types:
+Define exactly the fields you want, independent of the 11 built-in document types.
+Creating a config writes a real stored search configuration into the Knowledge Box, so —
+like the other write operations covered in
+[Credentials for write operations](#credentials-for-write-operations) — it requires a
+credential even when `API_KEYS` is unset. Get a session first:
 
 ```bash
-curl -sS -X POST 'http://localhost:8080/api/v1/extraction-configs' \
+curl -sS -c /tmp/cookies.txt -X POST http://localhost:8080/api/v1/session
+curl -sS -b /tmp/cookies.txt -X POST 'http://localhost:8080/api/v1/extraction-configs' \
      -H 'Content-Type: application/json' \
      -d '{
            "name": "Insurance Card",
@@ -258,7 +263,7 @@ curl -sS -X POST 'http://localhost:8080/api/v1/extraction-configs' \
 
 ```json
 {
-  "id": "cfg_5088a08b",
+  "id": "cfg_7361fcb2",
   "name": "Insurance Card",
   "docType": "generic",
   "description": "Fields from a health insurance membership card",
@@ -271,8 +276,8 @@ curl -sS -X POST 'http://localhost:8080/api/v1/extraction-configs' \
     { "key": "group_number", "label": "Group Number", "type": "string", "required": false },
     { "key": "plan_type", "label": "Plan Type", "type": "string", "required": false }
   ],
-  "createdAt": "2026-09-12T02:46:47.047Z",
-  "updatedAt": "2026-09-12T02:46:47.047Z"
+  "createdAt": "2026-09-12T03:10:12.291Z",
+  "updatedAt": "2026-09-12T03:10:12.291Z"
 }
 ```
 
@@ -281,10 +286,10 @@ Creating the config immediately provisions a stored ARAG search configuration
 (`dip_custom_insurance_card`) that pins the model, `full_resource` grounding, the grounding
 prompt and an `answer_json_schema` built from these fields (see
 [`arag-integration.md`](../architecture/arag-integration.md#stored-search-configurations)).
-Use the returned `id` as `config` on upload:
+Use the returned `id` as `config` on upload — uploading itself needs no credential:
 
 ```bash
-curl -sS -X POST 'http://localhost:8080/api/v1/documents?config=cfg_5088a08b' \
+curl -sS -X POST 'http://localhost:8080/api/v1/documents?config=cfg_7361fcb2' \
      -H 'Content-Type: text/plain' -H 'X-Filename: card.txt' --data-binary @some-card.txt
 ```
 
@@ -293,9 +298,8 @@ Card"`) and forces exactly those four fields. Built-in configs are addressed by 
 type directly: `?config=invoice`, `?config=medical_claim`, etc. — see
 [`GET /api/v1/schemas`](api-reference.md#get-apiv1schemas) for the full list. Built-in
 configs cannot be deleted (`409`); a custom one is removed with `DELETE
-/api/v1/extraction-configs/{id}` (also deletes its ARAG search configuration) — like every
-destructive verb in this API, that call requires a credential even with `API_KEYS` unset;
-see [Deleting things](#deleting-things) below.
+/api/v1/extraction-configs/{id}` (also deletes its ARAG search configuration) — again
+requiring a credential; see [Credentials for write operations](#credentials-for-write-operations) below.
 
 ## `config=agent` — reading Data Augmentation agent output
 
@@ -319,12 +323,13 @@ extraction — real output from the job's event log:
 
 Details in [`arag-integration.md`](../architecture/arag-integration.md#data-augmentation-agents).
 
-## Deleting things
+## Credentials for write operations
 
-`DELETE /api/v1/documents/{id}`, `DELETE /api/v1/jobs/{id}` (cancel) and
-`DELETE /api/v1/extraction-configs/{id}` are destructive, so they always require a
-credential — an API key, the admin token, or a same-origin session cookie — **even when
-`API_KEYS` is unset** (uploads and reads stay open either way). Get a session first:
+Four routes change shared state and so always require a credential — an API key, the
+admin token, or a same-origin session cookie — **even when `API_KEYS` is unset**: creating
+a custom extraction config, and the three deletes. Uploads and every read stay open either
+way (`src/routes/guards.ts`, `requireWriter`). Get a session first, the same way the demo
+UI does at page load:
 
 ```bash
 curl -sS -c /tmp/cookies.txt -X POST http://localhost:8080/api/v1/session
@@ -342,9 +347,9 @@ Without a credential, the same call returns a real, verified `401`:
   "type": "https://arag.dev/problems/unauthorized",
   "title": "Unauthorized",
   "status": 401,
-  "detail": "Destructive operations require a credential: send an API key (X-API-Key or Authorization: Bearer), the admin token, or call POST /api/v1/session first to obtain a same-origin session cookie.",
-  "instance": "/api/v1/documents/8294398cb4c94bed94fe6d8230b32818",
-  "requestId": "0b9c281d-6b3b-4473-be62-f717884fdf55"
+  "detail": "This operation requires a credential: send an API key (X-API-Key or Authorization: Bearer), the admin token, or call POST /api/v1/session first to obtain a same-origin session cookie.",
+  "instance": "/api/v1/extraction-configs",
+  "requestId": "4a799aa7-def5-440f-af5a-0bc0df4fe3dd"
 }
 ```
 
@@ -447,10 +452,16 @@ do {
 
 const record = await (await fetch(`${BASE}/api/v1/documents/${document.id}`)).json();
 console.log(record.status, record.docType, record.fields.length);
-await fetch(`${BASE}/api/v1/documents/${document.id}`, { method: "DELETE" });
+
+// Deleting is a destructive verb — it needs a credential even with API_KEYS unset.
+const sessionRes = await fetch(`${BASE}/api/v1/session`, { method: "POST" });
+const cookie = sessionRes.headers.get("set-cookie").split(";")[0];
+await fetch(`${BASE}/api/v1/documents/${document.id}`, { method: "DELETE", headers: { Cookie: cookie } });
+console.log("deleted", document.id);
 ```
 
-Run against the local mock server, this prints `ready invoice 12`.
+Run against the local mock server, this prints `ready invoice 12` followed by `deleted
+<document id>`.
 
 ### Python (`urllib`, standard library only)
 
@@ -464,22 +475,25 @@ def request(method, path, data=None, headers=None):
     req = urllib.request.Request(f"{BASE}{path}", data=body, method=method, headers=headers or {})
     with urllib.request.urlopen(req) as resp:
         raw = resp.read()
-        return json.loads(raw) if raw else None
+        return (json.loads(raw) if raw else None), resp.headers.get("Set-Cookie", "")
 
 with open("public/samples/invoice.txt", "rb") as f:
-    out = request("POST", "/api/v1/documents?config=auto", data=f.read(),
-                  headers={"Content-Type": "text/plain", "X-Filename": "invoice.txt"})
+    out, _ = request("POST", "/api/v1/documents?config=auto", data=f.read(),
+                      headers={"Content-Type": "text/plain", "X-Filename": "invoice.txt"})
 doc_id, job_id = out["document"]["id"], out["job"]["id"]
 
 while True:
-    job = request("GET", f"/api/v1/jobs/{job_id}")
+    job, _ = request("GET", f"/api/v1/jobs/{job_id}")
     if job["status"] in ("succeeded", "failed", "cancelled"):
         break
     time.sleep(1)
 
-record = request("GET", f"/api/v1/documents/{doc_id}")
+record, _ = request("GET", f"/api/v1/documents/{doc_id}")
 print(record["status"], record["docType"], len(record["fields"]))
-request("DELETE", f"/api/v1/documents/{doc_id}")
+
+# Deleting is a destructive verb — it needs a credential even with API_KEYS unset.
+_, cookie = request("POST", "/api/v1/session")
+request("DELETE", f"/api/v1/documents/{doc_id}", headers={"Cookie": cookie.split(";")[0]})
 ```
 
 Also prints `ready invoice 12` against the local mock server. Both snippets were run

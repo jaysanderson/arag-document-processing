@@ -12,21 +12,12 @@ import {
   standardResponses,
 } from "../vendor/arag-platform/src/index.ts";
 
+import { DOC_TYPE_VALUES } from "./types.ts";
+
 export const VERSION = "1.0.0";
 
-const DOC_TYPES = [
-  "invoice",
-  "receipt",
-  "contract",
-  "resume",
-  "purchase_order",
-  "medical_claim",
-  "preauthorisation",
-  "bank_statement",
-  "form",
-  "report",
-  "generic",
-] as const;
+/** The spec's document-type enums come from the code, so the two cannot drift. */
+const DOC_TYPES = DOC_TYPE_VALUES;
 
 const ExtractedField = {
   type: "object",
@@ -614,7 +605,13 @@ export const openapi = buildOpenApi({
               arag: { type: "object", additionalProperties: true },
               extractStrategy: { type: ["string", "null"] },
               generativeModel: { type: "string" },
-              documents: { type: "object", additionalProperties: { type: "number" } },
+              documents: {
+                type: "object",
+                additionalProperties: { type: "number" },
+                description:
+                  "Counts by status plus `degraded`: records that finished but lost a stage " +
+                  "(see the record's `meta.stageErrors`).",
+              },
             },
             additionalProperties: true,
           }),
@@ -666,6 +663,44 @@ export const openapi = buildOpenApi({
             type: "object",
             required: ["items"],
             properties: { items: { type: "array", items: { $ref: "#/components/schemas/LogRecord" } } },
+          }),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+    },
+    "/api/v1/admin/search-configurations": {
+      get: {
+        operationId: "adminSearchConfigurations",
+        tags: ["admin"],
+        summary: "Read the stored ARAG search configurations this product provisions",
+        description:
+          "Fetches the `dip_*` search configurations straight from the Knowledge Box, so an " +
+          "operator can confirm which model, RAG strategy, prompt and answer_json_schema the " +
+          "extraction agents are actually running against — without opening the ARAG dashboard.",
+        responses: {
+          200: jsonResponse({
+            type: "object",
+            required: ["items"],
+            properties: {
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["name", "kind"],
+                  properties: {
+                    name: { type: "string" },
+                    kind: { type: "string" },
+                    config: { type: "object", additionalProperties: true },
+                  },
+                },
+              },
+              other: {
+                type: "array",
+                items: { type: "string" },
+                description: "Names of search configurations in the KB that this product did not create.",
+              },
+            },
           }),
           ...standardResponses,
         },

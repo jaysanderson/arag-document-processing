@@ -86,6 +86,12 @@
               <tbody></tbody>
             </table>
             <div id="provisionResult" style="margin-top:12px"></div>
+            <details style="margin-top:12px" id="storedConfigs">
+              <summary class="muted small">
+                Inspect the stored ARAG search configurations (model, RAG strategy, prompt, schema)
+              </summary>
+              <arag-json id="storedConfigsJson" src="/api/v1/admin/search-configurations"></arag-json>
+            </details>
           </div>
         </div>
       </section>

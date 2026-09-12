@@ -302,7 +302,7 @@ Auth: ApiKey or Bearer
 
 ### `POST /api/v1/extraction-configs`
 
-**Create a custom extraction configuration** — Persists the config and provisions a stored ARAG search configuration (kind `ask`) that pins the model, the full_resource RAG strategy, the grounding prompt and the answer_json_schema built from these fields.
+**Create a custom extraction configuration** — Persists the config and provisions a stored ARAG search configuration (kind `ask`) that pins the model, the full_resource RAG strategy, the grounding prompt and the answer_json_schema built from these fields. Because it writes into the Knowledge Box, it requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.
 
 Request body (`application/json`): [ExtractionConfigCreate](#extractionconfigcreate)
 
@@ -489,6 +489,23 @@ Parameters:
 | `level` | query | string |  |  |
 | `contains` | query | string |  |  |
 | `limit` | query | integer |  |  |
+
+Responses:
+
+- `200` OK — `application/json` object
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+
+### `GET /api/v1/admin/search-configurations`
+
+**Read the stored ARAG search configurations this product provisions** — Fetches the `dip_*` search configurations straight from the Knowledge Box, so an operator can confirm which model, RAG strategy, prompt and answer_json_schema the extraction agents are actually running against — without opening the ARAG dashboard.
 
 Responses:
 

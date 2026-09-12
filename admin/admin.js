@@ -64,6 +64,8 @@ async function loadHealth() {
     $("#docCounts").textContent = Object.entries(h.documents ?? {})
       .map(([k, v]) => `${k}: ${v}`)
       .join(" · ");
+    // A "degraded" document finished but lost a stage — worth an operator's attention.
+    $("#docCounts").className = h.documents?.degraded ? "arag-chip warn" : "";
   } catch (e) {
     toast(e.message, "error");
   }
@@ -131,7 +133,10 @@ async function loadConfigs() {
     toast(e.message, "error");
   }
 }
-$("#reloadConfigs").addEventListener("click", loadConfigs);
+$("#reloadConfigs").addEventListener("click", () => {
+  loadConfigs();
+  $("#storedConfigsJson").load();
+});
 
 $("#provision").addEventListener("click", async () => {
   $("#provision").disabled = true;
@@ -147,6 +152,7 @@ $("#provision").addEventListener("click", async () => {
         )
         .join("")}</tbody></table>`;
     loadConfigs();
+    $("#storedConfigsJson").load();
   } catch (e) {
     $("#provisionResult").innerHTML = `<div class="arag-alert error">${esc(e.message)}</div>`;
   } finally {

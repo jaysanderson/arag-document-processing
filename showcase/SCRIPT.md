@@ -5,14 +5,23 @@ deterministic and needs no credentials. Narration is written to be read at a mea
 conversational pace — pause on each on-screen action rather than racing ahead of it.
 
 Screenshot filenames below are produced by `showcase/record.spec.ts` and match
-`STORYBOARD.md`. The video is `showcase/out/*.webm`.
+`STORYBOARD.md`. The video is `showcase/out/*/video.webm`.
+
+A note on realism: the mock ARAG resolves the whole seven-stage pipeline in well under a
+second (there is no simulated network/model latency), so the *video* shows the pipeline
+stages appear in a quick, genuine burst rather than the slower cadence a live multimodal
+model would have — that is faster than the real thing, not scripted to look busier than
+it is. The document dropped in the first beat is also not one of the pristine built-in
+samples: it is `showcase/fixtures/invoice-review.txt`, a deliberately imperfect invoice
+(the printed subtotal and tax do not add up to the printed total) so the validation-issues
+part of the canonical record has something real to show.
 
 ---
 
 ### 00:00–00:15 — The problem
 
 **On screen:** the demo home page, freshly loaded. Dropzone empty, "no document" label,
-canonical-record panel showing its empty state.
+canonical-record panel showing its empty state, no export buttons yet.
 **Screenshot:** `01-home.png`
 
 > "Most business documents — invoices, purchase orders, claim forms, receipts — arrive as
@@ -25,61 +34,40 @@ everything that follows is one document proving that claim.
 
 ---
 
-### 00:15–00:35 — Drop an invoice
+### 00:15–01:05 — Drop an invoice; the live pipeline; the canonical record
 
-**On screen:** click the **Invoice** text sample button. The file label updates, the
-source preview fills with the raw invoice text, and the live pipeline card starts
-reporting the first stage.
-**Screenshot:** `02-pipeline-running.png` (captured while a stage is still in flight)
-
-> "I'll drop in a sample invoice — in the real product this would be a drag-and-drop PDF
-> or a photo from a phone. The moment it lands, Progress Agentic RAG picks it up: OCR,
-> layout, embeddings, and the extraction pipeline all fire immediately."
-
-*Why this matters:* stress that nothing here is scripted client-side — the timeline is a
-live server-sent-events stream off a real job.
-
----
-
-### 00:35–01:00 — The live pipeline, stage by stage
-
-**On screen:** the pipeline card lights up each stage in turn — process, classify,
-extract, entities, summary, validate, standardize — finishing with a green "succeeded"
-chip.
-**Screenshot:** `03-pipeline-complete.png`
-
-> "Seven agent stages run in sequence: the document is processed by ARAG, classified by
-> type, its fields extracted, named entities pulled out, a summary written, the result
-> validated, and finally standardised into one shape. You're watching the actual job
-> stream, not a progress bar."
-
-*Why this matters:* this is the "multi-agent pipeline" claim made visible — a sceptical
-viewer can see each named stage complete, not just a spinner.
-
----
-
-### 01:00–01:25 — The canonical record
-
-**On screen:** the record panel populates: document-type badge, classifier confidence,
-summary paragraph, topic tags, any validation issues, the extracted-fields table with a
+**On screen:** a document is dropped straight into the dropzone (a real file-input
+selection, the same code path as drag-and-drop). Within moments the "Live pipeline" card
+lists all seven agent stages — process, classify, extract, entities, summary, validate,
+standardize — each with a timing in milliseconds and a green "succeeded" chip, and the
+canonical record on the right fills in: document-type badge, classifier confidence,
+model/timing line, a plain-English summary, topic tags, an extracted-fields table with a
 confidence bar per field, and the entities list.
-**Screenshot:** `04-canonical-record.png`
+**Screenshot:** `02-pipeline-and-record.png`
 
-> "And here's the payoff: a canonical record. Every field comes with a confidence score,
-> not just a value — so a low-confidence total or ABN gets flagged for review instead of
-> silently trusted. Named entities, a plain-English summary, and any validation issues sit
-> alongside it."
+> "I'll drop in an invoice — in the real product this is a drag-and-drop PDF or a photo
+> from a phone. The moment it lands, Progress Agentic RAG picks it up, and seven agent
+> stages run in sequence: the document is processed, classified, its fields extracted,
+> named entities pulled out, a summary written, the result validated, and standardised
+> into one shape. Every field comes with a confidence score, not just a value.
+>
+> And look here — the validation stage has flagged something: the subtotal and tax on
+> this invoice don't actually add up to the printed total. That's exactly the kind of
+> discrepancy a person would otherwise have to notice by hand; the pipeline catches it
+> automatically and surfaces it as a warning rather than silently trusting the total."
 
-*Why this matters:* confidence-per-field and validation issues are the difference between
-"OCR text" and something a finance system can trust.
+*Why this matters:* this single screenshot carries most of the value proposition —
+nothing here is scripted client-side, it's the real SSE job stream and a real arithmetic
+check against the extracted numbers. Point out that a clean document would show no
+warning at all; this one was chosen deliberately to prove the check is real.
 
 ---
 
-### 01:25–01:40 — Export it
+### 01:05–01:20 — Export it
 
-**On screen:** click through the JSON, XML and CSV export buttons; a toast confirms each
+**On screen:** click through the JSON, XML and CSV export buttons; toasts confirm each
 download.
-**Screenshot:** `05-exports.png`
+**Screenshot:** `03-exports.png`
 
 > "The same record exports as JSON, XML or CSV — whatever the downstream system expects,
 > with no re-mapping."
@@ -89,27 +77,27 @@ drop-in rather than another format to build against.
 
 ---
 
-### 01:40–02:00 — Ask the document a question
+### 01:20–01:40 — Ask the document a question
 
 **On screen:** type a question into "Ask this document" and submit; the answer streams
-in with its source citation and latency.
-**Screenshot:** `06-ask-answer.png`
+in with its source-document citation and latency.
+**Screenshot:** `04-ask-answer.png`
 
 > "Because the document lives in an ARAG knowledge box, not just a table row, you can also
 > ask it questions directly — 'What is the total due?' — and get a grounded answer back,
-> with the answer traced to the source."
+> traced to the source document."
 
 *Why this matters:* the record isn't a dead export — the original document stays
 queryable.
 
 ---
 
-### 02:00–02:20 — The visual path
+### 01:40–02:00 — The visual path
 
 **On screen:** an image (scanned) purchase order is processed with a forced
 `purchase_order` config; the preview shows the actual image, and the record panel shows
 "auto-classification skipped" alongside the extracted fields.
-**Screenshot:** `07-image-sample.png`
+**Screenshot:** `05-image-sample.png`
 
 > "This isn't limited to text. A scanned or photographed purchase order goes through the
 > same pipeline using visual extraction — and here I've forced the purchase-order config
@@ -121,11 +109,12 @@ of choosing a schema — forcing it — versus auto-detect.
 
 ---
 
-### 02:20–02:40 — Custom extraction configs
+### 02:00–02:25 — Custom extraction configs
 
 **On screen:** open **Manage… → Extraction configs**, see the built-in list, add a new
-config with two custom fields, save it, and watch it appear as provisioned.
-**Screenshot:** `08-config-manager.png`, `09-config-fields.png`, `10-config-provisioned.png`
+config with two custom fields, save it, and watch it appear at the top of the list,
+provisioned.
+**Screenshot:** `06-config-manager.png`, `07-config-fields.png`, `08-config-provisioned.png`
 
 > "Eleven document types ship out of the box, but real catalogues always have one more
 > form. Define the fields you need — here, an insurance card's policy number and insurer —
@@ -138,12 +127,13 @@ support a new document type.
 
 ---
 
-### 02:40–02:55 — The admin panel
+### 02:25–02:45 — The admin panel
 
 **On screen:** sign in to `/admin/` with the deployment's admin token; the overview shows
-KB health as connected; switch to the extraction-configs tab (the new custom config is
-listed, provisioned); switch to jobs and open the job just run.
-**Screenshot:** `11-admin-overview.png`, `12-admin-configs.png`, `13-admin-jobs.png`
+KB health as connected, the pipeline settings and usage; switch to the extraction-configs
+tab (the new custom config is listed, provisioned); switch to jobs and open the job just
+run, with its full stage timeline and raw JSON.
+**Screenshot:** `09-admin-overview.png`, `10-admin-configs.png`, `11-admin-jobs.png`
 
 > "Operators get their own view: live KB health, every extraction config and its
 > provisioning state, and every job with its full stage timeline — the same events the
@@ -154,10 +144,10 @@ and job visibility in one place, gated by a token.
 
 ---
 
-### 02:55–03:00 — The API docs, and the one-command try-it
+### 02:45–03:00 — The API docs, and the one-command try-it
 
 **On screen:** `/api/v1/docs` — the generated Redoc reference.
-**Screenshot:** `14-api-docs.png`
+**Screenshot:** `12-api-docs.png`
 
 > "Every route shown here is generated from one OpenAPI document and contract-tested
 > against it. To try all of this yourself: clone the repo, run `make install && make dev`,
@@ -170,11 +160,12 @@ and job visibility in one place, gated by a token.
 
 ## Optional: mp4 conversion
 
-The recording is a `.webm` (Playwright's default). If `ffmpeg` is available locally, it
-can be converted for players that prefer mp4:
+The recording is a `.webm` (Playwright's default), written under
+`showcase/out/<test name>/video.webm`. If `ffmpeg` is available locally, it can be
+converted for players that prefer mp4:
 
 ```bash
-ffmpeg -i showcase/out/*.webm -c:v libx264 -pix_fmt yuv420p -crf 20 showcase/out/showcase.mp4
+ffmpeg -i showcase/out/*/video.webm -c:v libx264 -pix_fmt yuv420p -crf 20 showcase/out/showcase.mp4
 ```
 
 This is not part of `make showcase` and is not required for the deliverable.

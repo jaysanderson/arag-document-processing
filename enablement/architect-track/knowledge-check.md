@@ -1,7 +1,9 @@
 # Architect track — knowledge check
 
 12 questions, architect-level: judgement and trade-offs, not syntax. Each answer points
-at where the fact lives in the codebase or the companion documents.
+at where the fact lives in the codebase or the companion documents
+([`WORKSHOP.md`](WORKSHOP.md), [`sizing-deployment.md`](sizing-deployment.md),
+[`design-review-checklist.md`](design-review-checklist.md)).
 
 ---
 

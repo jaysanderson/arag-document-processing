@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { openapi } from "../src/openapi.ts";
 import { createProduct, type Product } from "../src/server.ts";
-import { STAGES } from "../src/types.ts";
+import { DOC_TYPE_VALUES, STAGES } from "../src/types.ts";
 import { Logger, readEnv, testing } from "../vendor/arag-platform/src/index.ts";
 
 const ADMIN = "test-admin-token";
@@ -278,7 +278,7 @@ test("extraction configs: built-ins listed, custom created + provisioned + delet
   assert.deepEqual(testing.checkResponse(openapi, "/api/v1/extraction-configs", "get", 200, list.json), []);
   const builtins = (list.json as { items: Array<{ builtin: boolean; id: string; aragConfig: string }> })
     .items;
-  assert.equal(builtins.filter((c2) => c2.builtin).length, 11);
+  assert.equal(builtins.filter((c2) => c2.builtin).length, DOC_TYPE_VALUES.length);
   assert.ok(builtins.some((c2) => c2.id === "medical_claim"));
   assert.ok(builtins.some((c2) => c2.id === "preauthorisation"));
   assert.ok(builtins.some((c2) => c2.id === "bank_statement"));
@@ -344,7 +344,7 @@ test("the schema catalogue lists every document type and its fields", async () =
   assert.equal(res.status, 200);
   assert.deepEqual(testing.checkResponse(openapi, "/api/v1/schemas", "get", 200, res.json), []);
   const items = (res.json as { items: Array<{ docType: string; fields: unknown[] }> }).items;
-  assert.equal(items.length, 11);
+  assert.equal(items.length, DOC_TYPE_VALUES.length);
   const invoice = items.find((i) => i.docType === "invoice")!;
   assert.ok(invoice.fields.length >= 10);
 });
@@ -371,7 +371,12 @@ test("admin routes require the token; login sets an HttpOnly cookie", async () =
   const h = await c.get("/api/v1/admin/health", { authorization: `Bearer ${ADMIN}` });
   assert.equal(h.status, 200);
   assert.deepEqual(testing.checkResponse(openapi, "/api/v1/admin/health", "get", 200, h.json), []);
-  const health = h.json as { arag: { ok: boolean; mock: boolean }; generativeModel: string };
+  const health = h.json as {
+    arag: { ok: boolean; mock: boolean };
+    generativeModel: string;
+    documents: Record<string, number>;
+  };
+  assert.equal(typeof health.documents.degraded, "number");
   assert.equal(health.arag.ok, true);
   assert.equal(health.arag.mock, true);
   assert.ok(health.generativeModel.length > 0);
@@ -399,8 +404,27 @@ test("admin provision re-creates every ARAG search configuration", async () => {
   assert.deepEqual(testing.checkResponse(openapi, "/api/v1/admin/provision", "post", 200, res.json), []);
   const out = res.json as { ok: number; failed: number; items: Array<{ aragConfig: string; ok: boolean }> };
   assert.equal(out.failed, 0);
-  assert.ok(out.ok >= 11);
+  assert.ok(out.ok >= DOC_TYPE_VALUES.length);
   assert.ok(out.items.every((i) => i.aragConfig.startsWith("dip_")));
+
+  // The provisioned configurations are readable back from the Knowledge Box.
+  const listed = await c.get("/api/v1/admin/search-configurations", {
+    authorization: `Bearer ${ADMIN}`,
+  });
+  assert.equal(listed.status, 200);
+  assert.deepEqual(
+    testing.checkResponse(openapi, "/api/v1/admin/search-configurations", "get", 200, listed.json),
+    [],
+  );
+  const configs = listed.json as {
+    items: Array<{ name: string; kind: string; config: Record<string, unknown> }>;
+  };
+  assert.ok(configs.items.length >= DOC_TYPE_VALUES.length);
+  const invoiceCfg = configs.items.find((i) => i.name === "dip_invoice_extraction")!;
+  assert.equal(invoiceCfg.kind, "ask");
+  assert.equal((invoiceCfg.config.rag_strategies as Array<{ name: string }>)[0]!.name, "full_resource");
+  assert.ok(invoiceCfg.config.answer_json_schema, "the stored config carries the extraction schema");
+  assert.equal((await c.get("/api/v1/admin/search-configurations")).status, 401);
 });
 
 test("admin purge deletes old documents from the store and the KB", async () => {

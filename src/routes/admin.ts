@@ -120,6 +120,24 @@ export function registerAdminRoutes(app: App, deps: AdminDeps): void {
     },
   );
 
+  // Read-only window onto what the extraction agents actually run against. Without this
+  // the only way to inspect a provisioned configuration is the ARAG dashboard or a script.
+  app.get(
+    "/api/v1/admin/search-configurations",
+    async () => {
+      const all = await deps.arag.listSearchConfigurations();
+      const items: Array<{ name: string; kind: string; config: unknown }> = [];
+      const other: string[] = [];
+      for (const [name, cfg] of Object.entries(all)) {
+        if (name.startsWith("dip_")) items.push({ name, kind: cfg.kind, config: cfg.config });
+        else other.push(name);
+      }
+      items.sort((a, b) => a.name.localeCompare(b.name));
+      return { items, other: other.sort() };
+    },
+    { auth: "admin", operationId: "adminSearchConfigurations" },
+  );
+
   // Idempotent by design (STANDARDS §2): safe to re-run after a KB reset or a model change.
   app.post(
     "/api/v1/admin/provision",

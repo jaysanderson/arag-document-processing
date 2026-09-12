@@ -39,19 +39,27 @@ export interface ValidationIssue {
   message: string;
 }
 
-/** Supported document classes the classifier can assign. */
-export type DocType =
-  | "invoice"
-  | "receipt"
-  | "contract"
-  | "resume"
-  | "purchase_order"
-  | "medical_claim"
-  | "preauthorisation"
-  | "bank_statement"
-  | "form"
-  | "report"
-  | "generic";
+/**
+ * Supported document classes the classifier can assign — the single source of truth.
+ * `SCHEMAS` (services/schemas.ts) is typed `Record<DocType, ExtractionSchema>`, so a new
+ * entry here fails to compile until its schema exists; `openapi.ts` builds its enums from
+ * this same list, so the spec can never drift from the code.
+ */
+export const DOC_TYPE_VALUES = [
+  "invoice",
+  "receipt",
+  "contract",
+  "resume",
+  "purchase_order",
+  "medical_claim",
+  "preauthorisation",
+  "bank_statement",
+  "form",
+  "report",
+  "generic",
+] as const;
+
+export type DocType = (typeof DOC_TYPE_VALUES)[number];
 
 /** Lifecycle of a document in this service (not the ARAG resource status). */
 export type DocumentStatus = "pending" | "processing" | "ready" | "failed";

@@ -10,7 +10,7 @@
  * Schemas are intentionally flat and demo-legible. `field()` keeps them terse.
  */
 
-import type { DocType } from "../types.ts";
+import { DOC_TYPE_VALUES, type DocType } from "../types.ts";
 
 export interface ExtractionSchema {
   /** Schema name (also used as answer_json_schema.name). */
@@ -387,8 +387,8 @@ export function schemaFor(docType: DocType): ExtractionSchema {
   return SCHEMAS[docType] ?? SCHEMAS.generic;
 }
 
-/** All doc types the classifier may choose from. */
-export const DOC_TYPES: DocType[] = Object.keys(SCHEMAS) as DocType[];
+/** All doc types the classifier may choose from, in the canonical order. */
+export const DOC_TYPES: DocType[] = [...DOC_TYPE_VALUES];
 
 // ─── Custom configuration builder ─────────────────────────────────────────────
 

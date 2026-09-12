@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { DOC_TYPE_VALUES } from "../../src/types.ts";
 
 const TOKEN = "e2e-admin-token";
 
@@ -35,11 +36,15 @@ test("admin: login is required, then health, configs, jobs, logs and retention a
 
   // Extraction configs and their ARAG search configurations.
   await page.click('[data-tab="configs"]');
-  await expect(page.locator("#cfgTable tbody tr")).toHaveCount(11);
+  await expect(page.locator("#cfgTable tbody tr")).toHaveCount(DOC_TYPE_VALUES.length);
   await expect(page.locator("#cfgTable")).toContainText("dip_medical_claim_extraction");
   await page.click("#provision");
   await expect(page.locator("#provisionResult")).toContainText("provisioned", { timeout: 30_000 });
   await expect(page.locator("#provisionResult")).toContainText("0 failed");
+  // The stored ARAG search configurations are readable from the panel.
+  await page.click("#storedConfigs summary");
+  await expect(page.locator("#storedConfigsJson")).toContainText("full_resource", { timeout: 20_000 });
+  await expect(page.locator("#storedConfigsJson")).toContainText("answer_json_schema");
 
   // Jobs: create one through the public API so this spec does not depend on the demo spec.
   const upload = await page.request.post("/api/v1/documents?config=invoice", {

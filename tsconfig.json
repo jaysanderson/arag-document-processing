@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2023", "module": "NodeNext", "moduleResolution": "NodeNext", "lib": ["ES2023", "DOM"],
+    "target": "ES2023", "module": "NodeNext", "moduleResolution": "NodeNext", "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "strict": true, "noUncheckedIndexedAccess": true, "noImplicitOverride": true, "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true, "allowImportingTsExtensions": true, "noEmit": true, "resolveJsonModule": true,
     "esModuleInterop": true, "skipLibCheck": true, "forceConsistentCasingInFileNames": true, "types": ["node"]

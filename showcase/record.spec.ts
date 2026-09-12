@@ -19,8 +19,20 @@
  */
 import { expect, test } from "@playwright/test";
 
-const shot = (page: import("@playwright/test").Page, name: string) =>
-  page.screenshot({ path: `showcase/out/${name}.png`, fullPage: true });
+// The shared UI kit's `.arag-header` is `position: sticky`, which Chromium's full-page
+// screenshot can render twice (once in place, once composited again lower down) once the
+// page is taller than one viewport. Un-stick it for the instant of the capture only, so
+// the still images are correct; the live recording (which is not a stitched screenshot)
+// is unaffected either way.
+async function shot(page: import("@playwright/test").Page, name: string): Promise<void> {
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll<HTMLElement>(".arag-header")) el.style.position = "static";
+  });
+  await page.screenshot({ path: `showcase/out/${name}.png`, fullPage: true });
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll<HTMLElement>(".arag-header")) el.style.position = "";
+  });
+}
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("showcase walkthrough", async ({ page }) => {

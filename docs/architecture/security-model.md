@@ -9,7 +9,7 @@
 | Oversized uploads exhausting memory/disk/ARAG spend | Two independent caps: `MAX_BODY_BYTES` (hard HTTP body cap, platform) and `DIP_MAX_UPLOAD_BYTES` (25 MB, product) | `src/services/documents.ts`, env |
 | Unauthenticated access to operator functions (logs, config, purge, re-provision) | `ADMIN_TOKEN` required for every `/api/v1/admin/*` route and `/admin`; constant-time comparison | `vendor/arag-platform/src/http/app.ts` (`constantTimeEqual`), `src/routes/admin.ts` |
 | Unauthenticated/abusive use of the public API | Optional `API_KEYS`; when unset the API is intentionally open (demo-friendly), when set every `auth: "api"` route requires a key or a session cookie | `App.enforceAuth` |
-| An anonymous caller deleting/cancelling data just because `API_KEYS` was left empty | `requireWriter()` guards every destructive verb (`DELETE /documents/{id}`, `DELETE /jobs/{id}`, `DELETE /extraction-configs/{id}`) and always demands a credential — admin token, API key, **or** a same-origin session cookie from `POST /api/v1/session` — independent of whether `API_KEYS` is configured. Reads and uploads stay anonymous-friendly so `curl` quickstarts keep working with no setup. | `src/routes/guards.ts` (`requireWriter`) |
+| An anonymous caller deleting data, cancelling jobs, or provisioning a KB search configuration just because `API_KEYS` was left empty | `requireWriter()` guards every write that changes shared state (`POST /extraction-configs`, `DELETE /documents/{id}`, `DELETE /jobs/{id}`, `DELETE /extraction-configs/{id}`) and always demands a credential — admin token, API key, **or** a same-origin session cookie from `POST /api/v1/session` — independent of whether `API_KEYS` is configured. Reads and document uploads stay anonymous-friendly so `curl` quickstarts keep working with no setup. | `src/routes/guards.ts` (`requireWriter`) |
 | Brute-forcing the admin token or API keys | Constant-time comparison (`timingSafeEqual`) everywhere a secret is compared | `constantTimeEqual` |
 | CSV export formula injection — a document's LLM-extracted field value (attacker-controlled, since it comes from an uploaded document) starting with `=`, `+`, `-` or `@` could execute as a formula when the CSV export is opened in Excel/Sheets/LibreOffice | Any such cell is prefixed with `'` before quoting (a plain negative number is exempted so amounts still read as numbers) | `csvCell()`, `src/services/formats.ts` |
 | Denial of service via request flooding | Per-IP-or-API-key token-bucket rate limiting (`RATE_LIMIT_RPS`/`BURST`), `429` with `Retry-After` | `App.rateLimited` |
@@ -40,16 +40,19 @@ Three independent mechanisms, checked in this order by `App.authenticate()`:
    signing secret defaults to `ADMIN_TOKEN`, or a random per-boot value if that's unset too
    (in which case sessions and any admin-cookie state stop surviving a restart).
 
-**Destructive verbs are the exception to "open when `API_KEYS` is unset."**
-`DELETE /api/v1/documents/{id}`, `DELETE /api/v1/jobs/{id}` (cancel) and
-`DELETE /api/v1/extraction-configs/{id}` each call `requireWriter()`
-(`src/routes/guards.ts`), which demands *any one* of the three mechanisms above — even with
-`API_KEYS` empty. Deleting a document also deletes its Knowledge Box resource, so an
-anonymous caller must not be able to destroy data purely because API keys were never
-configured; the demo UI and every curl example in this documentation call
+**Writes that change shared state are the exception to "open when `API_KEYS` is unset."**
+`POST /api/v1/extraction-configs` (creates a config *and* provisions a real stored search
+configuration in the Knowledge Box), `DELETE /api/v1/documents/{id}`,
+`DELETE /api/v1/jobs/{id}` (cancel), and `DELETE /api/v1/extraction-configs/{id}` each call
+`requireWriter()` (`src/routes/guards.ts`), which demands *any one* of the three mechanisms
+above — even with `API_KEYS` empty. Deleting a document also deletes its Knowledge Box
+resource, and creating a config writes into the KB's own configuration, so an anonymous
+caller must not be able to destroy or pollute shared state purely because API keys were
+never configured; the demo UI and every curl example in this documentation call
 `POST /api/v1/session` first (or already hold a credential) precisely to satisfy this.
-Reads and uploads are unaffected — they stay anonymous-friendly so a `curl` quickstart
-needs no setup.
+Reads and document uploads are unaffected — they stay anonymous-friendly so a `curl`
+quickstart needs no setup (an upload only adds the caller's own document, and is
+rate-limited regardless).
 
 ## Upload allowlist and filename sanitisation
 

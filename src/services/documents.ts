@@ -292,11 +292,19 @@ export class DocumentsService {
     return { deleted, failed };
   }
 
-  /** Counts for the admin usage endpoint. */
+  /**
+   * Counts for the admin usage endpoint. `degraded` counts records that finished but lost
+   * a stage on the way — otherwise "ARAG was down for an hour" is invisible in a list of
+   * documents that all say `ready`.
+   */
   stats(): Record<string, number> {
     const all = this.col.list();
     const byStatus: Record<string, number> = { pending: 0, processing: 0, ready: 0, failed: 0 };
-    for (const d of all) byStatus[d.status] = (byStatus[d.status] ?? 0) + 1;
-    return { total: all.length, ...byStatus };
+    let degraded = 0;
+    for (const d of all) {
+      byStatus[d.status] = (byStatus[d.status] ?? 0) + 1;
+      if (d.meta.stageErrors?.length) degraded++;
+    }
+    return { total: all.length, ...byStatus, degraded };
   }
 }

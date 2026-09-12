@@ -243,8 +243,11 @@ async function loadDocuments() {
     $("#docs tbody").innerHTML =
       d.items
         .map((r) => {
-          const cls = r.status === "ready" ? "ok" : r.status === "failed" ? "danger" : "warn";
-          return `<tr data-id="${esc(r.id)}"><td>${esc(r.filename)}</td><td class="small">${esc(r.docType.replace(/_/g, " "))}</td><td><span class="arag-chip ${cls}">${esc(r.status)}</span></td><td class="num">${r.fields.length}</td><td><button class="arag-btn ghost sm del">Delete</button></td></tr>`;
+          const degraded = (r.meta?.stageErrors ?? []).length > 0;
+          const cls = r.status === "failed" ? "danger" : r.status === "ready" && !degraded ? "ok" : "warn";
+          const label = r.status === "ready" && degraded ? "ready · degraded" : r.status;
+          const title = degraded ? ` title="${esc((r.meta.stageErrors ?? []).join("; "))}"` : "";
+          return `<tr data-id="${esc(r.id)}"><td>${esc(r.filename)}</td><td class="small">${esc(r.docType.replace(/_/g, " "))}</td><td><span class="arag-chip ${cls}"${title}>${esc(label)}</span></td><td class="num">${r.fields.length}</td><td><button class="arag-btn ghost sm del">Delete</button></td></tr>`;
         })
         .join("") || '<tr><td colspan="5" class="muted">No documents yet — drop one above.</td></tr>';
     for (const row of $("#docs").querySelectorAll("tr[data-id]")) {

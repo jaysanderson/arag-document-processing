@@ -26,9 +26,12 @@ On the right:
   ARAG extract-strategy id, or a dash if none), **Generative model**, **Documents** (a
   running count by status). Next to the heading, a **"Test KB connection"** button re-runs
   the health check on demand rather than waiting for the panel's own refresh.
-- **"Usage"** — a raw JSON viewer showing live counters: total requests, ARAG calls, ARAG
-  errors, ARAG time spent, and job counts by status (queued/running/succeeded/failed/
-  cancelled).
+- **"Usage"** — six KPI tiles: **Requests** (with uptime), **ARAG calls** (with average
+  latency), **ARAG errors**, **Documents** (with ready/failed counts), **Jobs succeeded**
+  (with running/queued counts), and **Jobs failed** (with cancelled count) — refreshed with
+  the **Reload** button next to the heading. A collapsed **"Raw JSON"** disclosure below the
+  tiles shows the same data as the underlying `GET /api/v1/admin/usage` response, for
+  anyone who wants the exact numbers rather than the rounded tile view.
 
 ## Extraction configs
 
@@ -44,6 +47,11 @@ re-sends every config to ARAG as a search configuration — safe to click any ti
 idempotent), and exactly what you'd use after resetting a Knowledge Box or switching the
 generative model. Clicking it shows a live "Provisioning…" message, then a summary banner
 ("N provisioned, N failed") once done.
+
+Below the table, a collapsed **"Inspect the stored ARAG search configurations (model, RAG
+strategy, prompt, schema)"** disclosure — click to expand it and see the actual
+configuration objects as stored in the Knowledge Box, fetched live rather than reconstructed
+locally, so what you see here is guaranteed to match what the KB is really running.
 
 ## Jobs
 
@@ -82,7 +90,8 @@ everything. Below it, an **"Older than (days)"** number input (defaulting to 30)
 **Purge** button. Clicking Purge runs the deletion immediately and shows a result summary
 (how many were deleted, and any that failed) underneath. There is no scheduled/automatic
 purge — this is the only way documents are cleaned up in bulk, and it's a deliberate,
-manual, auditable action (every purge shows up in the Logs and Usage tabs).
+manual, auditable action (every purge shows up in the Logs tab and the Overview tab's
+Usage tiles).
 
 ## Related
 
