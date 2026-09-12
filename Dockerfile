@@ -1,4 +1,4 @@
-# __PRODUCT_TITLE__ — zero-dependency runtime image. No npm, no build step: Node runs the TypeScript sources.
+# Document Processing — zero-dependency runtime image. No npm, no build step: Node runs the TypeScript sources.
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production PORT=8080 DATA_DIR=/data
 WORKDIR /app

@@ -50,9 +50,7 @@ test("demo: sample → live pipeline → canonical record → exports → ask", 
   await expect(page.locator("#docs tbody .arag-chip").first()).toContainText("ready");
 });
 
-test("demo: image sample uses the visual path and a forced config skips classification", async ({
-  page,
-}) => {
+test("demo: image sample uses the visual path and a forced config skips classification", async ({ page }) => {
   test.setTimeout(90_000);
   await page.goto("/");
   await page.selectOption("#configSelect", "purchase_order");

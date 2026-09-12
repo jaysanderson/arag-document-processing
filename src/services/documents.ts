@@ -239,6 +239,9 @@ export class DocumentsService {
       {
         query: question,
         citations: true,
+        // `/ask` + resource_filters, never `/resource/{id}/ask`: the per-resource endpoint
+        // rejects `full_resource` upstream (HTTP 500/503). See services/agents.ts.
+        resource_filters: [rec.resourceId],
         rag_strategies: [{ name: "full_resource" }],
         prompt: {
           system:
@@ -249,7 +252,7 @@ export class DocumentsService {
         generative_model: this.d.generativeModel || undefined,
         reranker: this.d.env.arag.reranker,
       },
-      { resourceId: rec.resourceId, signal },
+      { signal },
     );
     return {
       answer: res.answerText,

@@ -14,6 +14,13 @@
  * one resource via `resourceId`). Temperature 0 keeps demos repeatable.
  *
  * All HTTP goes through the shared platform `AragClient`; nothing here knows URLs.
+ *
+ * Every call targets `POST /ask` with `resource_filters: [resourceId]` rather than the
+ * per-resource `POST /resource/{id}/ask` endpoint. Verified against the live KB: the
+ * per-resource endpoint returns HTTP 500/503 as soon as `rag_strategies:
+ * [{name:"full_resource"}]` is present, while `/ask` + `resource_filters` accepts the same
+ * payload and returns the structured answer. Since full_resource grounding is the whole
+ * point of the extraction agents, `resource_filters` is the only shape that works.
  */
 import type {
   AnswerJsonSchema,
@@ -159,6 +166,7 @@ export class Agents {
     const res = await this.d.arag.ask(
       {
         query: querySeed,
+        resource_filters: [resourceId],
         rag_strategies: [{ name: "full_resource" }],
         prompt: { system: GROUNDING },
         answer_json_schema: schema,
@@ -169,7 +177,7 @@ export class Agents {
         generative_model: this.d.generativeModel || undefined,
         reranker: this.d.reranker,
       },
-      { resourceId, signal },
+      { signal },
     );
     const o = obj(res.answerJson);
     const docType = (DOC_TYPES as string[]).includes(String(o.doc_type))
@@ -193,8 +201,14 @@ export class Agents {
     // answer_json_schema. Provision it on first use (idempotent).
     const configName = await this.ensureExtractionConfig(schema);
     const res = await this.d.arag.ask(
-      { query: querySeed, search_configuration: configName, temperature: 0, max_tokens: 1500 },
-      { resourceId, signal },
+      {
+        query: querySeed,
+        search_configuration: configName,
+        resource_filters: [resourceId],
+        temperature: 0,
+        max_tokens: 1500,
+      },
+      { signal },
     );
     const fields = fieldsFromSchema(obj(res.answerJson), schema);
     this.d.log.info("agent.extract", {
@@ -237,6 +251,7 @@ export class Agents {
     const res = await this.d.arag.ask(
       {
         query: querySeed,
+        resource_filters: [resourceId],
         rag_strategies: [{ name: "full_resource" }],
         prompt: { system: GROUNDING },
         answer_json_schema: schema,
@@ -247,7 +262,7 @@ export class Agents {
         generative_model: this.d.generativeModel || undefined,
         reranker: this.d.reranker,
       },
-      { resourceId, signal },
+      { signal },
     );
     const entities = entitiesFrom(obj(res.answerJson));
     this.d.log.info("agent.entities", { resourceId, count: entities.length, ms: res.timings.totalMs });
@@ -276,6 +291,7 @@ export class Agents {
     const res = await this.d.arag.ask(
       {
         query: querySeed,
+        resource_filters: [resourceId],
         rag_strategies: [{ name: "full_resource" }],
         prompt: { system: GROUNDING },
         answer_json_schema: schema,
@@ -284,7 +300,7 @@ export class Agents {
         generative_model: this.d.generativeModel || undefined,
         reranker: this.d.reranker,
       },
-      { resourceId, signal },
+      { signal },
     );
     const o = obj(res.answerJson);
     const summary = typeof o.summary === "string" ? o.summary.trim() : "";
