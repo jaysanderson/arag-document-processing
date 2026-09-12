@@ -12,6 +12,9 @@ test("demo: sample → live pipeline → canonical record → exports → ask", 
   await expect(page.locator("#exports")).toBeHidden();
   await expect(page.locator("#resultBody")).toBeHidden();
   await expect(page.locator("#configModal")).toBeHidden();
+  // The mock is labelled honestly: fixture-driven extraction will not match an image's pixels.
+  await expect(page.locator("#strategyChip")).toContainText("mock ARAG");
+  await expect(page.locator("#mockNote")).toContainText("deterministic fixtures");
   await expect(page.locator("#askBtn")).toBeDisabled();
 
   // The extraction-config selector is populated from /api/v1/extraction-configs.

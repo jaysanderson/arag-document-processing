@@ -463,6 +463,8 @@ async function loadStrategyHint() {
     if (r?.arag?.mock) {
       chip.textContent = "mock ARAG — deterministic fixtures";
       chip.className = "arag-chip warn";
+      // Be explicit rather than let someone think the model read the picture.
+      $("#mockNote").hidden = false;
     } else if (r?.visualExtraction) {
       chip.textContent = "visual extraction on for images & PDFs";
       chip.className = "arag-chip info";

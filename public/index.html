@@ -53,6 +53,13 @@
               <button class="arag-btn ghost sm" data-image="remittance-statement">🖼 Remittance</button>
             </div>
 
+            <p class="arag-help" id="mockNote" hidden>
+              Running against the <strong>mock Knowledge Box</strong>: extraction comes from
+              deterministic fixtures keyed by filename, so the fields will not match the pixels of
+              an image sample. Point <code>ARAG_KB_ID</code>/<code>ARAG_API_KEY</code> at a real
+              Knowledge Box to see genuine visual extraction.
+            </p>
+
             <div class="arag-row config-bar">
               <label class="arag-label" for="configSelect">Extraction config</label>
               <select id="configSelect" class="arag-select"></select>
