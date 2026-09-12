@@ -1158,6 +1158,13 @@ mark.dip-hit.is-active {
     display: none !important;
   }
 }
+@media (max-width: 900px) {
+  /* Let the columns keep their natural width and scroll the container, rather than
+     squeezing a two-line filename cell into 90 px. */
+  .dip-tablescroll .dip-datatable {
+    min-width: 780px;
+  }
+}
 @media (max-width: 600px) {
   .dip-pagehead__actions,
   .dip-emptystate__actions {
