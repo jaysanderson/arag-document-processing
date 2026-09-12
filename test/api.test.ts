@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { openapi } from "../src/openapi.ts";
 import { createProduct, type Product } from "../src/server.ts";
+import { STAGES } from "../src/types.ts";
 import { Logger, readEnv, testing } from "../vendor/arag-platform/src/index.ts";
 
 const ADMIN = "test-admin-token";
@@ -93,9 +94,9 @@ test("upload → job → canonical record with extracted fields, entities, summa
   const job = product.jobs.get(jobId)!;
   assert.equal(job.status, "succeeded");
   assert.equal(job.kind, "process-document");
-  const stages = new Set(job.events.map((e) => e.stage));
-  for (const s of ["process", "classify", "extract", "entities", "summary", "validate", "standardize"])
-    assert.ok(stages.has(s), `missing stage ${s}`);
+  // The job emits exactly the documented stage names, in order.
+  const stages = [...new Set(job.events.map((e) => e.stage))];
+  assert.deepEqual(stages, [...STAGES]);
 
   const got = await c.get(`/api/v1/documents/${id}`);
   assert.equal(got.status, 200);

@@ -113,9 +113,12 @@ export interface DocumentRecord extends StoredDoc {
   meta: RecordMeta;
 }
 
-/** Pipeline stages, in order. `JobEvent.stage` uses these names. */
+/**
+ * Pipeline stages, in order — these are the values `JobEvent.stage` can take.
+ * Upload is not a stage: it happens synchronously in `POST /api/v1/documents` before the
+ * job exists, so a caller that gets a 202 already knows the document reached the KB.
+ */
 export type StageName =
-  | "ingest"
   | "process"
   | "classify"
   | "extract"
@@ -124,8 +127,7 @@ export type StageName =
   | "validate"
   | "standardize";
 
-export const STAGES: StageName[] = [
-  "ingest",
+export const STAGES: readonly StageName[] = [
   "process",
   "classify",
   "extract",
@@ -133,4 +135,4 @@ export const STAGES: StageName[] = [
   "summary",
   "validate",
   "standardize",
-];
+] as const;
