@@ -15,7 +15,7 @@
 import type { AragClient, JobContext, Logger } from "../../vendor/arag-platform/src/index.ts";
 import type { DocumentRecord, StageName } from "../types.ts";
 import type { Agents } from "./agents.ts";
-import { buildQuerySeed, fieldsFromObject, validateNormalize } from "./agents.ts";
+import { buildQuerySeed, fieldsFromObject, groundingScore, validateNormalize } from "./agents.ts";
 import type { ConfigsService } from "./configs.ts";
 import { type ExtractionSchema, schemaFor } from "./schemas.ts";
 
@@ -179,20 +179,22 @@ export async function runPipeline(
   //    pass comes back empty — guards against residual indexing lag. Skipped when the
   //    DA-agent path already loaded persisted fields.
   if (!agentHandled) {
-    const fields = await stage(
+    const extracted = await stage(
       "extract",
       `Extracting ${schema.docType.replace(/_/g, " ")} fields with the visual LLM…`,
       async () => {
-        let f = await deps.agents.extractFields(resourceId, schema, seed, ctx.signal);
-        if (f.length === 0) {
+        const opts = { sourceText, signal: ctx.signal };
+        let out = await deps.agents.extractFields(resourceId, schema, seed, opts);
+        if (out.fields.length === 0) {
           await sleep(2500, ctx.signal);
-          f = await deps.agents.extractFields(resourceId, schema, seed, ctx.signal);
+          out = await deps.agents.extractFields(resourceId, schema, seed, opts);
         }
-        return f;
+        return out;
       },
       { soft: true, progress: 0.6 },
     );
-    record.fields = fields ?? [];
+    record.fields = extracted?.fields ?? [];
+    record.evidence = extracted?.evidence ?? [];
   }
 
   // 4. Entity enrichment then summarisation — run SEQUENTIALLY, not concurrently.
@@ -235,7 +237,18 @@ export async function runPipeline(
       const { fields: normalized, issues } = validateNormalize(record.fields, valSchema);
       record.fields = normalized;
       record.issues = issues;
-      return { issues: issues.length };
+      // The headline "can I trust this record?" number: how much of what we extracted is
+      // backed by text that really appears in the document.
+      record.meta.groundingScore = groundingScore(record.fields, record.evidence);
+      const unverified = record.evidence.filter((e) => e.verified === "unverified");
+      for (const e of unverified) {
+        issues.push({
+          field: e.field,
+          severity: "warning",
+          message: `Supporting quote was not found in the document text: "${e.quote.slice(0, 120)}"`,
+        });
+      }
+      return { issues: issues.length, groundingScore: record.meta.groundingScore };
     },
     { soft: true, progress: 0.95 },
   );

@@ -112,6 +112,8 @@
             <div id="resultBody" hidden class="arag-stack">
               <div class="arag-row">
                 <span class="arag-chip info" id="docTypeBadge">document</span>
+                <span class="arag-chip" id="groundingBadge" hidden
+                      title="Share of extracted fields backed by a quote found verbatim in the document"></span>
                 <span class="muted small" id="docConf"></span>
                 <span class="spacer"></span>
                 <span class="muted small" id="timings"></span>
@@ -123,7 +125,7 @@
 
               <h3>Extracted fields</h3>
               <table class="arag-table" id="fieldsTable">
-                <thead><tr><th>Field</th><th>Value</th><th class="conf-col">Confidence</th></tr></thead>
+                <thead><tr><th>Field</th><th>Value</th><th class="conf-col">Confidence</th><th class="ev-col">Evidence</th></tr></thead>
                 <tbody></tbody>
               </table>
 

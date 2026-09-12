@@ -80,6 +80,26 @@
   margin: 0;
   padding-left: 16px;
 }
+.arag-table .ev-col {
+  width: 100px;
+}
+.evidence {
+  margin-top: 4px;
+}
+.evidence > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  color: var(--arag-text-muted);
+}
+.evidence blockquote {
+  margin: 4px 0 0;
+  padding: 4px 8px;
+  border-left: 2px solid var(--arag-brand-500, #5ce500);
+  background: var(--arag-surface-2, #fafafa);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
 .f-raw {
   display: block;
   font-size: 0.72rem;

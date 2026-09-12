@@ -53,6 +53,20 @@ repeated verbatim as a comment next to the code that depends on it.
    full_resource grounding is the whole point of the extraction agents, `resource_filters`
    is the only usable shape. Discovered by `make smoke` and isolated with a live A/B probe.
 
+6. **Verified evidence, because citations are unavailable to structured extraction.** ARAG
+   rejects `citations` alongside `answer_json_schema` — the live KB answers HTTP 500 — so
+   the usual citation machinery cannot annotate an extraction. A schema-only `/ask` *does*
+   still return the retrieval item with paragraph ids and character offsets, and a model
+   asked for verbatim quotes *inside* the schema fills them accurately. So every extraction
+   schema carries an `evidence` array of `{field, quote}`, and the service then checks each
+   quote against the document's own extracted text: an exact substring is `exact` (offsets
+   recorded), a match after normalising case, whitespace and punctuation is `normalised`,
+   anything else is `unverified` and raises a validation warning. Verified quotes are
+   pinned to the retrieval paragraph that contains them. The share of extracted fields with
+   a verified quote is `meta.groundingScore`. A model that paraphrases instead of quoting
+   is therefore visible rather than silently trusted. (`src/services/agents.ts`
+   — `verifyEvidence`, `groundingScore`; `src/services/schemas.ts` — `EVIDENCE_PROPERTY`)
+
 Plus two robustness choices:
 
 - **Amounts are extracted as strings, then normalized to numbers.** Forcing the model to
@@ -65,8 +79,10 @@ Plus two robustness choices:
   The classifier, entity and summary agents all budget well above their expected output.
 
 A further constraint the client handles for you: ARAG rejects `citations` together with
-`answer_json_schema` (422). `AragClient.askStream` drops `citations` automatically when a
-schema is present, so extraction and Q&A can share one code path.
+`answer_json_schema`. `AragClient.askStream` drops `citations` automatically when a schema
+is present, so extraction and Q&A can share one code path — and the evidence contract
+(mechanic 6) gives structured extraction the grounding that citations would otherwise
+provide. Plain text `/ask` (`POST /api/v1/documents/{id}/ask`) still uses real citations.
 
 ## Stored search configurations
 
@@ -81,7 +97,12 @@ stored ARAG search configuration named `dip_<schema name>`:
     "reranker": "predict",
     "rag_strategies": [{ "name": "full_resource" }],
     "prompt": { "system": "You are a precise document-data extraction engine. …" },
-    "answer_json_schema": { "name": "invoice_extraction", "parameters": { … } }
+    "answer_json_schema": {
+      "name": "invoice_extraction",
+      "parameters": {
+        "properties": { "…": "…", "evidence": { "type": "array", "items": { "…": "…" } } }
+      }
+    }
   }
 }
 ```
@@ -93,7 +114,11 @@ service — so they can be inspected and tuned in the ARAG dashboard, and every 
 KB gets the same extraction contract.
 
 Provisioning is idempotent (`POST`, falling back to `PATCH` on 409) and runs at boot, on
-custom-config creation, and on demand via `POST /api/v1/admin/provision`.
+custom-config creation, and on demand via `POST /api/v1/admin/provision`. **Changing an
+extraction schema — including adding the `evidence` property — only takes effect after a
+re-provision**, because the schema lives in the stored configuration, not in the request.
+Those 409s are expected and are counted separately from real errors in
+`GET /api/v1/admin/usage` (`aragConflicts`), so a re-provision does not read as an outage.
 
 ## Data Augmentation agents
 

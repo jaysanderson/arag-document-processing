@@ -28,7 +28,14 @@ import type {
   Logger,
   SearchConfiguration,
 } from "../../vendor/arag-platform/src/index.ts";
-import type { DocType, Entity, ExtractedField, ValidationIssue } from "../types.ts";
+import type {
+  DocType,
+  Entity,
+  Evidence,
+  EvidenceVerification,
+  ExtractedField,
+  ValidationIssue,
+} from "../types.ts";
 import { normalizeCurrency, parseAmount, parseDateISO } from "./normalize.ts";
 import { DOC_TYPES, type ExtractionSchema, SCHEMAS, toAnswerJsonSchema } from "./schemas.ts";
 
@@ -194,8 +201,8 @@ export class Agents {
     resourceId: string,
     schema: ExtractionSchema,
     querySeed: string,
-    signal?: AbortSignal,
-  ): Promise<ExtractedField[]> {
+    opts: { sourceText?: string; signal?: AbortSignal } = {},
+  ): Promise<{ fields: ExtractedField[]; evidence: Evidence[] }> {
     // Extraction runs through the schema's STORED ARAG search configuration, which
     // owns the model (visual LLM), full_resource RAG strategy, reranker, prompt, and
     // answer_json_schema. Provision it on first use (idempotent).
@@ -208,16 +215,28 @@ export class Agents {
         temperature: 0,
         max_tokens: 1500,
       },
-      { signal },
+      { signal: opts.signal },
     );
-    const fields = fieldsFromSchema(obj(res.answerJson), schema);
+    const answer = obj(res.answerJson);
+    const fields = fieldsFromSchema(answer, schema);
+    // The model was asked for verbatim quotes as part of the schema; check them against
+    // the document rather than taking them on trust. `citations` cannot be used here —
+    // ARAG rejects it alongside `answer_json_schema` — but the retrieval item still
+    // arrives, so quotes can be pinned to a paragraph.
+    const evidence = verifyEvidence(answer.evidence, {
+      sourceText: opts.sourceText ?? "",
+      fieldKeys: new Set(fields.map((f) => f.key)),
+      paragraphs: paragraphsFromRetrieval(res.retrieval, resourceId),
+    });
     this.d.log.info("agent.extract", {
       resourceId,
       schema: schema.name,
       fields: fields.length,
+      evidence: evidence.length,
+      verified: evidence.filter((e) => e.verified !== "unverified").length,
       ms: res.timings.totalMs,
     });
-    return fields;
+    return { fields, evidence };
   }
 
   // ─── enrichEntities ─────────────────────────────────────────────────────────
@@ -426,6 +445,139 @@ export function fieldsFromSchema(
     });
   }
   return fields;
+}
+
+// ─── verified evidence ─────────────────────────────────────────────────────────
+
+/**
+ * Normalise a quote for a forgiving comparison: case, whitespace runs, the punctuation a
+ * model habitually "tidies" (curly quotes, en/em dashes, trailing full stops) and the
+ * spaces around it. Deliberately does NOT strip digits or letters — a quote that only
+ * matches after mangling the numbers is not evidence.
+ */
+export function normaliseQuote(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201a\u201b]/g, "'")
+    .replace(/[\u201c\u201d\u201e\u201f]/g, '"')
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/[.,;:!?()[\]{}"'`]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** One retrieval paragraph, reduced to what locating a quote needs. */
+export interface EvidenceParagraph {
+  id: string;
+  text?: string;
+  start?: number;
+  end?: number;
+}
+
+/**
+ * Pull the paragraphs out of an `/ask` retrieval item. ARAG keys them
+ * `<rid>/<type>/<field>/<start>-<end>`, which is what a client needs to highlight a span.
+ */
+export function paragraphsFromRetrieval(retrieval: unknown, resourceId?: string): EvidenceParagraph[] {
+  const resources = (retrieval as { resources?: Record<string, unknown> } | undefined)?.resources ?? {};
+  const out: EvidenceParagraph[] = [];
+  for (const [rid, resource] of Object.entries(resources)) {
+    if (resourceId && rid !== resourceId) continue;
+    const fields = (resource as { fields?: Record<string, unknown> }).fields ?? {};
+    for (const field of Object.values(fields)) {
+      const paragraphs = (field as { paragraphs?: Record<string, unknown> }).paragraphs ?? {};
+      for (const [id, paragraph] of Object.entries(paragraphs)) {
+        const p = paragraph as { text?: string; position?: { start?: number; end?: number } };
+        out.push({ id, text: p.text, start: p.position?.start, end: p.position?.end });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Check each quote the model returned against the document's own extracted text.
+ *
+ * This is the whole point of the evidence contract: a model asked for a verbatim quote
+ * will sometimes paraphrase, and a paraphrase is not proof. Three outcomes:
+ *
+ *   exact       the quote appears character-for-character (offsets recorded)
+ *   normalised  it appears once case, whitespace and punctuation are normalised
+ *   unverified  it does not appear at all — treat the field as ungrounded
+ *
+ * Quotes for fields that were not extracted are dropped: evidence for a value the record
+ * does not contain would be misleading.
+ */
+export function verifyEvidence(
+  raw: unknown,
+  opts: { sourceText: string; fieldKeys: Set<string>; paragraphs?: EvidenceParagraph[] },
+): Evidence[] {
+  if (!Array.isArray(raw)) return [];
+  const normalisedSource = normaliseQuote(opts.sourceText);
+  const seen = new Set<string>();
+  const out: Evidence[] = [];
+
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const field = String(e.field ?? "").trim();
+    const quote = String(e.quote ?? "").trim();
+    if (!field || !quote || !opts.fieldKeys.has(field)) continue;
+    const dedupe = `${field}:${quote}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+
+    let verified: EvidenceVerification = "unverified";
+    let start: number | undefined;
+    let end: number | undefined;
+    const exactAt = opts.sourceText.indexOf(quote);
+    if (exactAt !== -1) {
+      verified = "exact";
+      start = exactAt;
+      end = exactAt + quote.length;
+    } else if (normalisedSource.includes(normaliseQuote(quote))) {
+      verified = "normalised";
+    }
+
+    const item: Evidence = { field, quote, verified };
+    if (start !== undefined) {
+      item.start = start;
+      item.end = end;
+    }
+    const paragraphId = locateParagraph(quote, start, opts.paragraphs ?? []);
+    if (paragraphId) item.paragraphId = paragraphId;
+    out.push(item);
+  }
+  return out;
+}
+
+/** Find the retrieval paragraph a quote belongs to, by offset first and then by text. */
+function locateParagraph(
+  quote: string,
+  start: number | undefined,
+  paragraphs: EvidenceParagraph[],
+): string | undefined {
+  if (start !== undefined) {
+    const byOffset = paragraphs.find(
+      (p) => p.start !== undefined && p.end !== undefined && start >= p.start && start < p.end,
+    );
+    if (byOffset) return byOffset.id;
+  }
+  const needle = normaliseQuote(quote);
+  if (!needle) return undefined;
+  return paragraphs.find((p) => p.text && normaliseQuote(p.text).includes(needle))?.id;
+}
+
+/**
+ * Share of extracted fields backed by a verified quote (0..1), or undefined when there is
+ * nothing to score. Only `exact` and `normalised` count — `unverified` is the failure it
+ * is meant to expose.
+ */
+export function groundingScore(fields: ExtractedField[], evidence: Evidence[]): number | undefined {
+  if (fields.length === 0) return undefined;
+  const grounded = new Set(evidence.filter((e) => e.verified !== "unverified").map((e) => e.field));
+  const covered = fields.filter((f) => grounded.has(f.key)).length;
+  return Math.round((covered / fields.length) * 100) / 100;
 }
 
 /** Normalise the entity agent's structured answer into deduped entities. */

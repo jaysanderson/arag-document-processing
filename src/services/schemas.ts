@@ -28,9 +28,11 @@ export interface ExtractionSchema {
 }
 
 export interface JsonProp {
-  type: "string" | "number" | "boolean" | "array";
+  type: "string" | "number" | "boolean" | "array" | "object";
   description?: string;
-  items?: { type: "string" | "number" };
+  items?: { type: "string" | "number" } | Record<string, unknown>;
+  properties?: Record<string, unknown>;
+  required?: string[];
 }
 
 function s(description: string): JsonProp {
@@ -370,6 +372,32 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
   },
 };
 
+/**
+ * The evidence contract, appended to every extraction schema.
+ *
+ * ARAG rejects `answer_json_schema` together with `citations` (HTTP 500 on the live KB),
+ * so the usual citation machinery is unavailable to structured extraction. Asking the
+ * model for verbatim quotes *inside* the schema gets the same guarantee by another route:
+ * each quote is then checked against the document's own extracted text, so a value is
+ * only ever presented as grounded if its supporting text really appears in the document.
+ */
+const EVIDENCE_PROPERTY: JsonProp = {
+  type: "array",
+  description:
+    "One entry per field you filled in, quoting the document verbatim. `field` is the " +
+    "property name; `quote` is the exact text from the document that supports that " +
+    "value — copy it character for character, do not paraphrase, summarise or translate. " +
+    "Omit a field entirely rather than inventing a quote for it.",
+  items: {
+    type: "object",
+    properties: {
+      field: { type: "string", description: "The property name this quote supports." },
+      quote: { type: "string", description: "Verbatim text copied from the document." },
+    },
+    required: ["field", "quote"],
+  },
+};
+
 /** Build the answer_json_schema payload ARAG expects for a given schema. */
 export function toAnswerJsonSchema(schema: ExtractionSchema): unknown {
   return {
@@ -377,7 +405,7 @@ export function toAnswerJsonSchema(schema: ExtractionSchema): unknown {
     description: schema.description,
     parameters: {
       type: "object",
-      properties: schema.properties,
+      properties: { ...schema.properties, evidence: EVIDENCE_PROPERTY },
       required: schema.required,
     },
   };
@@ -405,7 +433,7 @@ export function schemaToFields(schema: ExtractionSchema): ConfigField[] {
   return Object.entries(schema.properties).map(([key, prop]) => ({
     key,
     label: schema.labels[key] ?? key,
-    type: prop.type === "boolean" ? "string" : prop.type,
+    type: prop.type === "string" || prop.type === "number" || prop.type === "array" ? prop.type : "string",
     description: prop.description,
     required: schema.required.includes(key),
   }));

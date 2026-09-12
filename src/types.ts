@@ -25,6 +25,27 @@ export interface ExtractedField {
   page?: number;
 }
 
+/** How a quote was matched against the document's own extracted text. */
+export type EvidenceVerification = "exact" | "normalised" | "unverified";
+
+/**
+ * A verbatim quote from the document that supports one extracted field's value, checked
+ * against the extracted text rather than taken on trust. `verified` says how it matched;
+ * `paragraphId`/`start`/`end` locate it so a UI can highlight the source.
+ */
+export interface Evidence {
+  /** The `ExtractedField.key` this quote supports. */
+  field: string;
+  /** The quote exactly as the model returned it. */
+  quote: string;
+  verified: EvidenceVerification;
+  /** Retrieval paragraph the quote falls in, when it could be located. */
+  paragraphId?: string;
+  /** Character offsets into the document's extracted text (exact matches only). */
+  start?: number;
+  end?: number;
+}
+
 /** A named entity surfaced by the entity-enrichment agent. */
 export interface Entity {
   text: string;
@@ -84,6 +105,12 @@ export interface RecordMeta {
   /** ARAG extract strategy applied at ingestion (images/PDFs only). */
   extractStrategy?: string;
   /**
+   * Share of extracted fields that carry a quote verified against the document text
+   * (0..1). `undefined` when nothing was extracted. This is the headline "can I trust
+   * this record?" number.
+   */
+  groundingScore?: number;
+  /**
    * Stages that failed during the run, as `"<stage>: <message>"`. Present only when at
    * least one stage failed: the pipeline degrades gracefully, so a `ready` record can
    * still be missing the output of a stage that errored.
@@ -121,6 +148,8 @@ export interface DocumentRecord extends StoredDoc {
   tags: string[];
   /** Validation / normalisation findings. */
   issues: ValidationIssue[];
+  /** Verbatim quotes supporting the extracted fields, each checked against the document. */
+  evidence: Evidence[];
   /** Error detail when `status === "failed"`. */
   error?: string;
   /** Pipeline + source metadata. */

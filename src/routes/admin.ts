@@ -59,6 +59,7 @@ export function registerAdminRoutes(app: App, deps: AdminDeps): void {
         extractStrategy: deps.extractStrategy || null,
         generativeModel: deps.generativeModel || arag.generativeModel || "KB default",
         documents: deps.documents.stats(),
+        groundingScore: deps.documents.averageGroundingScore(),
       };
     },
     { auth: "admin", operationId: "adminHealth" },
@@ -93,6 +94,7 @@ export function registerAdminRoutes(app: App, deps: AdminDeps): void {
       ...deps.usage,
       uptimeSec: Math.round((Date.now() - deps.usage.startedAt) / 1000),
       documents: deps.documents.stats(),
+      groundingScore: deps.documents.averageGroundingScore(),
       jobs: {
         queued: deps.jobs.count({ status: "queued" }),
         running: deps.jobs.count({ status: "running" }),

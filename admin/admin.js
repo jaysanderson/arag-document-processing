@@ -33,7 +33,8 @@ async function check() {
   }
 }
 
-$("#signin").addEventListener("click", async () => {
+$("#loginForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
   try {
     await api("/api/v1/admin/login", { method: "POST", json: { token: $("#token").value } });
     $("#token").value = "";
@@ -45,8 +46,6 @@ $("#signin").addEventListener("click", async () => {
     $("#loginError").textContent = e.message;
   }
 });
-$("#token").addEventListener("keydown", (e) => e.key === "Enter" && $("#signin").click());
-
 for (const t of document.querySelectorAll('[role="tab"]')) {
   t.addEventListener("click", () => {
     for (const x of document.querySelectorAll('[role="tab"]'))
@@ -82,11 +81,22 @@ async function loadUsage() {
     $("#usageKpis").innerHTML = [
       kpi("Requests", u.requests ?? 0, `${mins} min uptime`),
       kpi("ARAG calls", u.aragCalls ?? 0, avgArag),
-      kpi("ARAG errors", u.aragErrors ?? 0, u.aragErrors ? "check the logs" : "none"),
+      kpi(
+        "ARAG errors",
+        u.aragErrors ?? 0,
+        u.aragErrors
+          ? "network, timeout or 5xx — check the logs"
+          : `none · ${u.aragConflicts ?? 0} expected provisioning conflicts`,
+      ),
+      kpi(
+        "Grounding",
+        typeof u.groundingScore === "number" ? `${Math.round(u.groundingScore * 100)}%` : "—",
+        "average verified-quote coverage",
+      ),
       kpi(
         "Documents",
         u.documents?.total ?? 0,
-        `${u.documents?.ready ?? 0} ready · ${u.documents?.failed ?? 0} failed`,
+        `${u.documents?.ready ?? 0} ready · ${u.documents?.degraded ?? 0} degraded · ${u.documents?.failed ?? 0} failed`,
       ),
       kpi(
         "Jobs succeeded",

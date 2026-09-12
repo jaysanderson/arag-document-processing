@@ -16,8 +16,9 @@ test("admin: login is required, then health, configs, jobs, logs and retention a
   await page.click("#signin");
   await expect(page.locator("#loginError")).toBeVisible();
 
+  // Enter must submit: a lone password input does not do this reliably without a form.
   await page.fill("#token", TOKEN);
-  await page.click("#signin");
+  await page.press("#token", "Enter");
   await expect(page.locator("#panel")).toBeVisible();
   // Only the selected tab's section is on screen.
   await expect(page.locator('[data-panel="overview"]')).toBeVisible();
@@ -29,8 +30,11 @@ test("admin: login is required, then health, configs, jobs, logs and retention a
   await expect(page.locator("arag-health")).toContainText("connected", { timeout: 20_000 });
   await expect(page.locator("#model")).not.toBeEmpty();
   await expect(page.locator("#extractStrategy")).not.toBeEmpty();
-  await expect(page.locator("#usageKpis .arag-kpi")).toHaveCount(6);
+  await expect(page.locator("#usageKpis .arag-kpi")).toHaveCount(7);
   await expect(page.locator("#usageKpis")).toContainText("ARAG calls");
+  // Expected provisioning conflicts must not read as failures.
+  await expect(page.locator("#usageKpis")).toContainText("expected provisioning conflicts");
+  await expect(page.locator("#usageKpis")).toContainText("Grounding");
   await page.click("#testKb");
   await expect(page.locator(".arag-toast")).toContainText("KB connected");
 

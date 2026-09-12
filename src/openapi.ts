@@ -54,6 +54,32 @@ const Entity = {
   },
 };
 
+const Evidence = {
+  type: "object",
+  description:
+    "A verbatim quote from the document supporting one extracted field, checked against " +
+    "the document's own extracted text rather than taken on trust.",
+  required: ["field", "quote", "verified"],
+  properties: {
+    field: { type: "string", description: "The `ExtractedField.key` this quote supports" },
+    quote: { type: "string", description: "The quote exactly as the model returned it" },
+    verified: {
+      type: "string",
+      enum: ["exact", "normalised", "unverified"],
+      description:
+        "`exact`: the quote appears character-for-character in the document. `normalised`: " +
+        "it appears once case, whitespace and punctuation are normalised. `unverified`: it " +
+        "does not appear — treat the field as ungrounded.",
+    },
+    paragraphId: {
+      type: "string",
+      description: "ARAG retrieval paragraph containing the quote (`<rid>/<type>/<field>/<start>-<end>`)",
+    },
+    start: { type: "integer", description: "Offset into the extracted text (exact matches only)" },
+    end: { type: "integer" },
+  },
+};
+
 const ValidationIssue = {
   type: "object",
   required: ["field", "severity", "message"],
@@ -79,6 +105,7 @@ const Document = {
     "entities",
     "tags",
     "issues",
+    "evidence",
     "meta",
     "createdAt",
     "updatedAt",
@@ -98,6 +125,7 @@ const Document = {
     summary: { type: "string" },
     tags: { type: "array", items: { type: "string" } },
     issues: { type: "array", items: { $ref: "#/components/schemas/ValidationIssue" } },
+    evidence: { type: "array", items: { $ref: "#/components/schemas/Evidence" } },
     error: { type: "string" },
     meta: {
       type: "object",
@@ -112,6 +140,14 @@ const Document = {
         forced: { type: "boolean" },
         searchConfiguration: { type: "string" },
         extractStrategy: { type: "string" },
+        groundingScore: {
+          type: "number",
+          minimum: 0,
+          maximum: 1,
+          description:
+            "Share of extracted fields backed by a verified quote. Absent when nothing was " +
+            "extracted. The headline signal for whether this record can be trusted unreviewed.",
+        },
         stageErrors: {
           type: "array",
           items: { type: "string" },
@@ -261,6 +297,7 @@ export const openapi = buildOpenApi({
   schemas: {
     ExtractedField,
     Entity,
+    Evidence,
     ValidationIssue,
     Document,
     DocumentPage: pageSchema("#/components/schemas/Document"),
@@ -614,6 +651,10 @@ export const openapi = buildOpenApi({
               arag: { type: "object", additionalProperties: true },
               extractStrategy: { type: ["string", "null"] },
               generativeModel: { type: "string" },
+              groundingScore: {
+                type: ["number", "null"],
+                description: "Mean grounding score across stored records; null when none has one.",
+              },
               documents: {
                 type: "object",
                 additionalProperties: { type: "number" },

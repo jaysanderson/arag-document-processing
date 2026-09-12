@@ -66,6 +66,23 @@ export function toXml(rec: DocumentRecord): string {
   }
   lines.push("  </fields>");
 
+  if (rec.evidence.length) {
+    lines.push("  <evidence>");
+    for (const e of rec.evidence) {
+      const attrs = [
+        `field="${escapeXml(e.field)}"`,
+        `verified="${escapeXml(e.verified)}"`,
+        e.paragraphId ? `paragraphId="${escapeXml(e.paragraphId)}"` : "",
+        e.start !== undefined ? `start="${e.start}"` : "",
+        e.end !== undefined ? `end="${e.end}"` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      lines.push(`    <quote ${attrs}>${escapeXml(e.quote)}</quote>`);
+    }
+    lines.push("  </evidence>");
+  }
+
   if (rec.entities.length) {
     lines.push("  <entities>");
     for (const e of rec.entities) {
@@ -94,6 +111,8 @@ export function toXml(rec: DocumentRecord): string {
   lines.push(`    <processedAt>${escapeXml(rec.meta.processedAt)}</processedAt>`);
   lines.push(`    <schema>${escapeXml(rec.meta.schema)}</schema>`);
   lines.push(`    <model>${escapeXml(rec.meta.model)}</model>`);
+  if (rec.meta.groundingScore !== undefined)
+    lines.push(`    <groundingScore>${rec.meta.groundingScore}</groundingScore>`);
   lines.push("  </meta>");
   lines.push("</document>");
   return lines.join("\n");
@@ -130,7 +149,19 @@ function flatValue(value: ExtractedField["value"]): string {
  * Columns: document_id, filename, doc_type, field_key, field_label, value, confidence
  */
 export function toCsv(rec: DocumentRecord): string {
-  const header = ["document_id", "filename", "doc_type", "field_key", "field_label", "value", "confidence"];
+  const header = [
+    "document_id",
+    "filename",
+    "doc_type",
+    "field_key",
+    "field_label",
+    "value",
+    "confidence",
+    "evidence_quote",
+    "evidence_verified",
+  ];
+  // One evidence entry per field: the row a reviewer reads is the row that carries its proof.
+  const byField = new Map(rec.evidence.map((e) => [e.field, e]));
   const rows: string[] = [header.map(csvCell).join(",")];
   for (const f of rec.fields) {
     rows.push(
@@ -142,6 +173,8 @@ export function toCsv(rec: DocumentRecord): string {
         f.label,
         flatValue(f.value),
         f.confidence !== undefined ? f.confidence.toFixed(2) : "",
+        byField.get(f.key)?.quote ?? "",
+        byField.get(f.key)?.verified ?? "",
       ]
         .map((c) => csvCell(String(c)))
         .join(","),

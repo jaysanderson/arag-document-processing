@@ -26,12 +26,23 @@ import { registerJobRoutes } from "./routes/jobs.ts";
 import { Agents } from "./services/agents.ts";
 import { ConfigsService } from "./services/configs.ts";
 import { DocumentsService } from "./services/documents.ts";
+import { mockEvidenceHook } from "./services/mock-evidence.ts";
 
 export interface Usage {
   startedAt: number;
   requests: number;
   aragCalls: number;
+  /** Calls that genuinely failed: network, timeout, or a 5xx from ARAG. */
   aragErrors: number;
+  /**
+   * Expected 409s from idempotent provisioning. `putSearchConfiguration` POSTs first and
+   * falls back to PATCH when the configuration already exists, so a re-provision of the
+   * eleven built-ins reports eleven conflicts — which read as eleven failures on an
+   * operator's dashboard if they are not counted apart.
+   */
+  aragConflicts: number;
+  /** Other 4xx (a missing resource, a rejected payload) — worth seeing, not an outage. */
+  aragClientErrors: number;
   aragMs: number;
 }
 
@@ -80,7 +91,15 @@ export function readProductEnv(src: NodeJS.ProcessEnv = process.env): {
 
 export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}): Promise<Product> {
   const log = opts.log ?? defaultLog;
-  const usage: Usage = { startedAt: Date.now(), requests: 0, aragCalls: 0, aragErrors: 0, aragMs: 0 };
+  const usage: Usage = {
+    startedAt: Date.now(),
+    requests: 0,
+    aragCalls: 0,
+    aragErrors: 0,
+    aragConflicts: 0,
+    aragClientErrors: 0,
+    aragMs: 0,
+  };
   const product = readProductEnv();
 
   // ARAG: live client, or the in-process mock when ARAG_MOCK=1 (no credentials needed).
@@ -92,7 +111,10 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     region: env.arag.region,
   };
   if (env.arag.mock) {
-    mock = await startMockArag({ log, ...opts.mock });
+    // The mock has no notion of our `evidence` contract; the hook teaches it to quote the
+    // fixture text it extracted from, so the demo and the tests exercise real verification
+    // instead of a grounding score of zero. Vendored files are never edited.
+    mock = await startMockArag({ log, answerHook: mockEvidenceHook, ...opts.mock });
     aragOpts = { kbId: mock.kbId, apiKey: mock.apiKey, baseUrl: mock.url, region: env.arag.region };
     log.warn("arag.mock", { url: mock.url });
   }
@@ -102,7 +124,10 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     onRequest: (i) => {
       usage.aragCalls++;
       usage.aragMs += i.ms;
-      if (i.error || (i.status ?? 0) >= 400) usage.aragErrors++;
+      const status = i.status ?? 0;
+      if (i.error || status >= 500) usage.aragErrors++;
+      else if (status === 409 && i.path.includes("/search_configurations/")) usage.aragConflicts++;
+      else if (status >= 400) usage.aragClientErrors++;
       log.debug("arag.request", {
         method: i.method,
         path: i.path,

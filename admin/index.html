@@ -18,10 +18,17 @@
         Enter the <code>ADMIN_TOKEN</code> configured for this deployment. It is exchanged for an
         HttpOnly cookie and never stored in the page.
       </p>
-      <div class="arag-row">
-        <input id="token" class="arag-input" type="password" placeholder="admin token" autocomplete="off" />
-        <button id="signin" class="arag-btn">Sign in</button>
-      </div>
+      <!-- A real form: a lone password input does not submit on Enter in every browser
+           (Chromium even warns "Password field is not contained in a form"), and the
+           owner hit exactly that. `submit` covers Enter and the button alike. -->
+      <form id="loginForm" autocomplete="off">
+        <div class="arag-row">
+          <label class="sr-only" for="token">Admin token</label>
+          <input id="token" name="token" class="arag-input" type="password"
+                 placeholder="admin token" autocomplete="current-password" />
+          <button id="signin" class="arag-btn" type="submit">Sign in</button>
+        </div>
+      </form>
       <p id="loginError" class="arag-alert error" hidden></p>
     </div>
 

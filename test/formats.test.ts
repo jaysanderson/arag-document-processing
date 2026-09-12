@@ -25,6 +25,10 @@ function sample(): DocumentRecord {
         confidence: 0.85,
       },
     ],
+    evidence: [
+      { field: "vendor_name", quote: "ACME ROBOTICS <Pty> & Co", verified: "exact", start: 0, end: 24 },
+      { field: "total", quote: "TOTAL DUE: $105,600", verified: "normalised", paragraphId: "r/f/file/0-19" },
+    ],
     entities: [{ text: "Acme Robotics", type: "ORG" }],
     summary: "An invoice from Acme.",
     tags: ["invoice", "hardware"],
@@ -60,7 +64,10 @@ test("toXml escapes special characters and is well-formed-ish", () => {
 test("toCsv emits one row per field with a header and quotes risky cells", () => {
   const csv = toCsv(sample());
   const lines = csv.split("\n");
-  assert.equal(lines[0], "document_id,filename,doc_type,field_key,field_label,value,confidence");
+  assert.equal(
+    lines[0],
+    "document_id,filename,doc_type,field_key,field_label,value,confidence,evidence_quote,evidence_verified",
+  );
   assert.equal(lines.length, 1 + 3); // header + 3 fields
   // comma-containing array value must be quoted
   const itemsRow = lines.find((l) => l.startsWith("abc123,invoice.pdf,invoice,line_items"))!;
@@ -90,10 +97,38 @@ test("csvCell neutralises spreadsheet formula injection but leaves numbers alone
   assert.equal(csvCell("ACME ROBOTICS"), "ACME ROBOTICS");
 });
 
-test("toCsv escapes a malicious extracted value", () => {
+test("toCsv escapes a malicious extracted value and a malicious quote", () => {
   const rec = sample();
   rec.fields = [{ key: "vendor_name", label: "Vendor", value: "=cmd|'/c calc'!A1", confidence: 0.9 }];
+  rec.evidence = [];
   const row = toCsv(rec).split("\n")[1]!;
   // No comma/quote/newline in the value, so no RFC 4180 quoting — just the formula guard.
-  assert.ok(row.endsWith("Vendor,'=cmd|'/c calc'!A1,0.90"), row);
+  assert.ok(row.endsWith("Vendor,'=cmd|'/c calc'!A1,0.90,,"), row);
+
+  // The evidence quote is attacker-controlled document text too, so it gets the same guard.
+  rec.evidence = [{ field: "vendor_name", quote: '=HYPERLINK("http://evil")', verified: "exact" }];
+  const withQuote = toCsv(rec).split("\n")[1]!;
+  assert.ok(withQuote.includes(`"'=HYPERLINK(""http://evil"")"`), withQuote);
+});
+
+test("toXml includes verified evidence and the grounding score", () => {
+  const rec = sample();
+  rec.meta.groundingScore = 0.67;
+  const xml = toXml(rec);
+  assert.match(xml, /<evidence>/);
+  assert.match(xml, /verified="exact"/);
+  assert.match(xml, /paragraphId="r\/f\/file\/0-19"/);
+  // The quote's own angle brackets must be escaped, not emitted raw.
+  assert.match(xml, /ACME ROBOTICS &lt;Pty&gt; &amp; Co<\/quote>/);
+  assert.match(xml, /<groundingScore>0.67<\/groundingScore>/);
+});
+
+test("toCsv carries each field's quote and verification alongside its value", () => {
+  const rows = toCsv(sample()).split("\n");
+  assert.match(rows[0]!, /evidence_quote,evidence_verified$/);
+  const vendor = rows.find((r) => r.includes("vendor_name"))!;
+  assert.ok(vendor.endsWith("ACME ROBOTICS <Pty> & Co,exact"), vendor);
+  // A field with no evidence still produces a well-formed row with empty columns.
+  const lineItems = rows.find((r) => r.includes("line_items"))!;
+  assert.ok(lineItems.endsWith(",,"), lineItems);
 });

@@ -158,20 +158,47 @@ async function showRecord(id) {
     )
     .join("");
 
+  // Grounding: what share of the extracted fields carry a quote we found in the document.
+  const grounding = rec.meta?.groundingScore;
+  const gb = $("#groundingBadge");
+  if (typeof grounding === "number") {
+    const pct = Math.round(grounding * 100);
+    gb.textContent = `${pct}% grounded`;
+    gb.className = `arag-chip ${pct >= 80 ? "ok" : pct >= 50 ? "warn" : "danger"}`;
+    gb.hidden = false;
+  } else {
+    gb.hidden = true;
+  }
+
+  const evidenceByField = new Map((rec.evidence ?? []).map((e) => [e.field, e]));
   $("#fieldsTable").querySelector("tbody").innerHTML =
     (rec.fields ?? [])
       .map((f) => {
         const conf = f.confidence !== undefined ? Math.round(f.confidence * 100) : null;
         const bar =
           conf === null ? "" : `<div class="f-bar" title="${conf}%"><i style="width:${conf}%"></i></div>`;
-        return `<tr><td>${esc(f.label)}</td><td class="f-value">${valueHtml(f)}</td><td>${bar}</td></tr>`;
+        return `<tr><td>${esc(f.label)}</td><td class="f-value">${valueHtml(f)}${evidenceHtml(evidenceByField.get(f.key))}</td><td>${bar}</td><td>${evidenceBadge(evidenceByField.get(f.key))}</td></tr>`;
       })
-      .join("") || `<tr><td colspan="3" class="muted">No fields extracted.</td></tr>`;
+      .join("") || `<tr><td colspan="4" class="muted">No fields extracted.</td></tr>`;
 
   $("#entities").innerHTML =
     (rec.entities ?? [])
       .map((e) => `<span class="ent"><b>${esc(e.type)}</b>${esc(e.text)}</span>`)
       .join("") || '<span class="subtle">No entities surfaced.</span>';
+}
+
+/** A one-word badge saying whether this field's quote was found in the document. */
+function evidenceBadge(evidence) {
+  if (!evidence) return '<span class="subtle small">—</span>';
+  const cls = { exact: "ok", normalised: "warn", unverified: "danger" }[evidence.verified] ?? "neutral";
+  const label = { exact: "verified", normalised: "near match", unverified: "not found" }[evidence.verified];
+  return `<span class="arag-chip ${cls}" title="${esc(evidence.quote)}">${esc(label)}</span>`;
+}
+
+/** The quote itself, collapsed behind a toggle so the table stays scannable. */
+function evidenceHtml(evidence) {
+  if (!evidence) return "";
+  return `<details class="evidence"><summary>evidence</summary><blockquote>${esc(evidence.quote)}</blockquote></details>`;
 }
 
 // ── exports ─────────────────────────────────────────────────────────────────

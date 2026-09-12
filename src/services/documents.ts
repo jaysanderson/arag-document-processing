@@ -170,6 +170,7 @@ export class DocumentsService {
       entities: [],
       tags: [],
       issues: [],
+      evidence: [],
       meta: {
         processedAt: new Date().toISOString(),
         schema: "generic_extraction",
@@ -306,5 +307,20 @@ export class DocumentsService {
       if (d.meta.stageErrors?.length) degraded++;
     }
     return { total: all.length, ...byStatus, degraded };
+  }
+
+  /**
+   * Mean grounding score across records that have one, or null when none do. Answers
+   * "how much of what this service extracted today is backed by the document?" in a
+   * single number an operator can watch.
+   */
+  averageGroundingScore(): number | null {
+    const scores = this.col
+      .list()
+      .map((d) => d.meta.groundingScore)
+      .filter((s): s is number => typeof s === "number");
+    if (scores.length === 0) return null;
+    const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+    return Math.round(mean * 100) / 100;
   }
 }

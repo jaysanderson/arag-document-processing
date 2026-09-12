@@ -115,11 +115,13 @@ test("upload → job → canonical record with extracted fields, entities, summa
     fields: Array<{ key: string; value: unknown }>;
     entities: unknown[];
     summary?: string;
+    evidence: Array<{ field: string; quote: string; verified: string; paragraphId?: string }>;
     meta: {
       schema: string;
       searchConfiguration?: string;
       sourceChars?: number;
       durationsMs: Record<string, number>;
+      groundingScore?: number;
     };
   };
   assert.equal(rec.status, "ready");
@@ -137,6 +139,17 @@ test("upload → job → canonical record with extracted fields, entities, summa
   assert.equal(byKey.invoice_date, "2026-06-15"); // 15/06/2026 → ISO
   assert.ok(rec.entities.length > 0);
   assert.ok((rec.summary ?? "").length > 0);
+
+  // Verified evidence: every extracted field carries a quote that really is in the document.
+  assert.equal(rec.evidence.length, rec.fields.length);
+  assert.ok(
+    rec.evidence.every((e) => e.verified === "exact"),
+    JSON.stringify(rec.evidence.slice(0, 2)),
+  );
+  assert.ok(rec.evidence.every((e) => typeof e.paragraphId === "string"));
+  assert.equal(rec.meta.groundingScore, 1);
+  const vendorEvidence = rec.evidence.find((e) => e.field === "vendor_name")!;
+  assert.match(vendorEvidence.quote, /ACME ROBOTICS/);
 });
 
 test("SSE job events replay the pipeline for a finished job", async () => {
@@ -190,10 +203,14 @@ test("exports serialise the record as JSON, XML and CSV with a download filename
   assert.match(xml.text, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
   assert.match(xml.text, /<document id="/);
   assert.match(xml.text, /<fields>/);
+  assert.match(xml.text, /<evidence>/);
+  assert.match(xml.text, /<groundingScore>/);
 
   const csv = await c.get(`/api/v1/documents/${id}/export?format=csv`);
   assert.match(csv.headers.get("content-type") ?? "", /text\/csv/);
   assert.match(csv.text.split("\n")[0]!, /^document_id,filename,doc_type,field_key/);
+  assert.match(csv.text.split("\n")[0]!, /evidence_quote,evidence_verified$/);
+  assert.match(csv.text, /,exact$/m, "each field row carries its verified quote");
   assert.ok(csv.text.split("\n").length > 2);
 
   assert.equal((await c.get(`/api/v1/documents/${id}/export?format=yaml`)).status, 400);

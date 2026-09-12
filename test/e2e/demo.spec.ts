@@ -33,6 +33,12 @@ test("demo: sample → live pipeline → canonical record → exports → ask", 
   await expect(page.locator("#fieldsTable")).toContainText("INV-2026-0042");
   await expect(page.locator("#fieldsTable .f-bar").first()).toBeVisible();
   await expect(page.locator("#entities .ent").first()).toBeVisible();
+
+  // Verified evidence: a grounding score next to the badge, and a quote per field.
+  await expect(page.locator("#groundingBadge")).toContainText("100% grounded");
+  await expect(page.locator("#fieldsTable tbody tr:first-child .arag-chip")).toContainText("verified");
+  await page.click("#fieldsTable tbody tr:first-child .evidence summary");
+  await expect(page.locator("#fieldsTable tbody tr:first-child blockquote")).toContainText("ACME ROBOTICS");
   await expect(page.locator("#timeline .arag-chip")).toContainText("succeeded");
 
   // Every stage reported.
