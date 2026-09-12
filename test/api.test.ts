@@ -514,3 +514,235 @@ test("errors are RFC 9457 problem documents with a request id", async () => {
   assert.ok(problem.requestId.length > 0);
   assert.equal(problem.instance, "/api/v1/documents/does-not-exist");
 });
+
+// ─── list search, filters, sorting ────────────────────────────────────────────
+
+test("the documents list searches, filters and sorts", async () => {
+  const a = await upload(INVOICE, "search-invoice.txt", "text/plain", "invoice");
+  const b = await upload(
+    "PURCHASE ORDER\nPO Number: PO-SEARCH-77\nSupplier: Zenith Components\n",
+    "search-po.txt",
+    "text/plain",
+    "purchase_order",
+  );
+
+  const page = await c.get("/api/v1/documents?page_size=200");
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/documents", "get", 200, page.json), []);
+
+  // `q` searches the extracted values, not just the filename: the invoice number is
+  // nowhere in "search-invoice.txt", and finding it is the point of the box.
+  const byNumber = await c.get("/api/v1/documents?q=INV-2026-0042");
+  const hits = (byNumber.json as { items: Array<{ id: string }> }).items;
+  assert.ok(
+    hits.some((d) => d.id === a.id),
+    "expected the invoice to be found by a value printed on it",
+  );
+  assert.ok(!hits.some((d) => d.id === b.id));
+
+  // Search is case-insensitive and matches the filename too.
+  assert.ok(
+    (await c.get("/api/v1/documents?q=SEARCH-PO")).json &&
+      ((await c.get("/api/v1/documents?q=search-po")).json as { items: Array<{ id: string }> }).items.some(
+        (d) => d.id === b.id,
+      ),
+  );
+
+  // Filters combine with AND.
+  const filtered = await c.get("/api/v1/documents?doc_type=purchase_order&status=ready");
+  const ids = (filtered.json as { items: Array<{ id: string }> }).items.map((d) => d.id);
+  assert.ok(ids.includes(b.id));
+  assert.ok(!ids.includes(a.id));
+
+  // Sorting: ascending filename is the reverse of descending filename.
+  const asc = (
+    (await c.get("/api/v1/documents?sort=filename&order=asc&page_size=200")).json as {
+      items: Array<{ filename: string }>;
+    }
+  ).items.map((d) => d.filename);
+  const desc = (
+    (await c.get("/api/v1/documents?sort=filename&order=desc&page_size=200")).json as {
+      items: Array<{ filename: string }>;
+    }
+  ).items.map((d) => d.filename);
+  assert.deepEqual(asc, [...desc].reverse());
+  assert.deepEqual(
+    asc,
+    [...asc].sort((x, y) => x.localeCompare(y)),
+  );
+
+  // A bare YYYY-MM-DD date bound covers the whole day in both directions.
+  const today = new Date().toISOString().slice(0, 10);
+  const sameDay = await c.get(`/api/v1/documents?date_from=${today}&date_to=${today}&page_size=200`);
+  assert.ok((sameDay.json as { total: number }).total >= 2);
+  assert.equal(
+    (await c.get("/api/v1/documents?date_from=2000-01-01&date_to=2000-01-02")).json &&
+      ((await c.get("/api/v1/documents?date_to=2000-01-02")).json as { total: number }).total,
+    0,
+  );
+
+  // An unknown sort value is rejected by the spec, not silently ignored.
+  assert.equal((await c.get("/api/v1/documents?sort=nonsense")).status, 400);
+});
+
+// ─── bulk actions ─────────────────────────────────────────────────────────────
+
+test("bulk export bundles several records into one file per format", async () => {
+  const a = await upload(INVOICE, "bulk-a.txt", "text/plain", "invoice");
+  const b = await upload(INVOICE, "bulk-b.txt", "text/plain", "invoice");
+
+  const json = await c.request("POST", "/api/v1/documents/bulk-export", {
+    json: { ids: [a.id, b.id], format: "json" },
+  });
+  assert.equal(json.status, 200);
+  assert.match(json.headers.get("content-disposition") ?? "", /attachment; filename="documents-/);
+  assert.equal((JSON.parse(json.text) as unknown[]).length, 2);
+
+  const xml = await c.request("POST", "/api/v1/documents/bulk-export", {
+    json: { ids: [a.id, b.id], format: "xml" },
+  });
+  // Exactly one XML declaration, one root, both documents inside it.
+  assert.equal(xml.text.match(/<\?xml/g)?.length, 1);
+  assert.match(xml.text, /<documents count="2">/);
+  assert.equal(xml.text.match(/<document /g)?.length, 2);
+
+  const csv = await c.request("POST", "/api/v1/documents/bulk-export", {
+    json: { ids: [a.id, b.id], format: "csv" },
+  });
+  const lines = csv.text.trim().split("\n");
+  assert.equal(lines.filter((l) => l.startsWith("document_id,")).length, 1, "one header for the batch");
+  assert.ok(lines.length > 3);
+
+  // Unknown ids are skipped and named rather than failing the whole export.
+  const partial = await c.request("POST", "/api/v1/documents/bulk-export", {
+    json: { ids: [a.id, "nope"], format: "json" },
+  });
+  assert.equal(partial.status, 200);
+  assert.equal(partial.headers.get("x-skipped-ids"), "nope");
+  assert.equal((JSON.parse(partial.text) as unknown[]).length, 1);
+
+  assert.equal(
+    (await c.request("POST", "/api/v1/documents/bulk-export", { json: { ids: [], format: "json" } })).status,
+    400,
+    "an empty selection is a bad request, not an empty file",
+  );
+});
+
+test("bulk delete is best-effort, credential-guarded and reports each id", async () => {
+  const a = await upload(INVOICE, "bulk-del-a.txt", "text/plain", "invoice");
+  const b = await upload(INVOICE, "bulk-del-b.txt", "text/plain", "invoice");
+
+  // Same guard as a single delete: it removes Knowledge Box resources.
+  assert.equal(
+    (await c.request("POST", "/api/v1/documents/bulk-delete", { json: { ids: [a.id] } })).status,
+    401,
+  );
+
+  const res = await c.request("POST", "/api/v1/documents/bulk-delete", {
+    json: { ids: [a.id, b.id, "does-not-exist"] },
+    headers: writer,
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(
+    testing.checkResponse(openapi, "/api/v1/documents/bulk-delete", "post", 200, res.json),
+    [],
+  );
+  const out = res.json as { deleted: string[]; failed: Array<{ id: string; error: string }> };
+  assert.deepEqual(out.deleted.sort(), [a.id, b.id].sort());
+  assert.deepEqual(out.failed, [{ id: "does-not-exist", error: "Not found" }]);
+  assert.equal((await c.get(`/api/v1/documents/${a.id}`)).status, 404);
+});
+
+// ─── reprocess ────────────────────────────────────────────────────────────────
+
+test("a document can be reprocessed without re-uploading it", async () => {
+  const { id } = await upload(INVOICE, "reprocess.txt", "text/plain", "invoice");
+  const before = (await c.get(`/api/v1/documents/${id}`)).json as { jobId: string; fields: unknown[] };
+  assert.ok(before.fields.length > 0);
+
+  assert.equal((await c.request("POST", `/api/v1/documents/${id}/reprocess`)).status, 401);
+
+  const res = await c.request("POST", `/api/v1/documents/${id}/reprocess`, { headers: writer });
+  assert.equal(res.status, 202, res.text);
+  assert.deepEqual(
+    testing.checkResponse(openapi, "/api/v1/documents/{id}/reprocess", "post", 202, res.json),
+    [],
+  );
+  const { document, job } = res.json as { document: { status: string; id: string }; job: { id: string } };
+  assert.equal(document.id, id, "the record keeps its id and its Knowledge Box resource");
+  assert.equal(document.status, "pending");
+  assert.notEqual(job.id, before.jobId);
+
+  await waitForJob(job.id);
+  const after = (await c.get(`/api/v1/documents/${id}`)).json as { status: string; fields: unknown[] };
+  assert.equal(after.status, "ready");
+  assert.equal(after.fields.length, before.fields.length);
+
+  // A config that does not exist is rejected before anything is queued.
+  assert.equal(
+    (await c.request("POST", `/api/v1/documents/${id}/reprocess?config=nope`, { headers: writer })).status,
+    400,
+  );
+  assert.equal(
+    (await c.request("POST", "/api/v1/documents/missing/reprocess", { headers: writer })).status,
+    404,
+  );
+});
+
+// ─── workspace: stats, settings, samples ──────────────────────────────────────
+
+test("stats report the document mix, grounding and job counts", async () => {
+  await upload(INVOICE, "stats.txt", "text/plain", "invoice");
+  const res = await c.get("/api/v1/stats");
+  assert.equal(res.status, 200);
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/stats", "get", 200, res.json), []);
+  const s = res.json as {
+    documents: Record<string, number>;
+    byDocType: Record<string, number>;
+    groundingScore: number | null;
+    fields: number;
+    jobs: Record<string, number>;
+    lastProcessedAt: string | null;
+  };
+  assert.ok(s.documents.total >= 1);
+  assert.ok(s.byDocType.invoice >= 1);
+  assert.ok(s.fields > 0);
+  assert.ok(s.jobs.succeeded >= 1);
+  assert.ok(typeof s.groundingScore === "number");
+  assert.ok(s.lastProcessedAt && !Number.isNaN(Date.parse(s.lastProcessedAt)));
+});
+
+test("settings describe the deployment without leaking secrets", async () => {
+  const res = await c.get("/api/v1/settings");
+  assert.equal(res.status, 200);
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/settings", "get", 200, res.json), []);
+  const s = res.json as {
+    product: { name: string; version: string };
+    connection: { ok: boolean; mock: boolean };
+    extraction: { visualExtraction: boolean; stages: string[]; configs: number };
+    uploads: { maxBytes: number; acceptedTypes: string[] };
+    security: { apiKeysEnforced: boolean; adminEnabled: boolean };
+  };
+  assert.equal(s.product.name, "Document Processing");
+  assert.equal(s.connection.ok, true);
+  assert.equal(s.connection.mock, true);
+  assert.deepEqual(s.extraction.stages, [...STAGES]);
+  assert.equal(s.extraction.configs, DOC_TYPE_VALUES.length);
+  assert.ok(s.uploads.acceptedTypes.includes("application/pdf"));
+  assert.equal(s.security.adminEnabled, true);
+  // No credential, token or strategy id anywhere in the payload.
+  assert.ok(!res.text.includes(ADMIN));
+  assert.ok(!/extractStrategy/i.test(res.text));
+});
+
+test("the sample catalogue points at files that are actually served", async () => {
+  const res = await c.get("/api/v1/samples");
+  assert.equal(res.status, 200);
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/samples", "get", 200, res.json), []);
+  const items = (res.json as { items: Array<{ id: string; url: string; kind: string }> }).items;
+  assert.ok(items.length >= 6);
+  assert.ok(items.some((s) => s.kind === "image"));
+  for (const s of items) {
+    const file = await c.get(s.url);
+    assert.equal(file.status, 200, `${s.id}: ${s.url} is not served`);
+  }
+});

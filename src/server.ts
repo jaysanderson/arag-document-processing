@@ -25,6 +25,7 @@ import { registerAdminRoutes } from "./routes/admin.ts";
 import { registerConfigRoutes } from "./routes/configs.ts";
 import { registerDocumentRoutes } from "./routes/documents.ts";
 import { registerJobRoutes } from "./routes/jobs.ts";
+import { registerWorkspaceRoutes } from "./routes/workspace.ts";
 import { Agents } from "./services/agents.ts";
 import { ConfigsService } from "./services/configs.ts";
 import { DocumentsService } from "./services/documents.ts";
@@ -198,7 +199,26 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
   });
   app.docs("/api/v1", openapi, { title: "Document Processing" });
 
-  registerDocumentRoutes(app, { documents });
+  const jobCounts = () => ({
+    queued: jobs.count({ status: "queued" }),
+    running: jobs.count({ status: "running" }),
+    succeeded: jobs.count({ status: "succeeded" }),
+    failed: jobs.count({ status: "failed" }),
+    cancelled: jobs.count({ status: "cancelled" }),
+  });
+
+  registerDocumentRoutes(app, { documents, jobCounts });
+  registerWorkspaceRoutes(app, {
+    arag,
+    env,
+    branding,
+    configs,
+    version: VERSION,
+    productName: branding.productName,
+    extractStrategy: product.extractStrategy,
+    generativeModel: product.generativeModel,
+    maxUploadBytes: product.maxUploadBytes,
+  });
   registerJobRoutes(app, { jobs });
   registerConfigRoutes(app, { configs });
   registerAdminRoutes(app, {

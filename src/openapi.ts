@@ -273,6 +273,158 @@ const ProvisionResult = {
   },
 };
 
+/** Ids a bulk action applies to. Capped so one request cannot become an unbounded job. */
+const BulkIds = {
+  type: "array",
+  minItems: 1,
+  maxItems: 200,
+  items: { type: "string", maxLength: 128 },
+};
+
+const BulkDeleteRequest = {
+  type: "object",
+  required: ["ids"],
+  properties: { ids: BulkIds },
+  additionalProperties: false,
+};
+
+const BulkDeleteResult = {
+  type: "object",
+  description:
+    "Per-id outcome. A bulk delete is best-effort: ids that could not be deleted are " +
+    "reported rather than failing the whole request.",
+  required: ["deleted", "failed"],
+  properties: {
+    deleted: { type: "array", items: { type: "string" } },
+    failed: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "error"],
+        properties: { id: { type: "string" }, error: { type: "string" } },
+      },
+    },
+  },
+};
+
+const BulkExportRequest = {
+  type: "object",
+  required: ["ids"],
+  properties: {
+    ids: BulkIds,
+    format: { type: "string", enum: ["json", "xml", "csv"], default: "json" },
+  },
+  additionalProperties: false,
+};
+
+const Stats = {
+  type: "object",
+  description: "Workspace counters for the documents overview — no credentials required.",
+  required: ["documents", "byDocType", "jobs"],
+  properties: {
+    documents: {
+      type: "object",
+      description: "Counts by lifecycle status plus `total` and `degraded`.",
+      additionalProperties: { type: "number" },
+    },
+    byDocType: { type: "object", additionalProperties: { type: "number" } },
+    groundingScore: {
+      type: ["number", "null"],
+      description: "Mean grounding score across stored records; null when none has one.",
+    },
+    fields: { type: "integer", description: "Total extracted fields across every record" },
+    issues: { type: "integer", description: "Total open validation issues across every record" },
+    lastProcessedAt: { type: ["string", "null"], format: "date-time" },
+    jobs: { type: "object", additionalProperties: { type: "number" } },
+  },
+};
+
+const Settings = {
+  type: "object",
+  description:
+    "Effective, non-secret runtime settings for the signed-in workspace: what this " +
+    "deployment is connected to, how it extracts, and what it accepts. Everything here is " +
+    "already visible to a user of the product; secrets stay behind ADMIN_TOKEN.",
+  required: ["product", "connection", "extraction", "uploads", "branding"],
+  properties: {
+    product: {
+      type: "object",
+      required: ["name", "version"],
+      properties: {
+        name: { type: "string" },
+        version: { type: "string" },
+        docsUrl: { type: "string" },
+        openapiUrl: { type: "string" },
+      },
+    },
+    connection: {
+      type: "object",
+      required: ["ok", "mock"],
+      properties: {
+        ok: { type: "boolean" },
+        mock: { type: "boolean", description: "True when running against the in-process mock ARAG" },
+        kbId: { type: "string" },
+        region: { type: "string" },
+        baseUrl: { type: "string" },
+        resources: { type: ["integer", "null"] },
+        ms: { type: ["number", "null"], description: "Round-trip of the last health check" },
+        error: { type: "string" },
+        checkedAt: { type: "string", format: "date-time" },
+      },
+      additionalProperties: true,
+    },
+    extraction: {
+      type: "object",
+      required: ["visualExtraction", "generativeModel", "stages"],
+      properties: {
+        visualExtraction: {
+          type: "boolean",
+          description:
+            "Whether an ingestion-time visual-LLM extract strategy is configured. The strategy " +
+            "id itself stays behind ADMIN_TOKEN.",
+        },
+        generativeModel: { type: "string" },
+        reranker: { type: ["string", "null"] },
+        stages: { type: "array", items: { type: "string" } },
+        configs: { type: "integer", description: "Extraction configurations available" },
+      },
+    },
+    uploads: {
+      type: "object",
+      required: ["maxBytes", "acceptedTypes"],
+      properties: {
+        maxBytes: { type: "integer" },
+        acceptedTypes: { type: "array", items: { type: "string" } },
+        acceptedExtensions: { type: "array", items: { type: "string" } },
+      },
+    },
+    branding: { $ref: "#/components/schemas/Branding" },
+    security: {
+      type: "object",
+      properties: {
+        apiKeysEnforced: { type: "boolean" },
+        adminEnabled: { type: "boolean" },
+      },
+    },
+  },
+};
+
+const Sample = {
+  type: "object",
+  description: "A bundled sample document the first-run flow can process in one click.",
+  required: ["id", "title", "filename", "contentType", "url"],
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+    description: { type: "string" },
+    filename: { type: "string" },
+    contentType: { type: "string" },
+    url: { type: "string", description: "Static path to fetch the sample's bytes from" },
+    kind: { type: "string", enum: ["text", "image"] },
+    expectedDocType: { type: "string", enum: [...DOC_TYPES] },
+  },
+};
+
 const apiSecurity = [{ ApiKey: [] }, { Bearer: [] }];
 const adminSecurity = [{ AdminToken: [] }];
 const idParam = { name: "id", in: "path", required: true, schema: { type: "string", maxLength: 128 } };
@@ -303,6 +455,12 @@ export const openapi = buildOpenApi({
     Document,
     DocumentPage: pageSchema("#/components/schemas/Document"),
     DocumentAccepted,
+    BulkDeleteRequest,
+    BulkDeleteResult,
+    BulkExportRequest,
+    Stats,
+    Settings,
+    Sample,
     AskRequest,
     AskResponse,
     ConfigField,
@@ -317,7 +475,12 @@ export const openapi = buildOpenApi({
       get: {
         operationId: "listDocuments",
         tags: ["documents"],
-        summary: "List documents (newest first)",
+        summary: "List documents (newest first) with search, filters and sorting",
+        description:
+          "Every parameter is optional and they combine with AND. `q` is a case-insensitive " +
+          "substring match across the filename, the summary, the tags and the extracted field " +
+          "labels and values — so a user can find a document by the supplier on it, not only by " +
+          "the name it was uploaded under.",
         parameters: [
           { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
           {
@@ -331,6 +494,59 @@ export const openapi = buildOpenApi({
             schema: { type: "string", enum: ["pending", "processing", "ready", "failed"] },
           },
           { name: "doc_type", in: "query", schema: { type: "string", enum: [...DOC_TYPES] } },
+          {
+            name: "q",
+            in: "query",
+            description: "Free-text search over filename, summary, tags and extracted field values",
+            schema: { type: "string", maxLength: 200 },
+          },
+          {
+            name: "sort",
+            in: "query",
+            description: "Field to order by (default `created_at`)",
+            schema: {
+              type: "string",
+              enum: ["created_at", "filename", "doc_type", "status", "fields", "grounding"],
+              default: "created_at",
+            },
+          },
+          {
+            name: "order",
+            in: "query",
+            schema: { type: "string", enum: ["asc", "desc"], default: "desc" },
+          },
+          {
+            name: "date_from",
+            in: "query",
+            description: "Only documents created at or after this instant (ISO 8601 or YYYY-MM-DD)",
+            schema: { type: "string", maxLength: 40 },
+          },
+          {
+            name: "date_to",
+            in: "query",
+            description: "Only documents created at or before this instant (ISO 8601 or YYYY-MM-DD)",
+            schema: { type: "string", maxLength: 40 },
+          },
+          {
+            name: "config",
+            in: "query",
+            description: "Only documents extracted with this extraction configuration id",
+            schema: { type: "string", maxLength: 80 },
+          },
+          {
+            name: "degraded",
+            in: "query",
+            description:
+              "`true` returns only records that finished with a failed stage (`meta.stageErrors`); " +
+              "`false` excludes them.",
+            schema: { type: "boolean" },
+          },
+          {
+            name: "has_issues",
+            in: "query",
+            description: "`true` returns only records carrying at least one validation issue",
+            schema: { type: "boolean" },
+          },
         ],
         responses: {
           200: jsonResponse({ $ref: "#/components/schemas/DocumentPage" }),
@@ -449,6 +665,126 @@ export const openapi = buildOpenApi({
         summary: "Ask a grounded question about one document",
         requestBody: jsonBody({ $ref: "#/components/schemas/AskRequest" }),
         responses: { 200: jsonResponse({ $ref: "#/components/schemas/AskResponse" }), ...standardResponses },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/{id}/reprocess": {
+      parameters: [idParam],
+      post: {
+        operationId: "reprocessDocument",
+        tags: ["documents"],
+        summary: "Re-run the pipeline over a document already in the Knowledge Box",
+        description:
+          "The recovery action for a failed or degraded record: the resource is already " +
+          "uploaded, so this queues a fresh job over it rather than asking the user to upload " +
+          "the file again. Returns 202 with the reset record and the new job to watch. " +
+          "Requires a credential even when `API_KEYS` is unset (it spends model calls): an API " +
+          "key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.",
+        parameters: [
+          {
+            name: "config",
+            in: "query",
+            description: "Extraction configuration to use for the re-run (default: the original one)",
+            schema: { type: "string", maxLength: 80 },
+          },
+        ],
+        responses: {
+          202: jsonResponse({ $ref: "#/components/schemas/DocumentAccepted" }, "Accepted"),
+          409: {
+            description: "The document is already queued or processing",
+            content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
+          },
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/bulk-delete": {
+      post: {
+        operationId: "bulkDeleteDocuments",
+        tags: ["documents"],
+        summary: "Delete several documents and their ARAG resources",
+        description:
+          "Best-effort: each id is attempted and reported separately, so one missing document " +
+          "does not abandon the rest of the selection. Requires the same credential as a single " +
+          "delete.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/BulkDeleteRequest" }),
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/BulkDeleteResult" }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/bulk-export": {
+      post: {
+        operationId: "bulkExportDocuments",
+        tags: ["documents"],
+        summary: "Download several records as one JSON, XML or CSV file",
+        description:
+          "JSON returns an array of records; XML wraps them in a `<documents>` root; CSV emits " +
+          "one header and one row per extracted field across every selected record, so a " +
+          "spreadsheet can reconcile a whole batch in one pass. Ids that do not exist are " +
+          "skipped and named in the `X-Skipped-Ids` response header.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/BulkExportRequest" }),
+        responses: {
+          200: {
+            description: "Standardised export of the selected records",
+            content: {
+              "application/json": {
+                schema: { type: "array", items: { $ref: "#/components/schemas/Document" } },
+              },
+              "application/xml": { schema: { type: "string" } },
+              "text/csv": { schema: { type: "string" } },
+            },
+          },
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/stats": {
+      get: {
+        operationId: "getStats",
+        tags: ["documents"],
+        summary: "Workspace counters: documents by status and type, grounding, jobs",
+        description:
+          "What the documents overview strip shows. Cheap and credential-free, so a list screen " +
+          "can poll it while a pipeline runs without an admin token.",
+        responses: { 200: jsonResponse({ $ref: "#/components/schemas/Stats" }), ...standardResponses },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/settings": {
+      get: {
+        operationId: "getSettings",
+        tags: ["system"],
+        summary: "Effective, non-secret runtime settings for the workspace",
+        description:
+          "Connection state, extraction configuration, upload limits and branding — everything " +
+          "the Settings screen shows a signed-in user. Secrets (the extract-strategy id, tokens, " +
+          "keys) stay behind `ADMIN_TOKEN` on `/api/v1/admin/config`.",
+        responses: { 200: jsonResponse({ $ref: "#/components/schemas/Settings" }), ...standardResponses },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/samples": {
+      get: {
+        operationId: "listSamples",
+        tags: ["system"],
+        summary: "Bundled sample documents for the first-run flow",
+        description:
+          "The catalogue behind “Try with a sample”: each entry names a file served from " +
+          "`/samples/`, which the client uploads to `POST /api/v1/documents` like any other " +
+          "document. Nothing here is special-cased in the pipeline.",
+        responses: {
+          200: jsonResponse({
+            type: "object",
+            required: ["items"],
+            properties: { items: { type: "array", items: { $ref: "#/components/schemas/Sample" } } },
+          }),
+          ...standardResponses,
+        },
         security: apiSecurity,
       },
     },

@@ -193,3 +193,42 @@ export function serialize(rec: DocumentRecord, format: Format): string {
       return toCsv(rec);
   }
 }
+
+/**
+ * Bundle several records into one file — what a bulk export from the documents list
+ * produces. Each format keeps the single-record projection recognisable:
+ *   - JSON: an array of the canonical records.
+ *   - XML: the per-document elements under one `<documents>` root (the per-record XML
+ *     declaration is emitted once, at the top, rather than once per document — repeating
+ *     it mid-file makes the result not well-formed).
+ *   - CSV: one header, then every record's field rows concatenated. `document_id` and
+ *     `filename` are already columns, so a batch stays sortable by document.
+ */
+export function serializeMany(recs: DocumentRecord[], format: Format): string {
+  switch (format) {
+    case "json":
+      return JSON.stringify(recs, null, 2);
+    case "xml": {
+      const bodies = recs.map((r) =>
+        toXml(r)
+          .replace(/^<\?xml[^>]*\?>\n/, "")
+          .split("\n")
+          .map((line) => `  ${line}`)
+          .join("\n"),
+      );
+      return [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        `<documents count="${recs.length}">`,
+        ...bodies,
+        "</documents>",
+      ].join("\n");
+    }
+    case "csv": {
+      if (recs.length === 0) return toCsv({ fields: [], evidence: [] } as unknown as DocumentRecord);
+      const parts = recs.map((r) => toCsv(r));
+      const header = parts[0]!.split("\n")[0]!;
+      const rows = parts.flatMap((p) => p.split("\n").slice(1)).filter((l) => l.length > 0);
+      return [header, ...rows].join("\n");
+    }
+  }
+}

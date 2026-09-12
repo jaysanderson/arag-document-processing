@@ -9,13 +9,16 @@ import {
   type UploadedFile,
 } from "../../vendor/arag-platform/src/index.ts";
 import { openapi } from "../openapi.ts";
-import type { DocumentsService } from "../services/documents.ts";
+import type { DocumentsService, SortKey } from "../services/documents.ts";
 import type { Format } from "../services/formats.ts";
 import { requireWriter } from "./guards.ts";
 
 const FORMATS = new Set(["json", "xml", "csv"]);
 
-export function registerDocumentRoutes(app: App, deps: { documents: DocumentsService }): void {
+export function registerDocumentRoutes(
+  app: App,
+  deps: { documents: DocumentsService; jobCounts: () => Record<string, number> },
+): void {
   app.get(
     "/api/v1/documents",
     (ctx) =>
@@ -24,11 +27,61 @@ export function registerDocumentRoutes(app: App, deps: { documents: DocumentsSer
         pageSize: Number(ctx.queryObj.page_size ?? 50),
         status: ctx.queryObj.status as string | undefined,
         docType: ctx.queryObj.doc_type as string | undefined,
+        q: ctx.queryObj.q as string | undefined,
+        sort: ctx.queryObj.sort as SortKey | undefined,
+        order: ctx.queryObj.order as "asc" | "desc" | undefined,
+        dateFrom: ctx.queryObj.date_from as string | undefined,
+        dateTo: ctx.queryObj.date_to as string | undefined,
+        config: ctx.queryObj.config as string | undefined,
+        degraded: ctx.queryObj.degraded as boolean | undefined,
+        hasIssues: ctx.queryObj.has_issues as boolean | undefined,
       }),
     {
       auth: "api",
       validate: operationSchemas(openapi, "/api/v1/documents", "get"),
       operationId: "listDocuments",
+    },
+  );
+
+  // Counters for the list screen's overview strip. Registered before `/documents/:id` so
+  // "stats" can never be read as a document id.
+  app.get("/api/v1/stats", (_ctx) => ({ ...deps.documents.overview(), jobs: deps.jobCounts() }), {
+    auth: "api",
+    operationId: "getStats",
+  });
+
+  // Bulk actions. Both are POSTs on fixed paths, so they cannot collide with
+  // `/documents/:id` (which has no POST) regardless of registration order.
+  app.post(
+    "/api/v1/documents/bulk-delete",
+    async (ctx) => {
+      requireWriter(ctx);
+      const { ids } = ctx.body as { ids: string[] };
+      return await deps.documents.bulkDelete(ids);
+    },
+    {
+      auth: "api",
+      validate: operationSchemas(openapi, "/api/v1/documents/bulk-delete", "post"),
+      operationId: "bulkDeleteDocuments",
+    },
+  );
+
+  app.post(
+    "/api/v1/documents/bulk-export",
+    (ctx) => {
+      const { ids, format = "json" } = ctx.body as { ids: string[]; format?: string };
+      if (!FORMATS.has(format)) throw badRequest(`format must be one of ${[...FORMATS].join(", ")}`);
+      const out = deps.documents.bulkExport(ids, format as Format);
+      ctx.text(200, out.body, out.contentType, {
+        "Content-Disposition": `attachment; filename="${out.filename}"`,
+        // Reported rather than failed: a stale selection should still export what exists.
+        "X-Skipped-Ids": out.skipped.join(","),
+      });
+    },
+    {
+      auth: "api",
+      validate: operationSchemas(openapi, "/api/v1/documents/bulk-export", "post"),
+      operationId: "bulkExportDocuments",
     },
   );
 
@@ -113,6 +166,21 @@ export function registerDocumentRoutes(app: App, deps: { documents: DocumentsSer
       validate: operationSchemas(openapi, "/api/v1/documents/{id}/ask", "post"),
       operationId: "askDocument",
     },
+  );
+
+  app.post(
+    "/api/v1/documents/:id/reprocess",
+    (ctx) => {
+      // Re-running spends model calls against the Knowledge Box, so it needs the same
+      // credential as a delete even when the public API is otherwise open.
+      requireWriter(ctx);
+      const out = deps.documents.reprocess(
+        ctx.params.id!,
+        (ctx.query.get("config") ?? undefined) || undefined,
+      );
+      ctx.json(202, out, { Location: `/api/v1/documents/${out.document.id}` });
+    },
+    { auth: "api", operationId: "reprocessDocument" },
   );
 
   app.delete(
