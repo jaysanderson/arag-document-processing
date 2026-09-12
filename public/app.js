@@ -143,9 +143,8 @@ async function showRecord(id) {
       ? `${Math.round(rec.docTypeConfidence * 100)}% classifier confidence`
       : "";
   const total = Object.values(rec.meta?.durationsMs ?? {}).reduce((a, b) => a + b, 0);
-  $("#timings").textContent = total
-    ? `${(total / 1000).toFixed(1)} s · ${rec.meta.schema} · ${rec.meta.model}`
-    : "";
+  const elapsed = total >= 1000 ? `${(total / 1000).toFixed(1)} s` : `${Math.round(total)} ms`;
+  $("#timings").textContent = `${elapsed} · ${rec.meta.schema} · ${rec.meta.model}`;
 
   $("#summary").textContent = rec.summary ?? "";
   $("#summary").hidden = !rec.summary;
