@@ -1,10 +1,10 @@
 # Walkthrough: the admin app (`/admin/`)
 
-The operator's view of the product — Sam's screen, in the persona table in
-[`overview.md`](overview.md): health, connection, configuration, jobs, logs, usage,
-branding and security. Open <http://localhost:8080/admin/>. This is a different product
-for a different person, not a tab inside the operator app — the sign-in boundary is
-deliberately built to look like the door to somewhere else.
+The person running the deployment's view of the product — not the person processing
+documents: health, connection, configuration, jobs, logs, usage, branding and security.
+Open <http://localhost:8080/admin/>. This is a different product for a different person,
+not a tab inside the operator app — the sign-in boundary is deliberately built to look like
+the door to somewhere else.
 
 ## Sign-in
 
@@ -59,7 +59,7 @@ create, so nothing there is mistaken for one of the eleven-plus-custom configs.
 **Re-provision all** re-sends every extraction config to the Knowledge Box as a search
 configuration — safe to run any time, and exactly what you'd reach for after resetting a
 Knowledge Box or switching the generative model. It shows a "Provisioning…" state, then a
-summary: "N provisioned · N failed."
+summary line naming how many succeeded and how many failed.
 
 ## Configs (`/admin/#/configs`)
 
@@ -71,9 +71,9 @@ State.
 ## Jobs (`/admin/#/jobs`)
 
 Every job across the whole deployment, filterable by status. Click a row to open a drawer
-with the job's kind, status, start time, elapsed time, a link to its document (when it has
-one), the stage timeline, and the raw job JSON behind a disclosure. A **Cancel job** button
-appears in the drawer footer only while the job is still queued or running.
+with the job's kind, status, start time, a link to its document (when it has one), the
+stage timeline, and the raw job JSON behind a disclosure. A **Cancel job** button appears
+in the drawer footer only while the job is still queued or running.
 
 ## Logs (`/admin/#/logs`)
 
@@ -119,8 +119,9 @@ Three cards:
 - **Retention** — the destructive one, and it gets the full treatment. Set a number of days
   in **Delete documents older than**, then click **Preview** before anything happens: the
   panel reports the exact count and the oldest and newest dates affected, and nothing is
-  deleted yet. Only once a preview has run does **Purge** become clickable. Clicking it
-  opens a confirmation dialog restating the count and requiring you to type the word
+  deleted yet. **Purge** stays disabled until a preview has found at least one document to
+  delete — if nothing is old enough, there is nothing to click. Once it is enabled, clicking
+  it opens a confirmation dialog restating the count and requiring you to type the word
   **DELETE** before the button will submit. The result panel then reports how many
   documents were deleted and how many failed. Every purge — preview or real — also shows up
   in the Logs screen and the Usage tiles, so there is always an audit trail of who ran it

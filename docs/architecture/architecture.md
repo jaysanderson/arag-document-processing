@@ -5,8 +5,8 @@
 ```mermaid
 flowchart LR
     subgraph Client["Browser / API client"]
-        Demo["Demo UI (public/)"]
-        Admin["Admin UI (admin/)"]
+        Demo["Operator app (public/)"]
+        Admin["Admin app (admin/)"]
         Curl["curl / SDK / other API client"]
     end
 
@@ -102,7 +102,7 @@ before ARAG has done any work.
   set whenever any stage failed, and the same failures are appended to `record.issues` as
   `severity: "error"` — so an API caller who only ever reads `GET /documents/{id}` still
   sees that something degraded, rather than reading a `ready` record with quietly missing
-  output as if nothing had gone wrong. The admin panel's Overview tab counts these as
+  output as if nothing had gone wrong. The admin app's Overview screen counts these as
   **degraded** documents.
 
 Full stage-by-stage detail, including what each stage calls in ARAG and why, is in

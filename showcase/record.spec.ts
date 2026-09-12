@@ -1,161 +1,213 @@
 /**
- * Playwright walkthrough that records the Document Processing showcase (video +
- * numbered screenshots) against the mock ARAG. Run: `make showcase`.
+ * Playwright walkthrough that records the Document Processing showcase (video + numbered
+ * screenshots) against the mock ARAG. Run: `make showcase`.
  *
  * Follows showcase/SCRIPT.md beat by beat; screenshot names match showcase/STORYBOARD.md.
- * Selectors are the same ones exercised (and kept working) by test/e2e/demo.spec.ts and
+ * Selectors are the ones exercised (and kept working) by test/e2e/app.spec.ts and
  * test/e2e/admin.spec.ts — nothing here is a new, unverified selector.
  *
- * The mock ARAG resolves the whole pipeline in well under a second (no simulated
- * latency), so a still screenshot cannot show a genuine "mid-stage" frame distinct from
- * "complete" — the video captures the real transition; the still is taken once the run
- * has settled. showcase/fixtures/invoice-review.txt is a deliberately imperfect invoice
- * (a subtotal + tax that don't add up to the printed total) so the canonical-record shot
- * has something in the validation-issues panel to show, rather than an empty one — the
- * built-in sample documents are all clean. (The mock's field-synthesis always fabricates
- * a placeholder for a field it can't find in the text rather than leaving it absent, so
- * a "required field missing" error cannot be demonstrated against the mock — every other
- * field in the fixture is filled in correctly so only the arithmetic check fires.)
+ * The click path follows design/PRODUCT-EXPERIENCE.md §6.3, with one deliberate change: the
+ * guided sample (`#startSample`) posts the clean, built-in `invoice.txt` sample, which has
+ * nothing for the validation surfaces to show. So the tour is still run for its own sake —
+ * it is a real, on-screen product feature worth recording — but the record the walkthrough
+ * actually inspects is `showcase/fixtures/invoice-review.txt`, uploaded afterwards through
+ * the upload drawer. That fixture's subtotal and tax deliberately do not reconcile with the
+ * printed total, so the trust strip, the field evidence and the source highlight all have a
+ * real validation issue to carry, not an empty one.
+ *
+ * The mock ARAG resolves the whole pipeline in well under a second (no simulated latency),
+ * so a still screenshot cannot show a genuine mid-stage "processing" frame distinct from
+ * "ready" — the video captures the real transition; the stills are taken once each screen
+ * has settled.
  */
 import { expect, test } from "@playwright/test";
 
-// The shared UI kit's `.arag-header` is `position: sticky`, which Chromium's full-page
-// screenshot can render twice (once in place, once composited again lower down) once the
-// page is taller than one viewport. Un-stick it for the instant of the capture only, so
-// the still images are correct; the live recording (which is not a stitched screenshot)
-// is unaffected either way.
+// Chromium's full-page screenshot composites `position: sticky` elements oddly once the
+// page is taller than one viewport: the band can be drawn twice and the sidebar's contents
+// can vanish. Make both static for the instant of the capture — the sidebar column keeps
+// its painted background either way, so the still looks exactly like the live screen. The
+// video (not a stitched screenshot) is unaffected.
+const PIN_STICKY =
+  ".dip-app > .arag-band{position:static!important}" +
+  ".dip-sidebar{position:static!important;height:auto!important}";
+
 async function shot(page: import("@playwright/test").Page, name: string): Promise<void> {
-  await page.evaluate(() => {
-    for (const el of document.querySelectorAll<HTMLElement>(".arag-header")) el.style.position = "static";
-  });
+  const tag = await page.addStyleTag({ content: PIN_STICKY });
   await page.screenshot({ path: `showcase/out/${name}.png`, fullPage: true });
-  await page.evaluate(() => {
-    for (const el of document.querySelectorAll<HTMLElement>(".arag-header")) el.style.position = "";
-  });
+  await tag.evaluate((el) => (el as HTMLElement).remove());
 }
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("showcase walkthrough", async ({ page }) => {
   test.setTimeout(240_000);
 
-  // ── 1. The problem: a fresh, empty demo ───────────────────────────────────
-  await page.goto("/");
-  await expect(page.locator("arag-shell .product")).toContainText("Document Processing");
-  await expect(page.locator("#configSelect option")).not.toHaveCount(0);
-  // The demo says plainly, in-page, that it is running against the mock Knowledge Box —
-  // so nobody watching mistakes fixture-driven extraction for genuine visual extraction.
-  await expect(page.locator("#mockNote")).toBeVisible({ timeout: 10_000 });
-  await pause(1800);
-  await shot(page, "01-home");
+  // ── 1. Welcome: first run, and the mock-Knowledge-Box honesty rule ───────────
+  await page.goto("/#/welcome");
+  await expect(page.locator("h1")).toContainText("Read every document the first time");
+  await expect(page.locator(".arag-alert.warn")).toContainText("mock Knowledge Box");
+  await expect(page.locator("#startSample")).toBeVisible();
+  await pause(600);
+  await shot(page, "01-welcome");
 
-  // ── 2. Drop an invoice; the live pipeline runs; the canonical record ─────
+  // ── 2. The guided sample and its advisory tour ────────────────────────────────
+  await page.click("#startSample");
+  await expect(page).toHaveURL(/#\/documents/, { timeout: 20_000 });
+  await expect(page.locator(".dip-tour__card")).toBeVisible();
+  await expect(page.locator(".dip-tour__card")).toContainText("This is the queue");
+  await pause(600);
+  await shot(page, "02-tour");
+  await page.click("[data-tour-end]");
+  await expect(page.locator(".dip-tour__card")).toHaveCount(0);
+  // The tour is advisory, not a cage: the sample keeps processing underneath it.
+  await expect(page.locator("#docsTable tbody tr")).not.toHaveCount(0, { timeout: 30_000 });
+
+  // ── 3. Upload the imperfect invoice through the drawer ────────────────────────
+  await page.click("#uploadBtn");
+  await expect(page).toHaveURL(/#\/documents\/upload/);
+  await expect(page.locator(".dip-drawer")).toBeVisible();
+  await expect(page.locator(".dip-drawer .arag-help").first()).toContainText("PDF");
+  await expect(page.locator(".dip-drawer .arag-help").first()).toContainText("MB each");
+  await pause(500);
+  await shot(page, "03-upload-drawer");
+
   await page.setInputFiles("#fileInput", "showcase/fixtures/invoice-review.txt");
-  await expect(page.locator("#preview pre")).toContainText("TAX INVOICE", { timeout: 20_000 });
-  await expect(page.locator("#timeline .arag-chip")).toContainText("succeeded", { timeout: 60_000 });
-  for (const stage of ["process", "classify", "extract", "entities", "summary", "validate", "standardize"]) {
-    await expect(page.locator("#timeline .arag-steps")).toContainText(stage);
-  }
-  await expect(page.locator("#resultBody")).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator("#docTypeBadge")).toContainText("invoice");
-  await expect(page.locator("#fieldsTable tbody tr")).not.toHaveCount(0);
-  await expect(page.locator("#fieldsTable")).toContainText("GLOBEX SUPPLY CO PTY LTD");
-  await expect(page.locator("#fieldsTable .f-bar").first()).toBeVisible();
-  await expect(page.locator("#entities .ent").first()).toBeVisible();
-  await expect(page.locator("#summary")).not.toBeEmpty();
-  // Validation issue: subtotal + tax do not reconcile with the printed total — a
-  // deterministic arithmetic check on the fixture's numbers, not a scripted UI state.
-  await expect(page.locator("#issues")).toContainText("≠ total");
-  await expect(page.locator("#issues .arag-alert.warn")).toBeVisible();
-  await pause(1800);
-  await shot(page, "02-pipeline-and-record");
+  await expect(page.locator("#queue .arag-chip")).toContainText("queued", { timeout: 20_000 });
+  await page.click(".dip-drawer [data-close]");
+  await expect(page.locator(".dip-drawer")).toHaveCount(0);
+  await expect(page).toHaveURL(/#\/documents(\?|$)/);
 
-  // ── 3. Export the record ───────────────────────────────────────────────────
-  for (const fmt of ["json", "xml", "csv"]) {
-    const download = page.waitForEvent("download");
-    await page.click(`#exports [data-fmt="${fmt}"]`);
-    expect((await download).suggestedFilename()).toBe(`invoice-review.${fmt}`);
-    await pause(400);
+  // ── 4. The queue: the new row reads its way to Ready, worth reviewing ─────────
+  const row = page.locator("#docsTable tbody tr", { hasText: "invoice-review.txt" });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await expect(row.locator(".arag-chip").first()).toContainText("Ready", { timeout: 30_000 });
+  await expect(row.locator(".dip-datatable__sub")).toContainText("INV-2026-1188");
+  await expect(row).toContainText("12"); // fields
+  await expect(row).toContainText("100%"); // grounding
+  await expect(row.locator(".arag-chip.warn, .arag-chip.danger")).toContainText("1"); // the reconciliation issue
+  await pause(600);
+  await shot(page, "04-fixture-ready");
+
+  // ── 5. The record: the trust strip, worded not just coloured ─────────────────
+  await row.locator(".dip-datatable__primary").click();
+  await expect(page.locator(".dip-grounding")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".dip-grounding__claim")).toContainText(
+    "of 12 fields carry a quote found in this document",
+  );
+  await expect(page.locator(".dip-grounding__breakdown")).toContainText("exact");
+  await expect(page.locator(".dip-grounding")).toHaveAttribute("data-band", "strong");
+  await expect(page.locator(".arag-alert.warn").first()).toContainText("≠ total");
+  await expect(page.locator("#field-total")).toBeVisible();
+  await pause(700);
+  await shot(page, "05-record");
+
+  // ── 6. The evidence beat: a field's own quote, and the issue it carries ──────
+  await page.click("#field-total .dip-field__evidence summary");
+  await expect(page.locator("#field-total blockquote")).toBeVisible();
+  await expect(page.locator("#field-total blockquote")).toContainText("TOTAL DUE");
+  await expect(page.locator("#field-total blockquote")).toContainText("25,750");
+  await expect(page.locator("#field-total .dip-field__issue")).toContainText("≠ total");
+  // Normalisation is shown, not hidden: the raw value sits beside the normalised one.
+  await expect(page.locator("#field-invoice_date .dip-field__raw")).toContainText("raw");
+  await pause(900);
+  await shot(page, "06-evidence-quote");
+
+  // ── 7. Source & evidence: the same quote, found in the document's own text ───
+  await page.click('a[role="tab"]:has-text("Source & evidence")');
+  await expect(page.locator(".dip-source__text")).toContainText("TAX INVOICE", { timeout: 20_000 });
+  await expect(page.locator("mark.dip-hit")).not.toHaveCount(0);
+  await page.click('.dip-source__item[data-ev="invoice_number"]');
+  await expect(page.locator("mark.dip-hit.is-active")).toContainText("INV-2026-1188");
+  await page.click('.dip-source__item[data-ev="total"]');
+  await expect(page.locator("mark.dip-hit.is-active")).toContainText("25,750.00");
+  await pause(700);
+  await shot(page, "07-source-highlight");
+
+  // ── 8. Pipeline: the seven stages, with real timings ──────────────────────────
+  await page.click('a[role="tab"]:has-text("Pipeline")');
+  for (const stage of ["process", "classify", "extract", "entities", "summary", "validate", "standardize"]) {
+    await expect(page.locator("#tabPanel")).toContainText(stage);
   }
+  await expect(page.locator("#tabPanel")).toContainText("Total");
+  await pause(600);
+  await shot(page, "08-pipeline");
+
+  // ── 9. Export the record ───────────────────────────────────────────────────────
+  await page.click('a[role="tab"]:has-text("Record")');
+  await expect(page.locator(".dip-grounding")).toBeVisible({ timeout: 20_000 });
+  const csv = page.waitForEvent("download");
+  await page.click("#exportCsv");
+  expect((await csv).suggestedFilename()).toBe("invoice-review.csv");
   await expect(page.locator(".arag-toast")).toContainText("Downloaded invoice-review.csv");
   await pause(500);
-  await shot(page, "03-exports");
+  await shot(page, "09-export");
 
-  // ── 4. Ask the document a question ────────────────────────────────────────
-  await page.fill("#askInput", "What is the total due?");
+  // ── 10. Ask this document ──────────────────────────────────────────────────────
+  await page.click('a[role="tab"]:has-text("Ask")');
+  await page.fill("#askInput", "What is the total due and when?");
   await page.click("#askBtn");
-  await expect(page.locator("#answer .arag-bubble.assistant").last()).not.toContainText("Thinking", {
+  await expect(page.locator(".arag-bubble.assistant").last()).not.toContainText("Thinking", {
     timeout: 30_000,
   });
-  await pause(1500);
-  await shot(page, "04-ask-answer");
+  await expect(page.locator(".arag-bubble.assistant").last()).toContainText("25,750");
+  await expect(page.locator(".arag-bubble.assistant").last()).toContainText("Open in source");
+  await pause(900);
+  await shot(page, "10-ask");
 
-  // ── 5. The visual path: an image sample, config forced (classification skipped) ──
-  await page.selectOption("#configSelect", "purchase_order");
-  await page.click('[data-image="purchase-order"]');
-  await expect(page.locator("#preview img")).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator("#resultBody")).toBeVisible({ timeout: 60_000 });
-  await expect(page.locator("#docConf")).toContainText("auto-classification skipped");
-  await expect(page.locator("#docTypeBadge")).toContainText("purchase order");
-  await expect(page.locator("#fieldsTable")).toContainText("PO-55218");
-  // The mock note (card #1) is still on screen here too — the fields shown do not come
-  // from reading the pixels of this particular image, and the note says so plainly.
-  await expect(page.locator("#mockNote")).toBeVisible();
-  await pause(1500);
-  await shot(page, "05-image-sample");
-
-  // ── 6. The extraction-config manager: built-ins, then a custom config ─────
-  await page.click("#manageConfigs");
-  await expect(page.locator("#configModal")).toBeVisible();
-  await expect(page.locator("#cfgList")).toContainText("Built-in");
-  await expect(page.locator("#cfgList")).toContainText("dip_invoice_extraction");
-  await pause(1000);
-  await shot(page, "06-config-manager");
-
+  // ── 11. A custom extraction config: the five-minute new document type ────────
+  await page.click('[data-nav="configs"]');
+  await expect(page.locator("h2").first()).toContainText("Built in");
+  await page.click('a[href="#/configs/new"]');
+  await expect(page.locator("h1")).toContainText("New extraction config");
   await page.fill("#cfgName", "Insurance Card");
-  await page.fill("#cfgFields .fld-label", "Policy Number");
+  await page.fill(".dip-fieldrow .fld-label", "Policy Number");
   await page.click("#addField");
-  await page.fill("#cfgFields .cfg-field-row:nth-child(2) .fld-label", "Insurer");
-  await pause(800);
-  await shot(page, "07-config-fields");
+  await page.fill(".dip-fieldrow:nth-child(2) .fld-label", "Insurer");
+  await expect(page.locator("#keyPreview")).toContainText("policy_number, insurer");
+  await pause(700);
+  await shot(page, "11-config-builder");
 
-  await page.click("#saveConfig");
-  await expect(page.locator("#configSelect")).toHaveValue(/^cfg_/, { timeout: 20_000 });
-  await expect(page.locator("#cfgList")).toContainText("Insurance Card");
-  await expect(page.locator("#cfgList")).toContainText("provisioned", { timeout: 20_000 });
-  // The new custom card renders at the top of the (now re-rendered, scrolled) list —
-  // bring it back into view so the screenshot actually shows what the toast promises.
-  await page.locator(".cfg-card", { hasText: "Insurance Card" }).scrollIntoViewIfNeeded();
-  await pause(1000);
-  await shot(page, "08-config-provisioned");
+  await page.click("#saveCfg");
+  await expect(page).toHaveURL(/#\/configs\/cfg_/, { timeout: 20_000 });
+  await expect(page.locator("h1")).toContainText("Insurance Card");
+  await expect(page.locator(".arag-chip.ok")).toContainText("Ready");
+  await expect(page.locator("dl")).toContainText("dip_custom_insurance_card");
+  await pause(700);
+  await shot(page, "12-config-saved");
 
-  await page.click("#closeConfigs");
-  await expect(page.locator("#configModal")).toBeHidden();
+  // ── 12. Settings: what this deployment is connected to, no admin token needed ──
+  await page.click('[data-nav="settings"]');
+  await expect(page.locator("#panel")).toContainText("Knowledge Box", { timeout: 20_000 });
+  await expect(page.locator(".arag-alert.warn")).toContainText("mock Knowledge Box");
+  await expect(page.locator("#panel")).toContainText("Grounding (mean)");
+  await pause(700);
+  await shot(page, "13-settings");
 
-  // ── 7. The admin panel: health, configs, jobs ─────────────────────────────
-  await page.goto("/admin/");
+  // ── 13. Admin: sign in, and the operator's own view ───────────────────────────
+  await page.click('a[href="/admin/"]');
+  await expect(page.locator(".dip-signin")).toBeVisible({ timeout: 20_000 });
   await page.fill("#token", "e2e-admin-token");
-  await page.click("#signin");
-  await expect(page.locator("arag-health")).toContainText("connected", { timeout: 20_000 });
-  await pause(1200);
-  await shot(page, "09-admin-overview");
+  await page.press("#token", "Enter");
+  await expect(page.locator(".dip-sidenav")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("h1")).toContainText("Overview");
+  await expect(page.locator(".dip-statstrip")).toContainText("Grounding");
+  await expect(page.locator("body")).toContainText("Needs attention");
+  await pause(700);
+  await shot(page, "14-admin-overview");
 
-  await page.click('[data-tab="configs"]');
-  await expect(page.locator("#cfgTable tbody tr")).not.toHaveCount(0);
-  await expect(page.locator("#cfgTable")).toContainText("Insurance Card");
-  await pause(1000);
-  await shot(page, "10-admin-configs");
+  // ── 14. Admin → Connection: the stored ARAG search configurations ────────────
+  await page.click('[data-nav="connection"]');
+  await expect(page.locator("table")).toContainText("dip_invoice_extraction", { timeout: 20_000 });
+  await expect(page.locator("table")).toContainText("dip_custom_insurance_card");
+  await page.click("tr[data-cfg='dip_invoice_extraction']");
+  await expect(page.locator(".dip-drawer")).toContainText("full_resource", { timeout: 20_000 });
+  await expect(page.locator(".dip-drawer")).toContainText("answer_json_schema");
+  await pause(700);
+  await shot(page, "15-admin-connection");
+  await page.keyboard.press("Escape");
 
-  await page.click('[data-tab="jobs"]');
-  await page.click("#reloadJobs");
-  await expect(page.locator("#jobs tbody tr[data-id]").first()).toBeVisible({ timeout: 20_000 });
-  await page.click("#jobs tbody tr[data-id]");
-  await expect(page.locator("#jobDetail .arag-steps li").first()).toBeVisible({ timeout: 20_000 });
-  await pause(1000);
-  await shot(page, "11-admin-jobs");
-
-  // ── 8. The API docs, then the one-command try-it ──────────────────────────
-  await page.goto("/api/v1/docs");
+  // ── 15. The API docs: every screen is a documented, contract-tested endpoint ──
+  await page.click("a[data-docs-link]");
   await expect(page).toHaveTitle(/API reference/, { timeout: 20_000 });
-  await pause(2500);
-  await shot(page, "12-api-docs");
+  await pause(1500);
+  await shot(page, "16-api-docs");
 });

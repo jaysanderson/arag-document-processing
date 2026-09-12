@@ -636,7 +636,7 @@ async function security() {
       </div></div>
       <div class="arag-card"><div class="head"><h3>Request protection</h3></div><div class="body">
         <dl class="arag-kv">
-          <dt>Rate limit</dt><dd>${s.rateLimit.rps} req/s, burst ${s.rateLimit.burst}</dd>
+          <dt>Rate limit</dt><dd>${s.rateLimit.rps > 0 ? `${s.rateLimit.rps} req/s, burst ${s.rateLimit.burst}` : "Disabled (RATE_LIMIT_RPS is 0)"}</dd>
           <dt>CORS</dt><dd>${s.cors.length ? esc(s.cors.join(", ")) : "same-origin only"}</dd>
           <dt>Max upload</dt><dd>${esc(fmtBytes(s.maxUploadBytes))}</dd>
           <dt>Max body</dt><dd>${esc(fmtBytes(s.maxBodyBytes))}</dd>

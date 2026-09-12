@@ -88,6 +88,14 @@ const ISSUE_CONSEQUENCE = [
 
 const consequence = (msg) => ISSUE_CONSEQUENCE.find(([re]) => re.test(msg))?.[1] ?? "";
 
+/**
+ * Fields are shown in schema order — a person reads an invoice in the shape of an invoice —
+ * with the rest behind a disclosure so a fourteen-field claim form is still scannable. The
+ * exception is above: anything unverified is pinned into "Check these first", because trust
+ * beats familiarity when the two conflict.
+ */
+const FIELD_PREVIEW = 10;
+
 let closeStream = null;
 
 export async function renderDocument(main, { params, query, stale }, tab = "") {
@@ -364,7 +372,20 @@ function renderRecord(panel, doc) {
         <h2>Extracted fields (${fields.length})</h2>
         ${
           fields.length
-            ? `<div class="dip-fields">${fields.map((f) => fieldRow(doc, f, evidence, issues)).join("")}</div>`
+            ? `<div class="dip-fields">${fields
+                .slice(0, FIELD_PREVIEW)
+                .map((f) => fieldRow(doc, f, evidence, issues))
+                .join("")}</div>
+               ${
+                 fields.length > FIELD_PREVIEW
+                   ? `<details id="allFields"><summary class="arag-btn ghost sm" style="display:inline-flex;margin-top:12px">Show all fields (${fields.length - FIELD_PREVIEW} more)</summary>
+                        <div class="dip-fields">${fields
+                          .slice(FIELD_PREVIEW)
+                          .map((f) => fieldRow(doc, f, evidence, issues))
+                          .join("")}</div>
+                      </details>`
+                   : ""
+               }`
             : `<div class="arag-empty">No fields were extracted. Nothing matched this schema — try a different extraction config.</div>`
         }
       </section>
@@ -430,6 +451,8 @@ function renderRecord(panel, doc) {
       e.preventDefault();
       const el = document.getElementById(`field-${a.dataset.focusField}`);
       if (!el) return;
+      // The field may be inside the "Show all fields" disclosure.
+      el.closest("details")?.setAttribute("open", "");
       el.scrollIntoView({ block: "center", behavior: "smooth" });
       el.classList.add("is-highlighted");
       el.focus();

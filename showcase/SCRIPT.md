@@ -5,180 +5,232 @@ deterministic and needs no credentials. Narration is written to be read at a mea
 conversational pace — pause on each on-screen action rather than racing ahead of it.
 
 Screenshot filenames below are produced by `showcase/record.spec.ts` and match
-`STORYBOARD.md`. The video is `showcase/out/*/video.webm`.
+`STORYBOARD.md`. The video is `showcase/out/record-showcase-walkthrough/video.webm`.
+
+This follows the click path in `design/PRODUCT-EXPERIENCE.md` §6.3, with one deliberate
+change from that document: `Start the guided sample` posts the clean, built-in
+`invoice.txt` — there is nothing there for the validation and evidence surfaces to prove.
+So the tour still runs, because it is a real product feature worth showing, but the record
+the rest of the walkthrough actually opens is `showcase/fixtures/invoice-review.txt`,
+dropped in afterwards through the upload drawer. Its subtotal and tax deliberately do not
+add up to the printed total, so the trust strip, the field evidence and the source
+highlight all have something real to check, not an empty record.
 
 A note on realism: the mock ARAG resolves the whole seven-stage pipeline in well under a
-second (there is no simulated network/model latency), so the *video* shows the pipeline
-stages appear in a quick, genuine burst rather than the slower cadence a live multimodal
-model would have — that is faster than the real thing, not scripted to look busier than
-it is. The document dropped in the first beat is also not one of the pristine built-in
-samples: it is `showcase/fixtures/invoice-review.txt`, a deliberately imperfect invoice
-(the printed subtotal and tax do not add up to the printed total) so the validation-issues
-part of the canonical record has something real to show.
-
-The page itself says, plainly, that this recording is running against the mock Knowledge
-Box: a note under the sample buttons explains that extraction comes from deterministic
-fixtures rather than a model actually reading the page, so nobody watching the video
-mistakes fixture-driven output for genuine visual extraction. Read it out at the image
-sample beat below — that's where the distinction actually matters.
+second (there is no simulated network/model latency), so a *still* cannot show a genuine
+mid-stage "processing" frame distinct from "ready" — the video captures the real
+transition; the screenshots are taken once each screen has settled. The page itself says,
+plainly, that this recording is running against the mock Knowledge Box: the alert under the
+sample cards on the welcome screen, and again on Settings → Connection, states that
+extraction comes from deterministic fixtures rather than a model reading the page, so
+nobody watching the video mistakes fixture-driven output for genuine visual extraction.
 
 ---
 
-### 00:00–00:15 — The problem
+### 00:00–00:10 — Welcome, and the mock-Knowledge-Box honesty rule
 
-**On screen:** the demo home page, freshly loaded. Dropzone empty, "no document" label,
-canonical-record panel showing its empty state, no export buttons yet — and, under the
-sample buttons, the in-page note that this deployment is running the mock Knowledge Box.
-**Screenshot:** `01-home.png`
+**On screen:** the welcome screen on a fresh deployment: the headline, the two action
+cards ("Try it with a sample" / "Use your own document"), and — not dismissible — the
+alert stating this deployment runs the mock Knowledge Box.
+**Screenshot:** `01-welcome.png`
 
-> "Most business documents — invoices, purchase orders, claim forms, receipts — arrive as
-> pictures of data: a PDF, a scan, a photo. A person still has to read them and re-key the
-> numbers. Document Processing turns any of those into a structured, validated record,
-> through one API call, in under a minute."
-
-*Why this matters (demo-giver aside):* frame the whole demo as "picture in, record out" —
-everything that follows is one document proving that claim.
+> "Document Processing turns paperwork — invoices, claim forms, statements, delivery notes
+> — into a checked, structured record, and shows you exactly where every value came from.
+> This deployment is running against a mock Knowledge Box, and it says so right here on
+> screen — nothing in this recording is dressed up as a live model reading a page."
 
 ---
 
-### 00:15–01:05 — Drop an invoice; the live pipeline; the canonical record
+### 00:10–00:22 — The guided sample, and its tour
 
-**On screen:** a document is dropped straight into the dropzone (a real file-input
-selection, the same code path as drag-and-drop). Within moments the "Live pipeline" card
-lists all seven agent stages — process, classify, extract, entities, summary, validate,
-standardize — each with a timing in milliseconds and a green "succeeded" chip, and the
-canonical record on the right fills in: document-type badge, classifier confidence,
-model/timing line, a plain-English summary, topic tags, an extracted-fields table with a
-confidence bar per field, and the entities list.
-**Screenshot:** `02-pipeline-and-record.png`
+**On screen:** clicking `Start the guided sample` posts the built-in invoice and lands in
+the Documents queue; an advisory spotlight tour introduces the queue itself.
+**Screenshot:** `02-tour.png`
 
-> "I'll drop in an invoice — in the real product this is a drag-and-drop PDF or a photo
-> from a phone. The moment it lands, Progress Agentic RAG picks it up, and seven agent
-> stages run in sequence: the document is processed, classified, its fields extracted,
-> named entities pulled out, a summary written, the result validated, and standardised
-> into one shape. Every field comes with a confidence score, not just a value.
->
-> And look here — the validation stage has flagged something: the subtotal and tax on
-> this invoice don't actually add up to the printed total. That's exactly the kind of
-> discrepancy a person would otherwise have to notice by hand; the pipeline catches it
-> automatically and surfaces it as a warning rather than silently trusting the total."
-
-*Why this matters:* this single screenshot carries most of the value proposition —
-nothing here is scripted client-side, it's the real SSE job stream and a real arithmetic
-check against the extracted numbers. Point out that a clean document would show no
-warning at all; this one was chosen deliberately to prove the check is real.
+> "Starting the guided sample drops a document straight into the queue and opens a short
+> tour of the real screen underneath it — not a mock of the product, the product itself.
+> Skipping it, or clicking through, costs nothing: the tour never blocks the page it is
+> describing."
 
 ---
 
-### 01:05–01:20 — Export it
+### 00:22–00:32 — Upload a document worth reviewing
 
-**On screen:** click through the JSON, XML and CSV export buttons; toasts confirm each
-download.
-**Screenshot:** `03-exports.png`
+**On screen:** the upload drawer, opened over the Documents list: a dropzone, the accepted
+file types and size limit read from the API, and a config picker.
+**Screenshot:** `03-upload-drawer.png`
 
-> "The same record exports as JSON, XML or CSV — whatever the downstream system expects,
-> with no re-mapping."
-
-*Why this matters:* one extraction, three integration paths — this is what makes it
-drop-in rather than another format to build against.
+> "To see the product prove something, I'll upload a document with a real problem in it —
+> the accepted types and the size limit here come from the API, not from markup that could
+> drift out of date."
 
 ---
 
-### 01:20–01:40 — Ask the document a question
+### 00:32–00:44 — The queue: worth reviewing, worth trusting
 
-**On screen:** type a question into "Ask this document" and submit; the answer streams
-in with its source-document citation and latency.
-**Screenshot:** `04-ask-answer.png`
+**On screen:** the new row — `invoice-review.txt`, identified by its own invoice number and
+supplier rather than its filename — reaches `Ready`: 12 fields, 100% grounding, one issue
+flagged.
+**Screenshot:** `04-fixture-ready.png`
 
-> "Because the document lives in an ARAG knowledge box, not just a table row, you can also
-> ask it questions directly — 'What is the total due?' — and get a grounded answer back,
-> traced to the source document."
-
-*Why this matters:* the record isn't a dead export — the original document stays
-queryable.
-
----
-
-### 01:40–02:00 — The visual path
-
-**On screen:** an image (scanned) purchase order is processed with a forced
-`purchase_order` config; the preview shows the actual image, and the record panel shows
-"auto-classification skipped" alongside the extracted fields. The in-page note from card 1
-is still visible, right under the sample buttons.
-**Screenshot:** `05-image-sample.png`
-
-> "This isn't limited to text. A scanned or photographed purchase order goes through the
-> same pipeline using visual extraction — and here I've forced the purchase-order config
-> directly, so classification is skipped and the fields it must return are pinned in
-> advance. One honest caveat: this recording is running against the mock Knowledge Box, so
-> what you're seeing here comes from a deterministic fixture, not a model reading this
-> particular page — the note on screen says so. Point it at a real Knowledge Box and a
-> multimodal model reads the page itself."
-
-*Why this matters:* proves the visual (image/PDF) path is real, and shows the second way
-of choosing a schema — forcing it — versus auto-detect. The caveat matters more than it
-might seem: it's the difference between a demo that's honest about what the mock can and
-can't prove, and one that quietly oversells it.
+> "This is `invoice-review.txt` — a supplier invoice whose subtotal and tax don't actually
+> add up to the printed total. The row already tells the story before I open it: twelve
+> fields read, full grounding, and one issue flagged — that's the arithmetic check, not a
+> guess."
 
 ---
 
-### 02:00–02:25 — Custom extraction configs
+### 00:44–00:59 — The record: a claim with a denominator
 
-**On screen:** open **Manage… → Extraction configs**, see the built-in list, add a new
-config with two custom fields, save it, and watch it appear at the top of the list,
-provisioned.
-**Screenshot:** `06-config-manager.png`, `07-config-fields.png`, `08-config-provisioned.png`
+**On screen:** the document detail's Record tab. The trust strip states "12 of 12 fields
+carry a quote found in this document," the exact/near/none breakdown, and — right below
+it — the reconciliation warning.
+**Screenshot:** `05-record.png`
 
-> "Eleven document types ship out of the box, but real catalogues always have one more
-> form. Define the fields you need — here, an insurance card's policy number and insurer —
-> and saving doesn't just store the config: it provisions a stored ARAG search
-> configuration that forces the model to return exactly those fields, grounded in the
-> document, every time this config is used."
-
-*Why this matters:* this is the extensibility story — no code change, no redeploy, to
-support a new document type.
+> "Every record opens with this strip, and it never shows a bare percentage. '12 of 12
+> fields carry a quote found in this document' is a claim you can check, not just a score.
+> And here's the validation catch: the subtotal and tax on this invoice don't reconcile
+> with the printed total — flagged automatically, against the field it actually concerns."
 
 ---
 
-### 02:25–02:45 — The admin panel
+### 00:59–01:14 — The evidence beat: a field's own quote
 
-**On screen:** sign in to `/admin/` with the deployment's admin token; the overview shows
-KB health as connected, the pipeline settings and usage; switch to the extraction-configs
-tab (the new custom config is listed, provisioned); switch to jobs and open the job just
-run, with its full stage timeline and raw JSON.
-**Screenshot:** `09-admin-overview.png`, `10-admin-configs.png`, `11-admin-jobs.png`
+**On screen:** the `Total` field's evidence disclosure, opened — the quote "TOTAL DUE:
+$25,750.00" in the model's own words, with the reconciliation issue carried inline beneath
+it rather than left for a banner at the top to explain.
+**Screenshot:** `06-evidence-quote.png`
 
-> "Operators get their own view: live KB health, every extraction config and its
-> provisioning state, and every job with its full stage timeline — the same events the
-> demo streamed, available for any run, at any time."
-
-*Why this matters:* this is what makes it operable, not just demoable — health, config
-and job visibility in one place, gated by a token.
+> "Every field carries its own quote, not just a value. Opening the evidence on Total shows
+> exactly what was read — 'TOTAL DUE: $25,750.00' — and the issue that quote raised sits
+> right here on the field, not only in a banner you'd have to correlate back to it."
 
 ---
 
-### 02:45–03:00 — The API docs, and the one-command try-it
+### 01:14–01:29 — Source & evidence: the quote, in the document's own text
 
-**On screen:** `/api/v1/docs` — the generated Redoc reference.
-**Screenshot:** `12-api-docs.png`
+**On screen:** the Source & evidence tab: the left rail lists every field's evidence, the
+right pane is the document's own extracted text with each quote highlighted; selecting
+`Invoice #` and then `Total` moves the highlight to the matching sentence.
+**Screenshot:** `07-source-highlight.png`
 
-> "Every route shown here is generated from one OpenAPI document and contract-tested
-> against it. To try all of this yourself: clone the repo, run `make install && make dev`,
-> and open localhost:8080 — no ARAG account required, it runs against a mock knowledge box
-> out of the box."
+> "This is the loop closing: the quote isn't just printed back at you, it's highlighted
+> inside the actual text Progress Agentic RAG read from the document. Selecting a field
+> jumps straight to its sentence — this is the difference between a system that asserts and
+> one that shows."
 
-*Why this matters:* close on the one command a viewer can actually run today.
+---
+
+### 01:29–01:39 — Pipeline: seven stages, real timings
+
+**On screen:** the Pipeline tab — process, classify, extract, entities, summary, validate,
+standardize — each with a real duration and a status.
+**Screenshot:** `08-pipeline.png`
+
+> "Every stage that produced this record is on the Pipeline tab, with its own timing — this
+> is the same job the queue streamed live, available afterwards for any run."
+
+---
+
+### 01:39–01:47 — Export the record
+
+**On screen:** back on Record, `Export CSV` downloads the file; a toast confirms it.
+**Screenshot:** `09-export.png`
+
+> "The record exports as CSV, JSON or XML — whatever the downstream ledger expects, with no
+> re-mapping."
+
+---
+
+### 01:47–01:59 — Ask this document
+
+**On screen:** the Ask tab: "What is the total due and when?" answered from the document's
+own text, with an `Open in source` link back to the passage it came from.
+**Screenshot:** `10-ask.png`
+
+> "Because the document lives in a Knowledge Box, not just a table row, you can ask it a
+> question directly and get an answer traced back to the same source text — not the
+> model's general knowledge."
+
+---
+
+### 01:59–02:11 — A custom extraction config
+
+**On screen:** Configs → `+ New config`: naming two fields — Policy Number, Insurer — the
+key preview updating live as they're typed.
+**Screenshot:** `11-config-builder.png`
+
+> "Eleven document types ship built in, but real catalogues always have one more form.
+> Naming the fields here is the whole job — saving is what does the work."
+
+---
+
+### 02:11–02:19 — Saved, and provisioned
+
+**On screen:** the new config's detail page: `Ready`, and its own stored ARAG search
+configuration, `dip_custom_insurance_card`.
+**Screenshot:** `12-config-saved.png`
+
+> "Saving doesn't just store a list of names — it provisions a stored search configuration
+> that forces the model to return exactly these fields, grounded in the document, every
+> time this config is used. No redeploy."
+
+---
+
+### 02:19–02:27 — Settings: what this deployment is connected to
+
+**On screen:** Settings → Connection — Knowledge Box, model, extract strategy, mean
+grounding — and the same mock-Knowledge-Box statement, without needing an admin token.
+**Screenshot:** `13-settings.png`
+
+> "Anyone using the product can answer 'what am I actually connected to?' for themselves,
+> here — no admin token required."
+
+---
+
+### 02:27–02:37 — Admin: sign in, and the operator's own view
+
+**On screen:** signing in to `/admin/` with the deployment's admin token; the Overview
+shows Knowledge Box health, the grounding mean and anything that needs attention.
+**Screenshot:** `14-admin-overview.png`
+
+> "Operators get a separate product behind its own sign-in: live health, grounding, and a
+> worklist of what needs attention — not a tab bolted onto the app Dana uses."
+
+---
+
+### 02:37–02:47 — Admin → Connection: the stored search configurations
+
+**On screen:** the Connection tab lists every stored ARAG search configuration, including
+the one just created; opening `dip_invoice_extraction` shows its model, grounding strategy
+and JSON schema.
+**Screenshot:** `15-admin-connection.png`
+
+> "Every extraction config is backed by a real, inspectable search configuration — the
+> model, the `full_resource` grounding strategy, the prompt and the schema — readable here
+> without opening the Knowledge Box dashboard."
+
+---
+
+### 02:47–02:55 — The API docs
+
+**On screen:** `/api/v1/docs`, the generated Redoc reference.
+**Screenshot:** `16-api-docs.png`
+
+> "Every screen in this recording is a documented, contract-tested `/api/v1` endpoint —
+> there is no UI-only capability. Clone the repo, run `make install && make dev`, and it's
+> the same product, running against the same mock, with no account required to start."
 
 ---
 
 ## Optional: mp4 conversion
 
 The recording is a `.webm` (Playwright's default), written under
-`showcase/out/<test name>/video.webm`. If `ffmpeg` is available locally, it can be
-converted for players that prefer mp4:
+`showcase/out/record-showcase-walkthrough/video.webm`. If `ffmpeg` is available locally, it
+can be converted for players that prefer mp4:
 
 ```bash
-ffmpeg -i showcase/out/*/video.webm -c:v libx264 -pix_fmt yuv420p -crf 20 showcase/out/showcase.mp4
+ffmpeg -i showcase/out/record-showcase-walkthrough/video.webm -c:v libx264 -pix_fmt yuv420p -crf 20 showcase/out/showcase.mp4
 ```
 
 This is not part of `make showcase` and is not required for the deliverable.

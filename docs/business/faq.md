@@ -25,8 +25,11 @@ image well.
 
 Both. Text files are read directly; images (PNG/JPEG/WebP/TIFF) and PDFs go through ARAG's
 visual-LLM extraction path — optionally with a configured ingestion-time "extract strategy"
-(`DIP_EXTRACT_STRATEGY`) for higher-fidelity visual/layout processing. The demo's "Image
-samples" buttons and prompt gallery exist specifically to show this off.
+(`DIP_EXTRACT_STRATEGY`) for higher-fidelity visual/layout processing. The welcome screen's
+"Try it with a sample" includes photographed samples (a scanned invoice, purchase order and
+pre-authorisation form) specifically to show this off; the appendix in
+[`walkthrough-demo.md`](walkthrough-demo.md#generating-your-own-test-documents) has prompts
+for generating more with an image model.
 
 ## What file types are accepted?
 
@@ -59,8 +62,9 @@ capability.
 Yes, until you delete it. Uploaded documents live in the ARAG Knowledge Box and the
 extracted record lives in the local store indefinitely — there is no automatic expiry.
 Deletion is explicit: `DELETE` a single document (removes it from both places), or an
-operator runs a retention purge (age-based, bulk) from the admin panel's **Retention** tab
-or the API. See [`../architecture/security-model.md`](../architecture/security-model.md#data-retention-and-purge).
+operator runs a retention purge (age-based, bulk, previewed before it runs) from the admin
+app's **Security** screen or the API. See
+[`../architecture/security-model.md`](../architecture/security-model.md#data-retention-and-purge).
 
 ## Is PII handled safely?
 
@@ -86,10 +90,11 @@ synthesises placeholder field values rather than genuinely reading documents) �
 ## How do I add support for a new kind of document?
 
 Two ways, neither requiring a code change for most cases: (1) as an end user, create a
-**custom extraction config** — name it, list the fields you want, done, via the admin-free
-"Manage…" button in the demo or a single `POST /api/v1/extraction-configs` call; or (2) as a
-developer, add a new built-in schema to the codebase if you want it available by default
-and addressable by document-type name. See
+**custom extraction config** — name it, list the fields you want, done — via the field
+builder at Configs → **+ New config** in the operator app (no admin token needed) or a
+single `POST /api/v1/extraction-configs` call; or (2) as a developer, add a new built-in
+schema to the codebase if you want it available by default and addressable by
+document-type name. See
 [`../developer/extension-points.md`](../developer/extension-points.md#add-a-document-type-extraction-schema).
 
 ## How fast is it?
@@ -116,10 +121,11 @@ first.
 
 ## Can I ask questions about a document instead of just extracting fields?
 
-Yes — every document has an "Ask this document" box in the demo (and a
-`POST /api/v1/documents/{id}/ask` endpoint). Answers are grounded strictly in that one
-document; if the answer isn't in it, the system says so rather than guessing from general
-knowledge.
+Yes — every document has an Ask tab in the operator app, and there's a standalone Ask
+screen (`/#/ask`) with a document picker for asking without first opening a document (and a
+`POST /api/v1/documents/{id}/ask` endpoint behind both). Answers are grounded strictly in
+that one document; if the answer isn't in it, the system says so rather than guessing from
+general knowledge.
 
 ## Is it open source?
 
@@ -130,15 +136,16 @@ against, ships in this repository.
 ## What happens to a document if I close my browser tab mid-processing?
 
 Nothing bad — processing is a background job, not something tied to a live connection. The
-live pipeline view in the demo is just a window onto that job; closing it doesn't stop or
+Pipeline tab in the operator app is just a window onto that job; closing it doesn't stop or
 restart the work, and reopening the document later shows the finished record exactly as if
 you'd stayed on the page the whole time.
 
 ## Do I need to write any code to try it?
 
 No — `make dev` starts the whole product against the mock ARAG with one command, and the
-demo UI at `/` walks through upload → extraction → export → ask with sample documents
-already provided. See [`../developer/quickstart.md`](../developer/quickstart.md).
+operator app at `/` opens on a welcome screen that walks through upload → extraction →
+export → ask with sample documents already provided, via a guided tour. See
+[`../developer/quickstart.md`](../developer/quickstart.md).
 
 ## Related
 

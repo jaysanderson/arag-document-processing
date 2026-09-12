@@ -128,14 +128,15 @@ The server creates the directory on boot if it's missing. `test/*.test.ts` uses 
   store file paths and every registered route — useful for confirming which `.env` actually
   took effect.
 - `GET /api/v1/admin/usage` (admin) shows request/ARAG-call counters and job counts by
-  status — a quick way to tell whether a stuck demo is a slow ARAG call or a hung process.
+  status — a quick way to tell whether a stuck run is a slow ARAG call or a hung process.
 - `GET /api/v1/admin/search-configurations` (admin) reads the stored `dip_*` search
   configurations straight from the Knowledge Box — the actual model, RAG strategy, prompt
   and `answer_json_schema` extraction is running against, not a local reconstruction. Useful
   for confirming a config really provisioned the way you expect, or diagnosing why
   extraction against a real KB behaves differently than the schema in `schemas.ts` implies.
-- The admin panel's Jobs tab shows the same job timeline as the demo, for any job, including
-  ones the demo UI never rendered (e.g. one you drove entirely with curl).
+- The admin app's Jobs screen shows the same job timeline as the operator app's Pipeline
+  tab, for any job, including ones the operator app never rendered (e.g. one you drove
+  entirely with curl).
 
 ## Related
 

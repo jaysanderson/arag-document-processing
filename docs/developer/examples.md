@@ -8,7 +8,7 @@ Every request and response below was run against a live `make dev` instance
 
 ### Raw body + `X-Filename`
 
-What `curl --data-binary` and the demo's dropzone send:
+What `curl --data-binary` and the operator app's upload dropzone send:
 
 ```bash
 curl -sS -X POST 'http://localhost:8080/api/v1/documents?config=auto' \
@@ -99,8 +99,8 @@ is a *view* of the job, not the job itself ([DP-02](../../DECISIONS.md)).
 </script>
 ```
 
-This is exactly the pattern `public/app.js` uses to drive the `<arag-job-timeline>` element
-in the demo.
+This is exactly the pattern `public/views/document.js` uses to drive the live Pipeline tab,
+and `admin/admin.js` uses for the `<arag-job-timeline>` element in a job's drawer.
 
 ## The canonical record
 
@@ -233,6 +233,9 @@ curl -sS -X POST "http://localhost:8080/api/v1/documents/$ID/ask" \
 {
   "answer": "... TOTAL DUE:         $116,160.00 AUD ...",
   "sources": ["invoice.txt"],
+  "citations": [
+    { "paragraphId": "0-0-0", "text": "TOTAL DUE:         $116,160.00 AUD", "start": 604, "end": 638 }
+  ],
   "ms": 3
 }
 ```
@@ -241,7 +244,10 @@ curl -sS -X POST "http://localhost:8080/api/v1/documents/$ID/ask" \
 `resource_filters` + `full_resource` (see
 [`arag-integration.md`](../architecture/arag-integration.md#key-arag-mechanics)); a question
 outside the document is answered "I don't have that information" per the system prompt in
-`services/documents.ts`.
+`services/documents.ts`. `sources` names the resource(s) the answer drew on; `citations` (an
+empty array when retrieval returned nothing) is the retrieval paragraph itself, which is
+what the operator app's **Open in source** link uses to jump into the Source & evidence tab
+— a source name alone is not something a reviewer can open and check.
 
 ## Custom extraction configs
 
@@ -315,6 +321,40 @@ configs cannot be deleted (`409`); a custom one is removed with `DELETE
 /api/v1/extraction-configs/{id}` (also deletes its ARAG search configuration) — again
 requiring a credential; see [Credentials for write operations](#credentials-for-write-operations) below.
 
+## Editing and re-provisioning a config
+
+`PUT /api/v1/extraction-configs/{id}` replaces a custom config's name, description and
+fields in place, keeping its id — which is what the operator app's field-builder **Edit**
+screen calls, so that `meta.config` on every document already processed with it stays
+meaningful. Delete-and-recreate would break that reference; `PUT` does not:
+
+```bash
+curl -sS -b /tmp/cookies.txt -X PUT 'http://localhost:8080/api/v1/extraction-configs/cfg_7361fcb2' \
+     -H 'Content-Type: application/json' \
+     -d '{"name": "Insurance Card", "fields": [
+           { "label": "Member Name", "required": true },
+           { "label": "Member ID",   "required": true },
+           { "label": "Group Number" }
+         ]}'
+```
+
+Built-in configs answer `409` — they cannot be edited, only read; create a custom config
+with the fields you want instead. Either kind can be re-provisioned on its own, without
+touching the others:
+
+```bash
+curl -sS -b /tmp/cookies.txt -X POST 'http://localhost:8080/api/v1/extraction-configs/cfg_7361fcb2/provision'
+```
+
+```json
+{ "ok": true, "aragConfig": "dip_custom_insurance_card" }
+```
+
+Idempotent — safe to call any time. `POST /api/v1/admin/provision` (admin token required)
+does the same for every config at once; the per-config route is the finer-grained action an
+operator reaches for to fix the one config that did not take, without re-sending the other
+twelve.
+
 ## `config=agent` — reading Data Augmentation agent output
 
 ```bash
@@ -339,11 +379,13 @@ Details in [`arag-integration.md`](../architecture/arag-integration.md#data-augm
 
 ## Credentials for write operations
 
-Four routes change shared state and so always require a credential — an API key, the
-admin token, or a same-origin session cookie — **even when `API_KEYS` is unset**: creating
-a custom extraction config, and the three deletes. Uploads and every read stay open either
-way (`src/routes/guards.ts`, `requireWriter`). Get a session first, the same way the demo
-UI does at page load:
+A handful of routes change shared state and so always require a credential — an API key,
+the admin token, or a same-origin session cookie — **even when `API_KEYS` is unset**:
+creating or replacing a custom extraction config (`POST`/`PUT /api/v1/extraction-configs`),
+the three deletes (single document, bulk documents, a custom config), and reprocessing a
+document (it spends model calls). Uploads and every read stay open either way
+(`src/routes/guards.ts`, `requireWriter`). Get a session first, the same way the operator
+app does at page load:
 
 ```bash
 curl -sS -c /tmp/cookies.txt -X POST http://localhost:8080/api/v1/session
@@ -367,20 +409,139 @@ Without a credential, the same call returns a real, verified `401`:
 }
 ```
 
-## Pagination and filtering
+## Pagination, search and filtering
 
 ```bash
 curl -sS "http://localhost:8080/api/v1/documents?page=1&page_size=5&status=ready&doc_type=invoice"
 ```
 
 ```json
-{ "items": [ /* up to 5 DocumentRecord objects */ ], "page": 1, "page_size": 5, "total": 2, "next_page": false }
+{ "items": [ /* up to 5 DocumentRecord objects */ ], "page": 1, "page_size": 5, "total": 2, "next_page": false,
+  "facets": { "total": 24, "status": { "ready": 20, "processing": 1, "failed": 1, "pending": 2 },
+              "docType": { "invoice": 9, "receipt": 3, "...": "…" }, "degraded": 2, "needsReview": 3 } }
 ```
 
-`page_size` maxes out at 200 (STANDARDS §2). `status` is one of `pending | processing |
-ready | failed`; `doc_type` is any of the 11 built-in types. `GET /api/v1/jobs` filters by
-`status` (`queued | running | succeeded | failed | cancelled`) and `ref` (the document id
-that submitted the job), with `limit` up to 200.
+`page_size` maxes out at 200 (STANDARDS §2). This is what the Documents screen's filter bar
+and stat strip call — every parameter is optional and combines with the others as `AND`:
+
+| Param | Notes |
+|---|---|
+| `q` | Case-insensitive substring over the filename, summary, tags and extracted field values — finds a document by the supplier on it, not only by the name it was uploaded under |
+| `status` | `pending \| processing \| ready \| failed` |
+| `doc_type` | Any of the 11 built-in types |
+| `sort`, `order` | `sort` is `created_at` (default) \| `filename` \| `doc_type` \| `status` \| `fields` \| `grounding`; `order` is `asc` \| `desc` (default `desc`) |
+| `date_from`, `date_to` | Inclusive range over `createdAt`, ISO 8601 or `YYYY-MM-DD` |
+| `config` | Only documents extracted with this extraction-config id |
+| `degraded` | `true` selects records that finished with a failed stage (`meta.stageErrors`) |
+| `has_issues` | `true` selects records carrying at least one validation issue |
+| `min_grounding` | `0`–`1`; records with no grounding score are excluded, not treated as `0` |
+
+`facets` reports counts across the *whole* collection, not just the current page — it is
+what lets the stat strip and the filter dropdowns show numbers without a second round trip.
+
+`GET /api/v1/jobs` takes the equivalent shape: `status` (`queued | running | succeeded |
+failed | cancelled`), `ref` (the document id that submitted the job), `page`/`page_size`
+(preferred) or `limit` (kept for compatibility), `sort` (`created_at` default | `duration` |
+`status`), `order`, and `q` (matches the job id, its kind, or the document id it refers
+to). The response is paged the same way: `{ items, page, page_size, total, next_page }`.
+
+## Bulk actions on a selection of documents
+
+Both take the same shape as a single export or delete, just with an array of ids — this is
+what the Documents screen's bulk bar calls once a selection is made:
+
+```bash
+curl -sS -b /tmp/cookies.txt -X POST 'http://localhost:8080/api/v1/documents/bulk-export' \
+     -H 'Content-Type: application/json' \
+     -d '{"ids": ["0bef696b45cc4bc6b04367b8cf752170", "f727bea71b6b46c99e1176f142231945"], "format": "csv"}'
+```
+
+CSV emits one row per extracted field across every selected record (so a spreadsheet can
+reconcile a whole batch in one pass); JSON returns an array of records; XML wraps them in a
+`<documents>` root. Ids that don't exist are skipped and named in the `X-Skipped-Ids`
+response header rather than failing the whole export.
+
+```bash
+curl -sS -b /tmp/cookies.txt -X POST 'http://localhost:8080/api/v1/documents/bulk-delete' \
+     -H 'Content-Type: application/json' \
+     -d '{"ids": ["0bef696b45cc4bc6b04367b8cf752170", "doesnotexist"]}'
+```
+
+```json
+{ "deleted": ["0bef696b45cc4bc6b04367b8cf752170"], "failed": [{ "id": "doesnotexist", "error": "Document not found" }] }
+```
+
+Best-effort: each id is attempted and reported separately, so one missing document doesn't
+abandon the rest of the selection. Both routes need the same credential as a single
+delete/export (export is a read, so it stays open; delete requires a writer credential).
+
+## Reprocessing a document
+
+The recovery action for a failed or degraded record: the file is already in the Knowledge
+Box, so this re-runs the pipeline over the existing resource rather than asking for a
+re-upload.
+
+```bash
+curl -sS -b /tmp/cookies.txt -X POST "http://localhost:8080/api/v1/documents/$ID/reprocess"
+```
+
+`202` with the reset record (`status` back to `pending`, `fields`/`evidence`/`issues`/
+`meta.stageErrors` cleared) and the new job to watch — the same shape as the original
+upload response. Pass `?config=<id>` to force a different extraction config on the retry,
+which is also how a config change gets tested against a document already on file. `409` if
+the document is already queued or processing.
+
+## The document's own text and its original file
+
+Two routes exist so a client can show an evidence quote *in* the document, not just quote
+it back:
+
+```bash
+curl -sS "http://localhost:8080/api/v1/documents/$ID/text"
+```
+
+```json
+{ "text": "GLOBEX SUPPLY CO PTY LTD\nLevel 3, 88 Collins Street...", "chars": 1284, "truncated": false }
+```
+
+This is the exact text every extraction stage read, and what `Evidence.start`/`Evidence.end`
+are offsets into — the operator app's Source & evidence tab highlights each evidence quote
+by slicing this string at those offsets. `max_chars` (default 200000, max 2000000) caps the
+response; `truncated: true` means there was more.
+
+```bash
+curl -sS "http://localhost:8080/api/v1/documents/$ID/source" -o original.pdf
+```
+
+Streams the original uploaded bytes back from the Knowledge Box with a `Content-Type`
+matching `contentType` and `Content-Disposition: inline`. Answers `404` when the resource no
+longer holds the file, which is the operator app's cue to hide the "Original file" toggle
+and fall back to showing the extracted text only.
+
+## Workspace stats, settings and samples
+
+Three read-only, credential-free routes back the parts of the operator app that don't need
+an admin token:
+
+```bash
+curl -sS "http://localhost:8080/api/v1/stats"
+```
+
+```json
+{ "documents": { "total": 24, "ready": 20, "degraded": 2, "failed": 1, "pending": 1 },
+  "byDocType": { "invoice": 9, "receipt": 3 }, "groundingScore": 0.91,
+  "fields": 210, "issues": 6, "jobs": { "succeeded": 21, "failed": 1, "running": 1, "queued": 1 } }
+```
+
+`GET /api/v1/settings` returns the non-secret runtime configuration the Settings screen
+shows — connection state, extraction defaults, upload limits, effective branding; the
+extract-strategy id itself and every credential stay behind `GET /api/v1/admin/config`.
+`GET /api/v1/samples` lists the bundled sample documents (id, title, description, the
+static URL the bytes come from, and the document type each is expected to classify as) —
+the catalogue behind "Try with a sample" on the welcome screen. `POST
+/api/v1/documents/sample` (body `{"sampleId": "invoice"}`) reads one of them server-side
+and runs it through the ordinary upload path in one call, which is what the welcome
+screen's guided-sample button does rather than fetching the bytes itself first.
 
 ## Error handling
 
@@ -443,6 +604,41 @@ disabled"). **429 — rate limited** (also problem+json) carries a `Retry-After`
 default limits are 5 requests/sec with a burst of 20 per IP or API key
 (`RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`), verified by hammering `/api/v1/schemas` 30 times in a
 row against a fresh bucket: the 21st request onward returned `429` until the bucket refilled.
+
+## Admin: security posture and a dry-run purge
+
+```bash
+curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/v1/admin/security
+```
+
+```json
+{ "apiKeys": { "count": 2, "hints": ["…a1b2", "…9f04"] }, "adminTokenSet": true,
+  "sessionTtlSec": 43200, "cors": [], "rateLimit": { "rps": 5, "burst": 20 },
+  "maxUploadBytes": 26214400, "writesRequireCredential": true,
+  "headers": { "csp": true, "hsts": true, "nosniff": true },
+  "retention": { "defaultOlderThanDays": 30 } }
+```
+
+Values only — a key or token is never returned, only how many are configured and the last
+few characters of each, which is what the admin app's Security screen shows so an operator
+can tell two keys apart without ever seeing either in full.
+
+Retention purge always supports a dry run, which is how the Security screen's **Preview**
+button states the exact blast radius before **Purge** is even clickable:
+
+```bash
+curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" -X POST http://localhost:8080/api/v1/admin/purge \
+     -H 'Content-Type: application/json' -d '{"olderThanDays": 30, "dryRun": true}'
+```
+
+```json
+{ "olderThanDays": 30, "dryRun": true, "wouldDelete": 4,
+  "oldest": "2026-06-01T02:46:03.172Z", "newest": "2026-06-28T11:02:44.001Z",
+  "ids": ["...", "...", "...", "..."], "deleted": [], "failed": [] }
+```
+
+Nothing is deleted while `dryRun: true`. Drop it (or set it to `false`) to actually purge —
+the response then reports `deleted`/`failed` instead of `wouldDelete`.
 
 ## Minimal clients (standard library only)
 

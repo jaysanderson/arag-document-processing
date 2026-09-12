@@ -1,28 +1,41 @@
 # Document Processing — storyboard
 
 Shot list for `showcase/record.spec.ts`. Each screenshot lands in `showcase/out/` at the
-listed filename; the `.webm` video (`showcase/out/<test name>/video.webm`) covers the
-whole session continuously. Durations are approximate on-screen time in the recording,
-not narration length (see `SCRIPT.md` for the read-aloud script and timestamps).
+listed filename; the `.webm` video
+(`showcase/out/record-showcase-walkthrough/video.webm`) covers the whole session
+continuously. Durations are approximate on-screen time in the recording, not narration
+length (see `SCRIPT.md` for the read-aloud script and timestamps).
+
+The walkthrough follows `design/PRODUCT-EXPERIENCE.md` §6.3, with one change: the guided
+sample (`#startSample`) posts the clean, built-in `invoice.txt`, which has no validation
+issue and nothing unverified for the trust surfaces to prove. So the tour still runs — it
+is a real, on-screen feature — but the record the rest of the walkthrough opens is
+`showcase/fixtures/invoice-review.txt`, dropped in afterwards through the upload drawer.
+That fixture's subtotal and tax deliberately do not reconcile with the printed total, so
+shots 5–7 (the trust strip, the field evidence and the source highlight — the centre of the
+recording) all have a real issue and a real quote to show, not an empty state.
 
 | # | Duration | On screen | UI element in focus | Camera / zoom note | Screenshot | Narration line (SCRIPT.md) |
 |---|---|---|---|---|---|---|
-| 1 | ~3 s | Home page, freshly loaded, nothing processed yet, no export buttons; the in-page note under the sample buttons states this deployment is running the mock Knowledge Box (`#mockNote`) | Dropzone + empty canonical-record panel | Full page, no zoom — establish the whole layout | `01-home.png` | 00:00 "Most business documents… arrive as pictures of data" |
-| 2 | ~4 s | An invoice dropped via the file input; pipeline card shows all seven stages complete with timings and a "succeeded" chip; canonical record shows fields with confidence bars, entities, a summary, and a validation warning banner (subtotal + tax ≠ total) | `#timeline` (pipeline card, left) and `#resultBody` (record panel, right) — both visible in one shot | Full page — the split layout puts the process and the result side by side | `02-pipeline-and-record.png` | 00:15 "I'll drop in an invoice…" through "…surfaces it as a warning" |
-| 3 | ~2 s | Export toasts visible after JSON/XML/CSV downloads | `#exports` buttons + `.arag-toast` | Full page | `03-exports.png` | 01:05 "The same record exports as JSON, XML or CSV…" |
-| 4 | ~3 s | Question asked, grounded answer rendered with source-document chip and latency | `#answer .arag-bubble.assistant` | Full page | `04-ask-answer.png` | 01:20 "You can also ask it questions directly…" |
-| 5 | ~3 s | Image purchase-order sample processed with a forced config; image preview + "auto-classification skipped" record; the mock-Knowledge-Box note (`#mockNote`) is still visible in card 1 | `#preview img` and `#docConf` | Full page — the image preview on the left is the key contrast with shot 2's text preview | `05-image-sample.png` | 01:40 "This isn't limited to text… this recording is running against the mock Knowledge Box…" |
-| 6 | ~2 s | Extraction-config modal open, built-in configs listed | `#configModal` / `#cfgList` | Modal is centred — full page capture still reads fine | `06-config-manager.png` | 02:00 "Eleven document types ship out of the box…" |
-| 7 | ~2 s | Custom config form filled in (name + two field rows) before saving | `#cfgName`, `#cfgFields` | Modal | `07-config-fields.png` | 02:00 (continued) "Define the fields you need…" |
-| 8 | ~2 s | New custom config saved, scrolled into view at the top of the list under "Custom", showing "provisioned" | `#cfgList` (new card, "provisioned" chip) | Modal, scrolled to the new card | `08-config-provisioned.png` | 02:00 (continued) "…provisions a stored ARAG search configuration…" |
-| 9 | ~2 s | Admin signed in, overview tab: health "connected", version/uptime, pipeline settings (extract strategy, model, document counts), usage JSON | `Health` and `Pipeline settings` cards | Full page | `09-admin-overview.png` | 02:25 "Operators get their own view…" |
-| 10 | ~2 s | Admin extraction-configs tab: table including the new custom config, all provisioned | `#cfgTable` | Full page | `10-admin-configs.png` | 02:25 (continued) "…every extraction config and its provisioning state…" |
-| 11 | ~2 s | Admin jobs tab: job list plus the opened job's stage timeline and raw JSON | `#jobs` table + `#jobDetail` | Full page | `11-admin-jobs.png` | 02:25 (continued) "…every job with its full stage timeline…" |
-| 12 | ~3 s | Redoc API reference page | Page title / operation list | Full page | `12-api-docs.png` | 02:45 "Every route shown here is generated from one OpenAPI document…" |
+| 1 | ~2 s | Welcome, first run: headline, two action cards, the non-dismissible mock-Knowledge-Box alert | `.arag-alert.warn` + the two `.arag-card`s | Full page, no zoom — establish the layout | `01-welcome.png` | 00:00 "Document Processing turns paperwork…" |
+| 2 | ~2 s | The guided sample posted; the advisory spotlight tour's first step, over the real Documents queue | `.dip-tour__card` over `#strip` | Full page — the scrim and card sit over the live screen, not a separate mock | `02-tour.png` | 00:10 "Starting the guided sample…" |
+| 3 | ~2 s | The upload drawer open over the Documents list: dropzone, accepted types and size limit, config picker | `.dip-drawer` | Full page | `03-upload-drawer.png` | 00:22 "To see the product prove something…" |
+| 4 | ~2 s | `invoice-review.txt` row, Ready: identified by its own invoice number and supplier, 12 fields, 100% grounding, 1 issue | `#docsTable` row for `invoice-review.txt` | Full page | `04-fixture-ready.png` | 00:32 "This is invoice-review.txt…" |
+| 5 | ~3 s | Document detail, Record tab: the trust strip ("12 of 12 fields carry a quote found in this document", exact/near/none breakdown) and the reconciliation warning | `.dip-grounding` + the issue `.arag-alert.warn` | Full page — strip is the first element, issue directly beneath it | `05-record.png` | 00:44 "Every record opens with this strip…" |
+| 6 | ~3 s | The `Total` field's evidence disclosure open: the quote "TOTAL DUE: $25,750.00", with the reconciliation issue carried inline on the field | `#field-total .dip-field__evidence` (open) + `.dip-field__issue` | Full page — the centre of the recording | `06-evidence-quote.png` | 00:59 "Every field carries its own quote…" |
+| 7 | ~3 s | Source & evidence tab: the evidence rail on the left, the document's own extracted text on the right with the `Total` quote highlighted and active | `.dip-source__rail` + `mark.dip-hit.is-active` | Full page — two panes, bidirectionally linked | `07-source-highlight.png` | 01:14 "This is the loop closing…" |
+| 8 | ~2 s | Pipeline tab: all seven stages with real durations and status | `#tabPanel` table | Full page | `08-pipeline.png` | 01:29 "Every stage that produced this record…" |
+| 9 | ~2 s | Record tab again; CSV exported, toast confirms the download | `#exportCsv` + `.arag-toast` | Full page | `09-export.png` | 01:39 "The record exports as CSV, JSON or XML…" |
+| 10 | ~2 s | Ask tab: question asked, grounded answer with `Open in source` links | `.arag-bubble.assistant` (last) | Full page | `10-ask.png` | 01:47 "Because the document lives in a Knowledge Box…" |
+| 11 | ~2 s | New extraction config form: name and two field rows filled in, key preview updating live | `#cfgName`, `.dip-fieldrow`, `#keyPreview` | Full page | `11-config-builder.png` | 01:59 "Eleven document types ship built in…" |
+| 12 | ~2 s | The saved config's detail page: `Ready`, its own stored ARAG search configuration named | `.arag-chip.ok` + provisioning `dl` | Full page | `12-config-saved.png` | 02:11 "Saving doesn't just store a list of names…" |
+| 13 | ~2 s | Settings → Connection: Knowledge Box, model, extract strategy, mean grounding, the mock alert — no admin token | `#panel` (Connection tab) | Full page | `13-settings.png` | 02:19 "Anyone using the product can answer…" |
+| 14 | ~2 s | Admin, signed in: Overview — health, grounding, "Needs attention" | `.dip-statstrip` + "Needs attention" card | Full page | `14-admin-overview.png` | 02:27 "Operators get a separate product…" |
+| 15 | ~2 s | Admin → Connection: every stored ARAG search configuration, `dip_invoice_extraction`'s drawer open showing its prompt and schema | `table` + open `.dip-drawer` | Full page | `15-admin-connection.png` | 02:37 "Every extraction config is backed by…" |
+| 16 | ~2 s | Redoc API reference page | Page title / operation list | Full page | `16-api-docs.png` | 02:47 "Every screen in this recording is…" |
 
-Total: 12 screenshots, one continuous video covering all shots plus the transitions
-between them (page navigations, typing, clicking). Shots 2 and 3 onward share the same
-document (`invoice-review.txt`) until shot 5 switches to the image sample; shots 6–8 use
-whichever document is currently loaded (the image sample) as the extraction target for
-the custom-config demonstration — only the config manager itself is on screen there, so
-the document underneath is incidental.
+Total: 16 screenshots, one continuous video covering all shots plus the transitions between
+them (page navigations, typing, clicking, opening disclosures). Shots 4 onward all concern
+the same document, `invoice-review.txt`, uploaded once in shot 3 and never replaced; the
+built-in sample from the guided sample tour (shot 2) exists in the queue throughout but is
+never reopened — its only purpose is to let the tour run against a real, populated screen.

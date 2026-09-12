@@ -20,14 +20,15 @@ Two cards, equal weight:
 - **Try it with a sample** — click **Start the guided sample**. This posts the bundled
   invoice sample (`POST /api/v1/documents/sample`) and drops you straight into the queue
   with a three-step guided tour running (more on that below). An **Other samples**
-  disclosure underneath lists every bundled sample — invoices, a purchase order, a
+  disclosure underneath lists every bundled sample — an invoice, a purchase order, a
   contract, a bank statement, a receipt, a résumé, and photographed versions of an
-  invoice, a purchase order, and a pre-authorisation form — each processed the same way a
-  real upload would be.
+  invoice, a purchase order, a pre-authorisation form and a remittance statement — each
+  processed the same way a real upload would be.
 - **Use your own document** — click **Upload a document** to open the upload drawer
-  directly. Say what it accepts: PDF, PNG, JPEG, TIFF, DOCX, TXT, CSV or Markdown, up to
-  25 MB. Worth saying out loud to a customer: bring a difficult document, not a clean one —
-  a bad scan tells you more than a sample ever will.
+  directly. The card names what it accepts: PDF, PNG, JPEG, TIFF, DOCX, TXT, CSV or
+  Markdown (the 25 MB size ceiling is stated once you're in the drawer itself). Worth
+  saying out loud to a customer: bring a difficult document, not a clean one — a bad scan
+  tells you more than a sample ever will.
 
 If the deployment is running the mock Knowledge Box, a non-dismissible amber notice sits
 under the two cards: *"This deployment is running the mock Knowledge Box. Extraction comes
@@ -50,15 +51,16 @@ that a solutions engineer can either narrate over or let the customer read thems
 3. Highlights **Configs** in the sidebar: *"Configs are what the model is forced to return.
    Eleven types are built in; a new one is a list of field names."*
 
-**Back** / **Next** / **Skip tour** sit on each step's card, and `Esc` ends the tour
-immediately. It never restarts on its own. The step lives in the URL
+**Back** / **Next** / **Skip tour** sit on each step's card (**Next** reads **Done** on the
+last step), and `Esc` ends the tour immediately. It never restarts on its own. The step
+lives in the URL
 (`?tour=1&step=2`), so any step can be linked to directly — which is how the showcase
 recording stays reproducible.
 
 ## 1 · Documents — the queue (`/#/documents`)
 
-This is the default screen and the one Dana (the AP manager persona) never leaves. At the
-top of the content column:
+This is the default screen and the one an AP or finance operations user rarely leaves. At
+the top of the content column:
 
 - **Stat strip** — four tiles: **Documents** (total), **Need review** (issues or weak
   grounding), **In flight** (queued or processing), **Degraded** (finished but a stage
@@ -82,7 +84,7 @@ top of the content column:
 - **Row menu** (`⋯`) — Open, Ask this document, Export JSON/XML/CSV, Reprocess (failed or
   degraded rows only), Delete.
 
-Click **+ Upload document** (top right) to open the upload drawer over the list — the list
+Click **Upload document** (top right) to open the upload drawer over the list — the list
 stays visible behind it, and closing the drawer (or pressing Back) returns to the queue
 without losing an in-flight upload.
 
@@ -133,14 +135,16 @@ This is the screen the product is judged on. Point at things top to bottom:
    normalised value (with the original raw text shown alongside whenever normalisation
    changed it — `$25,750.00` → `25750`), a confidence meter (grey, never colour-coded — that
    is deliberate: colouring confidence would make it look like verification), and the
-   verification chip — **Verified**, **Near match**, or **No quote returned**. Expand a
-   field's **Evidence** disclosure to read the exact quote, and click **Open in source** to
-   jump to it highlighted in the document's own text.
+   verification chip — **Verified**, **Near match**, **No quote returned** (the model
+   returned none), or **Quote not found** (it returned one, but it doesn't appear in the
+   document). Expand a field's **Evidence** disclosure to read the exact quote, and click
+   **Open in source** to jump to it highlighted in the document's own text.
 5. **The right-hand cards** — Summary (with topic tags), Entities, "How this was produced"
    (config, schema, model, the stored ARAG search-configuration name, source character
    count, run time, document id), and a Danger zone with **Delete document**.
-6. **Page actions** — **Export CSV** is the primary button; the overflow menu (`⋯`) adds
-   Export JSON, Export XML, Reprocess, Copy document id, Copy job id, and Delete.
+6. **Page actions** — **Export CSV** is the primary button, with an **Ask** link next to it
+   that jumps straight to the Ask tab; the overflow menu (`⋯`) adds Export JSON, Export
+   XML, Reprocess, Copy document id, Copy job id, and Delete document.
 
 ### Source & evidence
 
@@ -157,8 +161,10 @@ not just a citation you have to trust. Two panes:
 Click any evidence entry on the left and the source pane scrolls to and highlights that
 quote; click a highlighted quote in the text and the matching entry is selected on the
 left. Both directions update the URL (`?ev=<field>`), so a specific disputed value can be
-linked to directly. If the source text is no longer available, the quotes still render —
-only the jump-to-source behaviour is disabled, with a note explaining why.
+linked to directly. If the extracted text is no longer available for this document, the
+left rail still lists every quote — only the right pane shows an explanatory error in its
+place, so nothing pretends the evidence is unavailable, only the ability to see it in
+context.
 
 ### Pipeline
 
@@ -166,33 +172,34 @@ A table of the seven stages — process, classify, extract, entities, summary, v
 standardize — each with a duration bar (relative to the slowest stage) and a **Done** /
 **Failed** / **Not run** chip. If a stage failed, a warning banner sits above the table
 naming it, with a **Reprocess** button, and the failed row's bar renders in the danger
-colour. Below the table: total time, the job id (with **Copy id** and a link to open it in
-**Jobs**), and start time. A collapsed **What each stage does** disclosure explains each
-stage in one line — useful the first time someone asks "what does 'standardize' actually
-do?"
+colour. Below the table: total time, the job id with a status chip and an **Open in Jobs**
+link, and the start time (**Copy job id** itself lives in the Record tab's overflow menu).
+A collapsed **What each stage does** disclosure explains each stage in one line — useful
+the first time someone asks "what does 'standardize' actually do?"
 
 ### Ask
 
 A per-document chat: suggested questions tailored to the document type (an invoice gets
 "What is the total due and when?"; a contract gets "What is the termination notice
-period?"), a text box, and an **Ask** button. Answers come back with the source document
-named and, when the API returns a citation, an **Open in source** link; otherwise the
-answer card says plainly **No source returned** rather than implying one exists. The
-conversation is not saved — leaving the tab and coming back starts fresh.
+period?"), a text box, and an **Ask** button. When the API returns a citation, the answer
+card adds an **Open in source** link; otherwise it says plainly **No source returned**
+rather than implying one exists. The conversation is not saved — leaving the tab and
+coming back starts fresh.
 
 ### JSON
 
 The canonical record exactly as `GET /api/v1/documents/{id}` returns it, rendered with the
-shared JSON viewer. This is Priya's (the integration engineer persona) screen — it proves
-the UI shows nothing the API does not also expose.
+shared JSON viewer. This is the screen for an integration engineer evaluating the
+product — it proves the UI shows nothing the API does not also expose.
 
 ## 3 · Ask (`/#/ask`)
 
-A first-class home for grounded Q&A that does not start with finding a row in a list —
-Alex's (the contracts-manager persona) screen. Pick a document from the combobox (only
-**Ready** and **Degraded** documents are selectable), then ask exactly as on the document's
-own Ask tab. The page states plainly that there is no cross-document search — each question
-is scoped to one file.
+A first-class home for grounded Q&A that does not start with finding a row in a list — a
+contracts or procurement manager's screen. Pick a document from the dropdown (documents
+that finished processing are listed — a degraded one is included, since its fields still
+processed even though a later stage failed; anything still queued, processing or failed is
+not), then ask exactly as on the document's own Ask tab. The page states plainly that there
+is no cross-document search — each question is scoped to one file.
 
 ## 4 · Configs (`/#/configs`)
 

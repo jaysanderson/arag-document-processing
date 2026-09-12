@@ -37,8 +37,8 @@ built from the same array.
 3. Re-provision so the stored ARAG search configuration picks it up:
    `POST /api/v1/admin/provision`.
 
-Nothing else changes: `GET /api/v1/schemas`, the demo's config selector, the admin table and
-the OpenAPI document all derive from those two edits. The
+Nothing else changes: `GET /api/v1/schemas`, the operator app's upload config selector, the
+admin configs table and the OpenAPI document all derive from those two edits. The
 [developer lab](../../enablement/developer-track/LAB.md) walks through exactly this.
 
 ## 2. Change what the agents do
@@ -101,7 +101,7 @@ Inherit these; they are what makes the fork maintainable:
 
 ```bash
 make check      # Biome, tsc --noEmit, tests with the 80 % coverage gate, dependency audit
-make e2e        # Playwright over the demo and admin against the mock ARAG
+make e2e        # Playwright over the operator app and the admin app against the mock ARAG
 make links      # every relative documentation link resolves
 make smoke      # opt-in live run against a real Knowledge Box; cleans up after itself
 ```

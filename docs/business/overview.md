@@ -52,13 +52,14 @@ platform used for retrieval-augmented generation. Every extraction is grounded i
 actual uploaded document — the model is never asked to recall facts from memory, only to
 read and structure what's in front of it — which is what makes the results trustworthy
 enough to route into a business process rather than just interesting to look at. It's
-released as an open, self-hostable API-first product: every capability in the demo and
-admin panel is also a documented `/api/v1` endpoint, so it's straightforward to fold into
-an existing workflow rather than being a standalone tool people copy-paste in and out of.
+released as an open, self-hostable API-first product: every capability in the operator app
+and the admin app is also a documented `/api/v1` endpoint, so it's straightforward to fold
+into an existing workflow rather than being a standalone tool people copy-paste in and out
+of.
 
 ## Where to go next
 
 - [`when-to-use.md`](when-to-use.md) — good fits, poor fits, and honest alternatives.
-- [`walkthrough-demo.md`](walkthrough-demo.md) — a guided tour of the demo, for a first look.
+- [`walkthrough-demo.md`](walkthrough-demo.md) — a guided tour of the operator app, for a first look.
 - [`walkthrough-admin.md`](walkthrough-admin.md) — the operator's view: health, jobs, retention.
 - [`faq.md`](faq.md) — the questions an evaluator usually asks next.

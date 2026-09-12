@@ -2,8 +2,8 @@
 
 A partner can rebrand a deployment of Document Processing **by configuration alone** — no
 fork, no rebuild, no code change. Set `BRAND_*` environment variables, drop a logo into a
-directory, restart. Both the demo (`/`) and the admin panel (`/admin/`) read the effective
-branding from `GET /api/v1/branding` before they paint.
+directory, restart. Both the operator app (`/`) and the admin app (`/admin/`) read the
+effective branding from `GET /api/v1/branding` before they paint.
 
 ## The branding keys
 
@@ -74,8 +74,10 @@ $ curl -sS http://localhost:8080/api/v1/branding
  "footerText":"","docsUrl":"/api/v1/docs","supportUrl":""}
 ```
 
-The admin panel's **Configuration** tab shows the same values with the variable that sets
-each one, so an operator can see what is in force without shell access.
+The admin app's **Branding** screen (`/admin/#/branding`) shows the same values with the
+variable that sets each one, plus a live preview — and the same information, without an
+admin token, is on the operator app's **Settings → Branding** tab — so an operator can see
+what is in force without shell access.
 
 ## What branding does *not* change
 

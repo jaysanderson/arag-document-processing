@@ -83,7 +83,7 @@ function toParams(f) {
   return p;
 }
 
-export async function renderDocuments(main, { query, stale }) {
+export async function renderDocuments(main, { query, stale, keepEmpty = false }) {
   const f = filtersFrom(query);
   stopLive();
   main.innerHTML = `
@@ -115,8 +115,10 @@ export async function renderDocuments(main, { query, stale }) {
   if (stale()) return;
 
   // First run is a different product from "no results": send it to the welcome screen
-  // rather than showing an empty table with filters nobody set.
-  if (page.total === 0 && activeFilterCount(f) === 0) {
+  // rather than showing an empty table with filters nobody set. `keepEmpty` is for the
+  // upload drawer, which is a route over this list: arriving from Welcome's "Use your own
+  // document" with nothing processed yet must not bounce straight back to Welcome.
+  if (page.total === 0 && activeFilterCount(f) === 0 && !keepEmpty) {
     navigate("/welcome", {}, { replace: true });
     return;
   }
@@ -267,12 +269,22 @@ function subline(doc) {
 function renderList(main, page, f, query) {
   const host = $("#list", main);
   if (!page.items.length) {
-    host.innerHTML = emptyState({
-      iconName: "search",
-      title: "No documents match these filters",
-      body: "Try a wider date range, or a different status.",
-      actions: '<button class="arag-btn secondary" type="button" id="clear2">Clear all filters</button>',
-    });
+    host.innerHTML =
+      activeFilterCount(f) === 0
+        ? emptyState({
+            iconName: "document",
+            title: "No documents yet",
+            body: "Drop in a document and get back a checked, structured record — with the sentence from the page behind every value.",
+            actions: `<a class="arag-btn" href="${buildHash("/documents/upload")}">Upload document</a>
+              <a class="arag-btn secondary" href="${buildHash("/welcome")}">Start the guided sample</a>`,
+          })
+        : emptyState({
+            iconName: "search",
+            title: "No documents match these filters",
+            body: "Try a wider date range, or a different status.",
+            actions:
+              '<button class="arag-btn secondary" type="button" id="clear2">Clear all filters</button>',
+          });
     $("#clear2", host)?.addEventListener("click", () => navigate("/documents", {}));
     return;
   }
@@ -506,7 +518,7 @@ async function runBulk(kind, page, main, query) {
 /** The upload drawer is a route over the list, so Back closes it. */
 export async function renderUpload(main, ctx) {
   const query = { ...ctx.query };
-  await renderDocuments(main, { query, stale: ctx.stale });
+  await renderDocuments(main, { query, stale: ctx.stale, keepEmpty: true });
   openUploadDrawer({
     onClose: () => navigate("/documents", query, { replace: true }),
     onUploaded: () => renderDocuments(main, { query, stale: () => false }),

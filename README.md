@@ -21,8 +21,8 @@ Then open:
 
 | Surface | URL | What it is |
 |---|---|---|
-| Demo | <http://localhost:8080/> | The studio: drop a document, watch the pipeline, read the record |
-| Admin | <http://localhost:8080/admin/> | Health, KB test, extraction configs, jobs, logs, retention |
+| Operator app | <http://localhost:8080/> | A signed-in workspace — Documents, Configs, Ask, Jobs, Settings — hash-routed, with a guided first-run sample |
+| Admin app | <http://localhost:8080/admin/> | Operations — Overview, Connection, Configs, Jobs, Logs, Usage, Branding, Security |
 | API docs | <http://localhost:8080/api/v1/docs> | Redoc (and `/api/v1/swagger` to try it out) |
 | OpenAPI | <http://localhost:8080/api/v1/openapi.json> | The spec every route is validated against |
 
@@ -78,27 +78,36 @@ Everything lives under `/api/v1` and is described by [`src/openapi.ts`](src/open
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/documents` | Upload (multipart `file`, or raw body + `X-Filename`) → `202 {document, job}` |
-| `GET` | `/documents` | List (paged, filter by `status` / `doc_type`) |
+| `GET` | `/documents` | List — search (`q`), filter (`status`, `doc_type`, `config`, `degraded`, `has_issues`, `min_grounding`, `date_from`/`date_to`), sort and page; response includes `facets` |
 | `GET` | `/documents/{id}` | The canonical record |
 | `GET` | `/documents/{id}/export` | `?format=json\|xml\|csv` |
-| `POST` | `/documents/{id}/ask` | Grounded Q&A over one document |
+| `GET` | `/documents/{id}/text` | The document's own extracted text — what `Evidence.start`/`end` index into |
+| `GET` | `/documents/{id}/source` | The original uploaded file |
+| `POST` | `/documents/{id}/ask` | Grounded Q&A over one document (`citations[]` in the response) |
+| `POST` | `/documents/{id}/reprocess` | Re-run the pipeline over an already-uploaded document (needs a credential) |
+| `POST` | `/documents/sample` | Process one of the bundled samples in one call |
+| `POST` | `/documents/bulk-delete`, `/documents/bulk-export` | Act on a selection of ids at once (needs a credential for delete) |
 | `DELETE` | `/documents/{id}` | Delete the record **and** the KB resource (needs a credential) |
-| `GET` | `/jobs`, `/jobs/{id}` | Processing jobs |
+| `GET` | `/stats` | Workspace counters behind the Documents stat strip |
+| `GET` | `/settings` | Non-secret runtime settings: connection, extraction limits, branding |
+| `GET` | `/samples` | The bundled sample-document catalogue |
+| `GET` | `/jobs`, `/jobs/{id}` | Processing jobs (paged: `page`, `page_size`, `sort`, `order`, `q`) |
 | `GET` | `/jobs/{id}/events` | Server-sent events for a running job |
 | `DELETE` | `/jobs/{id}` | Cancel (needs a credential) |
 | `GET`/`POST` | `/extraction-configs` | List / create |
-| `GET`/`DELETE` | `/extraction-configs/{id}` | Read / delete (needs a credential; built-ins are not deletable) |
+| `GET`/`PUT`/`DELETE` | `/extraction-configs/{id}` | Read / replace / delete (write needs a credential; built-ins are not deletable or editable) |
+| `POST` | `/extraction-configs/{id}/provision` | Re-provision one config's stored ARAG search configuration (needs a credential) |
 | `GET` | `/schemas` | Document types and their fields |
-| `POST` | `/session` | Same-origin session cookie for the demo UI |
-| `GET` | `/admin/health`, `/admin/config`, `/admin/usage`, `/admin/logs` | Operator views |
-| `POST` | `/admin/login`, `/admin/provision`, `/admin/purge` | Sign in, re-provision search configs, retention purge |
+| `POST` | `/session` | Same-origin session cookie for the operator app |
+| `GET` | `/admin/health`, `/admin/config`, `/admin/usage`, `/admin/logs`, `/admin/security` | Operator views (security posture never returns a full key or token) |
+| `POST` | `/admin/login`, `/admin/provision`, `/admin/purge` | Sign in, re-provision search configs, retention purge (`dryRun: true` previews without deleting) |
 
 Errors are RFC 9457 `application/problem+json` with a `requestId` that ties back to the
 logs. Uploads are limited by a MIME allowlist (pdf, png, jpeg, webp, tiff, txt, md, csv,
 docx) and a size cap; filenames are sanitised.
 
-Reads and uploads are open by default (rate-limited per IP) so the demo and these examples
-work with no setup. **Destructive verbs always require a credential** — an API key, the
+Reads and uploads are open by default (rate-limited per IP) so the operator app and these
+examples work with no setup. **Destructive verbs always require a credential** — an API key, the
 admin token, or a same-origin session cookie from `POST /api/v1/session` — even when
 `API_KEYS` is unset. Set `API_KEYS` for anything reachable from the internet.
 
@@ -114,7 +123,7 @@ runs against the in-process mock Knowledge Box — no account, no LLM spend.
 | `DIP_EXTRACT_STRATEGY` | — | ARAG extract-strategy id applied to image/PDF uploads. |
 | `DIP_MAX_UPLOAD_BYTES` | `26214400` | Upload cap (25 MB). |
 | `ADMIN_TOKEN` | — | Required to open `/admin` and `/api/v1/admin/*`. |
-| `API_KEYS` | — | When set, `/api/v1` requires `X-API-Key` (the demo UI uses a session cookie). |
+| `API_KEYS` | — | When set, `/api/v1` requires `X-API-Key` (the operator app uses a session cookie). |
 | `DATA_DIR` | `./data` | JSON stores: documents, jobs, extraction configs. |
 
 Full list with comments: [`.env.example`](.env.example).
@@ -123,7 +132,7 @@ Full list with comments: [`.env.example`](.env.example).
 
 ```bash
 make check          # Biome + tsc --noEmit + tests with the 80 % coverage gate + dependency audit
-make e2e            # Playwright: demo + admin against a mock-backed server
+make e2e            # Playwright: operator app + admin app against a mock-backed server
 make docs           # regenerate docs/developer/api-reference.md and check every doc link
 make showcase       # record the 2–3 minute walkthrough into showcase/out/
 make smoke          # OPT-IN live run against the real KB (uploads, processes, deletes)
