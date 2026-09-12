@@ -85,6 +85,10 @@ test("docs, health and static surfaces are served", async () => {
   assert.equal((await c.get("/healthz")).status, 200);
   const ready = await c.get("/readyz");
   assert.equal((ready.json as { arag: { ok: boolean } }).arag.ok, true);
+  // Readiness is cached briefly (every open tab polls it every 15 s, and each uncached
+  // check costs a catalog + configuration call): an immediate second call is byte-identical.
+  const again = await c.get("/readyz");
+  assert.equal(again.text, ready.text, "/readyz should be served from the cache");
   assert.match((await c.get("/")).text, /arag-shell/);
   assert.match((await c.get("/admin/")).text, /Admin sign-in/);
   assert.match((await c.get("/ui/arag-ui.css")).headers.get("content-type") ?? "", /text\/css/);

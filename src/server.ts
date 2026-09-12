@@ -143,13 +143,23 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     usage.requests++;
     await next();
   });
-  healthRoutes(app, async () => ({
-    version: VERSION,
-    arag: { ...(await arag.health()), mock: env.arag.mock },
-    // Whether an ingestion-time visual-LLM extract strategy is configured — a boolean, not
-    // the strategy id (that stays behind the admin token).
-    visualExtraction: Boolean(product.extractStrategy),
-  }));
+  // Every open browser tab polls /readyz every 15 s (the UI kit's status pill), and each
+  // ARAG health check costs a catalog + configuration call. Cache it briefly so a handful
+  // of demo viewers cannot turn readiness polling into steady Knowledge Box traffic.
+  let readyCache: { at: number; value: Record<string, unknown> } | null = null;
+  const READY_TTL_MS = 10_000;
+  healthRoutes(app, async () => {
+    if (readyCache && Date.now() - readyCache.at < READY_TTL_MS) return readyCache.value;
+    const value = {
+      version: VERSION,
+      arag: { ...(await arag.health()), mock: env.arag.mock },
+      // Whether an ingestion-time visual-LLM extract strategy is configured — a boolean,
+      // not the strategy id (that stays behind the admin token).
+      visualExtraction: Boolean(product.extractStrategy),
+    };
+    readyCache = { at: Date.now(), value };
+    return value;
+  });
   app.docs("/api/v1", openapi, { title: "Document Processing" });
 
   registerDocumentRoutes(app, { documents });
