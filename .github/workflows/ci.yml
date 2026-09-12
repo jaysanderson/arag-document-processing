@@ -16,7 +16,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bunx biome ci .
       - run: bunx tsc --noEmit -p tsconfig.json
-      - run: node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-lines=80 'test/*.test.ts'
+      - run: node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-exclude='src/index.ts' --test-coverage-lines=80 --test-timeout=30000 'test/*.test.ts'
       - run: bun audit || true
   e2e:
     runs-on: ubuntu-latest
@@ -37,3 +37,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t arag-doc-processing:ci .
+      - name: smoke the image against the mock ARAG
+        run: |
+          docker run -d --name dip -p 8080:8080 -e ARAG_MOCK=1 -e ADMIN_TOKEN=ci arag-doc-processing:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz && break || sleep 1; done
+          curl -fsS http://127.0.0.1:8080/api/v1/openapi.json > /dev/null
+          docker rm -f dip

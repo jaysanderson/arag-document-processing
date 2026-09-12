@@ -136,7 +136,9 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
   });
 
   const app = new App({ env, log });
-  app.use(securityHeaders(), cors());
+  // The demo previews an uploaded PDF from a blob: URL in an <iframe>; the default CSP
+  // allows only `frame-src 'self'` (and `object-src 'none'`, which rules out <embed>).
+  app.use(securityHeaders({ frameSrc: ["blob:"] }), cors());
   app.use(async (_ctx, next) => {
     usage.requests++;
     await next();

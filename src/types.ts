@@ -51,7 +51,8 @@ export type DocType =
   | "bank_statement"
   | "form"
   | "report"
-  | "generic";
+  | "generic"
+  | "insurance_card";
 
 /** Lifecycle of a document in this service (not the ARAG resource status). */
 export type DocumentStatus = "pending" | "processing" | "ready" | "failed";

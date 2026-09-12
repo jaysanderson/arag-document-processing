@@ -35,7 +35,8 @@ async function setPreview(blob, filename, contentType) {
     host.innerHTML = `<img src="${preview.url}" alt="${esc(filename)}" />`;
   } else if (contentType === "application/pdf") {
     preview = { url: URL.createObjectURL(blob) };
-    host.innerHTML = `<embed src="${preview.url}#toolbar=0" type="application/pdf" />`;
+    // <iframe>, not <embed>: the CSP sets `object-src 'none'` and allows `frame-src blob:`.
+    host.innerHTML = `<iframe src="${preview.url}#toolbar=0" title="${esc(filename)}"></iframe>`;
   } else if (contentType.startsWith("text/")) {
     preview = null;
     host.innerHTML = `<pre>${esc((await blob.text()).slice(0, 8000))}</pre>`;

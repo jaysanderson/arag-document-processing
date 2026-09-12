@@ -40,13 +40,14 @@
   padding: 10px;
 }
 .doc-preview img,
-.doc-preview embed {
+.doc-preview iframe {
   display: block;
   width: 100%;
   border-radius: 6px;
 }
-.doc-preview embed {
+.doc-preview iframe {
   height: 320px;
+  border: 0;
 }
 .doc-preview pre {
   margin: 0;

@@ -26,6 +26,7 @@ const DOC_TYPES = [
   "form",
   "report",
   "generic",
+  "insurance_card",
 ] as const;
 
 const ExtractedField = {

@@ -1,91 +1,151 @@
-# Document Intelligence Studio — on Progress Agentic RAG
+# Document Processing
 
-A demo-grade **document processing** application built on **Progress Agentic RAG (ARAG)**.
-Drop in a document and watch it move, live, through a multi-stage pipeline:
+**Turn any document into a canonical, validated record — in under a minute, through one API call.**
 
-```
-Drop a document
-   ↓ ingest        upload to the ARAG Knowledge Box
-   ↓ process       ARAG runs OCR · visual layout · embeddings (then waits for search readiness)
-   ↓ classify      an agent picks the document type (invoice · contract · résumé · receipt · PO · form · report · generic)
-   ↓ extract       schema-driven visual-LLM extraction — the right fields for that type, grounded in the page
-   ↓ entities      named-entity enrichment (people · orgs · money · dates · IDs · …)
-   ↓ summary       one-paragraph abstractive summary + topic tags
-   ↓ validate      deterministic normalization (amounts→numbers, dates→ISO, currency→ISO) + consistency checks
-   ↓ standardize   one canonical record → JSON · XML · CSV
-   ↓ ask           grounded Q&A over the document
-```
+Drop in a PDF, a photo of a form, or a text file. Document Processing uploads it to a
+Progress Agentic RAG (ARAG) Knowledge Box, runs a multi-agent pipeline over it
+(process → classify → extract → entities → summary → validate → standardize) and gives you
+back a structured record: typed fields with confidence, named entities, a summary, topic
+tags and validation issues — exportable as JSON, XML or CSV, and queryable in natural
+language.
 
-Everything is grounded in the document via ARAG's `full_resource` retrieval and forced
-structured output (`answer_json_schema`), with temperature 0 for repeatable demos.
-
-## Why it's a good ARAG demo
-
-- **Custom visual-LLM extraction** — per-document-type JSON Schemas drive the multimodal
-  model (`chatgpt-azure-4o`) to extract exactly the right fields, grounded in the page.
-- **Data-augmentation agents** — classify → extract → enrich entities → summarize →
-  validate/normalize, each a focused, grounded ARAG call (see [`bridge/src/agents.ts`](bridge/src/agents.ts)).
-- **Standardized output** — one canonical record, serialized to **JSON, XML, and CSV**
-  (see [`bridge/src/formats.ts`](bridge/src/formats.ts)).
-- **Grounded, deterministic, honest** — answers cite the source document; off-document
-  questions are declined rather than hallucinated.
-
-## Run it
-
-Requires **Node ≥ 22.6**. This project is **dependency-free** — no `npm install`, no build
-step. TypeScript runs natively via `--experimental-transform-types`.
+Built on the [shared ARAG platform](../arag-platform). API-first, zero runtime
+dependencies, Apache-2.0.
 
 ```bash
-cp .env.example .env       # then paste your ARAG_TOKEN
-make dev                   # hot-reload server + UI at http://localhost:8080
-# or
-make start                 # production mode
-make test                  # unit tests (formats, normalization, validation, schemas)
-make smoke                 # end-to-end run against the live KB (uploads, processes, deletes)
+make install        # bun installs dev tooling only (no npm, ever)
+make dev            # http://localhost:8080 — uses the mock ARAG unless .env has credentials
 ```
 
-Open **http://localhost:8080**, drop a file (or click a sample), and watch the pipeline run.
+Then open:
 
-## Configuration
+| Surface | URL | What it is |
+|---|---|---|
+| Demo | <http://localhost:8080/> | The studio: drop a document, watch the pipeline, read the record |
+| Admin | <http://localhost:8080/admin/> | Health, KB test, extraction configs, jobs, logs, retention |
+| API docs | <http://localhost:8080/api/v1/docs> | Redoc (and `/api/v1/swagger` to try it out) |
+| OpenAPI | <http://localhost:8080/api/v1/openapi.json> | The spec every route is validated against |
 
-All config is environment-driven (see [`.env.example`](.env.example)):
+## Sixty-second tour
 
-| Variable | Purpose |
-|---|---|
-| `ARAG_KB_URL` | KB base URL, `https://<region>.dp.progress.cloud/api/v1/kb/<id>` |
-| `ARAG_TOKEN` | Nuclia service-account JWT (sent as `X-NUCLIA-SERVICEACCOUNT: Bearer …`) |
-| `ARAG_GENERATIVE_MODEL` | Generative model (default `chatgpt-azure-4o`, multimodal) |
-| `ARAG_RERANKER` | `predict` (grounded) or `noop` (fast) |
-| `ARAG_TIMEOUT_MS` | Per-request timeout to ARAG |
-| `PORT`, `MAX_UPLOAD_BYTES`, `LOG_LEVEL` | Bridge server settings |
+```bash
+# 1. Upload a document; you get the record and the job that is processing it.
+curl -sS -X POST 'http://localhost:8080/api/v1/documents?config=auto' \
+     -H 'Content-Type: text/plain' -H 'X-Filename: invoice.txt' \
+     --data-binary @public/samples/invoice.txt | tee /tmp/up.json
+
+ID=$(jq -r .document.id /tmp/up.json); JOB=$(jq -r .job.id /tmp/up.json)
+
+# 2. Watch the pipeline live (or poll GET /api/v1/jobs/$JOB).
+curl -sN "http://localhost:8080/api/v1/jobs/$JOB/events"
+
+# 3. Read the canonical record, or export it.
+curl -sS "http://localhost:8080/api/v1/documents/$ID" | jq .
+curl -sS "http://localhost:8080/api/v1/documents/$ID/export?format=csv"
+
+# 4. Ask the document a question.
+curl -sS -X POST "http://localhost:8080/api/v1/documents/$ID/ask" \
+     -H 'Content-Type: application/json' -d '{"question":"What is the total due?"}' | jq .
+
+# 5. Clean up — deletes the record and the KB resource.
+curl -sS -X DELETE "http://localhost:8080/api/v1/documents/$ID"
+```
+
+## What it extracts
+
+Eleven built-in document types, each with its own extraction schema:
+`invoice`, `receipt`, `purchase_order`, `contract`, `resume`, `medical_claim`,
+`preauthorisation`, `bank_statement`, `form`, `report`, `generic`.
+
+Not enough? `POST /api/v1/extraction-configs` with a list of field labels creates a custom
+config, persists it, and provisions a stored ARAG search configuration so the model is
+forced to return exactly those fields, grounded in the document. `GET /api/v1/schemas`
+lists every built-in type and the fields it captures.
+
+Three ways to decide what gets extracted, chosen with `?config=`:
+
+- `auto` — an agent classifies the document, then the matching schema is used.
+- `<config id>` — force a built-in or custom config (classification is skipped).
+- `agent` — read fields an ARAG **Data Augmentation agent** already persisted on the
+  resource, instead of extracting live.
 
 ## API
 
+Everything lives under `/api/v1` and is described by [`src/openapi.ts`](src/openapi.ts).
+
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/health` | Liveness + KB id + model |
-| `POST` | `/api/ingest` | Upload raw file bytes → `{ resourceId }` |
-| `GET` | `/api/process?id=&filename=&type=` | **SSE** stream of pipeline stage events → final record |
-| `GET` | `/api/record?id=` | Fetch the finished canonical record |
-| `GET` | `/api/export?id=&format=json\|xml\|csv` | Download a standardized export |
-| `POST` | `/api/ask` | Grounded Q&A over a document |
+| `POST` | `/documents` | Upload (multipart `file`, or raw body + `X-Filename`) → `202 {document, job}` |
+| `GET` | `/documents` | List (paged, filter by `status` / `doc_type`) |
+| `GET` | `/documents/{id}` | The canonical record |
+| `GET` | `/documents/{id}/export` | `?format=json\|xml\|csv` |
+| `POST` | `/documents/{id}/ask` | Grounded Q&A over one document |
+| `DELETE` | `/documents/{id}` | Delete the record **and** the KB resource |
+| `GET` | `/jobs`, `/jobs/{id}` | Processing jobs |
+| `GET` | `/jobs/{id}/events` | Server-sent events for a running job |
+| `DELETE` | `/jobs/{id}` | Cancel |
+| `GET`/`POST` | `/extraction-configs` | List / create |
+| `GET`/`DELETE` | `/extraction-configs/{id}` | Read / delete (built-ins are not deletable) |
+| `GET` | `/schemas` | Document types and their fields |
+| `POST` | `/session` | Same-origin session cookie for the demo UI |
+| `GET` | `/admin/health`, `/admin/config`, `/admin/usage`, `/admin/logs` | Operator views |
+| `POST` | `/admin/login`, `/admin/provision`, `/admin/purge` | Sign in, re-provision search configs, retention purge |
 
-## Deploy (Fly.io)
+Errors are RFC 9457 `application/problem+json` with a `requestId` that ties back to the
+logs. Uploads are limited by a MIME allowlist (pdf, png, jpeg, webp, tiff, txt, md, csv,
+docx) and a size cap; filenames are sanitised.
+
+## Configuration
+
+Copy `.env.example` to `.env`. Without ARAG credentials, set `ARAG_MOCK=1` and everything
+runs against the in-process mock Knowledge Box — no account, no LLM spend.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ARAG_KB_ID`, `ARAG_API_KEY`, `ARAG_REGION` | — | Knowledge Box and service-account token. Required unless `ARAG_MOCK=1`. |
+| `ARAG_GENERATIVE_MODEL` | `chatgpt-azure-4o` | Must be multimodal for visual extraction. |
+| `DIP_EXTRACT_STRATEGY` | — | ARAG extract-strategy id applied to image/PDF uploads. |
+| `DIP_MAX_UPLOAD_BYTES` | `26214400` | Upload cap (25 MB). |
+| `ADMIN_TOKEN` | — | Required to open `/admin` and `/api/v1/admin/*`. |
+| `API_KEYS` | — | When set, `/api/v1` requires `X-API-Key` (the demo UI uses a session cookie). |
+| `DATA_DIR` | `./data` | JSON stores: documents, jobs, extraction configs. |
+
+Full list with comments: [`.env.example`](.env.example).
+
+## Development
 
 ```bash
-cd bridge
-fly launch --no-deploy          # once; app name arag-doc-processing
-fly secrets set ARAG_KB_URL=… ARAG_TOKEN=…
+make check          # Biome + tsc --noEmit + tests with the 80 % coverage gate
+make e2e            # Playwright: demo + admin against a mock-backed server
+make docs           # regenerate docs/developer/api-reference.md from the OpenAPI document
+make showcase       # record the 2–3 minute walkthrough into showcase/out/
+make smoke          # OPT-IN live run against the real KB (uploads, processes, deletes)
+make docker         # build the container image
+make fly-validate   # validate fly.toml
+```
+
+The platform is vendored in `vendor/arag-platform/` and must never be edited in place —
+change the platform repo and re-run `make sync-platform`.
+
+## Documentation
+
+Start at [`docs/README.md`](docs/README.md): developer quickstart and API reference,
+architecture and the ARAG mechanics that make this reliable, business walkthroughs,
+product marketing, hands-on enablement labs, and the showcase script.
+
+## Deploying
+
+`Dockerfile` (node:22-slim, non-root, no build step) and `fly.toml` (app
+`arag-doc-processing`, `data` volume mounted at `/data`) are ready to go:
+
+```bash
+fly secrets set ARAG_KB_ID=… ARAG_API_KEY=… ARAG_REGION=aws-us-east-2-1 \
+                ADMIN_TOKEN=… DIP_EXTRACT_STRATEGY=…
 fly deploy
 ```
 
-## Architecture
+See [`docs/architecture/deployment-topologies.md`](docs/architecture/deployment-topologies.md).
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the module map and the key ARAG
-mechanics that make the demo reliable (full-resource grounding, query seeding, the
-PROCESSED-vs-searchable gate, and string-amounts-then-normalize).
+## Licence
 
----
-
-Built dependency-free on bare Node + native TypeScript, in the spirit of the sibling
-`arag-voice` project.
+Apache-2.0 — see [LICENSE](LICENSE). Contributions welcome: [CONTRIBUTING.md](CONTRIBUTING.md).

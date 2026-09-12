@@ -1,0 +1,19 @@
+# Only src/, public/, admin/, vendor/ and the two manifests are copied, but keep the build
+# context small and make it impossible for a secret or a data directory to slip in.
+.git
+.github
+node_modules
+data
+coverage
+test-results
+playwright-report
+showcase/out
+docs
+enablement
+test
+scripts
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
