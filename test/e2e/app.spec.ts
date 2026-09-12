@@ -209,3 +209,52 @@ test("ask is reachable on its own and scoped to one document", async ({ page }) 
     timeout: 30_000,
   });
 });
+
+test("extracted values are escaped before they reach the page", async ({ page }) => {
+  // Field values, summaries and entity text are an LLM's reading of a document somebody
+  // uploaded, so they are attacker-controlled. The list's subline renders the identifier
+  // and the counterparty, which makes it the place an injection would land. The response
+  // is stubbed rather than uploaded because the mock ARAG synthesises its own field values
+  // from the fixture text and will not echo a payload back.
+  const payload = '<img src=x onerror="window.__xss = true">';
+  const now = new Date().toISOString();
+  const doc = {
+    id: "xss-probe",
+    resourceId: "xss-probe",
+    filename: "probe.txt",
+    contentType: "text/plain",
+    bytes: 10,
+    status: "ready",
+    docType: "invoice",
+    fields: [
+      { key: "vendor_name", label: "Vendor", value: payload, confidence: 0.9 },
+      { key: "invoice_number", label: "Invoice #", value: payload, confidence: 0.9 },
+    ],
+    entities: [],
+    tags: [],
+    issues: [],
+    evidence: [],
+    meta: { processedAt: now, schema: "invoice_extraction", model: "test", durationsMs: {} },
+    createdAt: now,
+    updatedAt: now,
+  };
+  await page.route("**/api/v1/documents?*", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [doc],
+        page: 1,
+        page_size: 20,
+        total: 1,
+        next_page: false,
+        facets: { total: 1, status: { ready: 1 }, docType: { invoice: 1 }, degraded: 0, needsReview: 0 },
+      }),
+    }),
+  );
+  await page.goto("/#/documents");
+  await expect(page.locator("#docsTable tbody tr")).toHaveCount(1);
+  // The payload is text, not markup: it is visible verbatim and no element was created.
+  await expect(page.locator(".dip-datatable__sub").first()).toContainText(payload);
+  expect(await page.locator("#docsTable img").count()).toBe(0);
+  expect(await page.evaluate(() => "__xss" in window)).toBe(false);
+});

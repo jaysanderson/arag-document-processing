@@ -253,10 +253,13 @@ function issueChip(doc) {
 
 function subline(doc) {
   const h = headline(doc);
-  const bits = [h.identifier, h.counterparty].filter(Boolean);
+  // The identifier and the counterparty are extracted field values — an LLM's reading of a
+  // document someone uploaded — so they are attacker-controlled and must be escaped like
+  // any other untrusted string before they reach innerHTML.
+  const bits = [h.identifier, h.counterparty].filter(Boolean).map(esc);
   const state = docState(doc);
   if (state === "processing" || state === "pending") {
-    bits.push(`${esc(doc.jobId ? "processing" : "queued")}`);
+    bits.push(doc.jobId ? "processing" : "queued");
   } else if (state === "failed") {
     bits.push(esc(doc.error ?? "processing failed"));
   } else if (state === "degraded") {
