@@ -106,6 +106,16 @@
   color: var(--arag-text-muted);
 }
 
+/* ---------- admin usage KPIs ---------- */
+.usage-kpis {
+  gap: 10px;
+}
+.usage-kpis .arag-kpi {
+  border: 1px solid var(--arag-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
 /* ---------- prompt gallery ---------- */
 .gallery {
   margin-top: 20px;

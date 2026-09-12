@@ -15,6 +15,7 @@ function show(authed) {
   // Components mounted before sign-in rendered 401s; reload them now that the cookie is set.
   for (const el of document.querySelectorAll("arag-health, arag-json[src], arag-log")) el.load?.();
   loadHealth();
+  loadUsage();
   loadConfigs();
   loadJobs();
 }
@@ -68,11 +69,44 @@ async function loadHealth() {
   }
 }
 
+const kpi = (label, value, sub = "") =>
+  `<div class="arag-kpi"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div>`;
+
+async function loadUsage() {
+  try {
+    const u = await api("/api/v1/admin/usage");
+    const avgArag = u.aragCalls ? `${Math.round(u.aragMs / u.aragCalls)} ms avg` : "";
+    const mins = Math.round((u.uptimeSec ?? 0) / 60);
+    $("#usageKpis").innerHTML = [
+      kpi("Requests", u.requests ?? 0, `${mins} min uptime`),
+      kpi("ARAG calls", u.aragCalls ?? 0, avgArag),
+      kpi("ARAG errors", u.aragErrors ?? 0, u.aragErrors ? "check the logs" : "none"),
+      kpi(
+        "Documents",
+        u.documents?.total ?? 0,
+        `${u.documents?.ready ?? 0} ready · ${u.documents?.failed ?? 0} failed`,
+      ),
+      kpi(
+        "Jobs succeeded",
+        u.jobs?.succeeded ?? 0,
+        `${u.jobs?.running ?? 0} running · ${u.jobs?.queued ?? 0} queued`,
+      ),
+      kpi("Jobs failed", u.jobs?.failed ?? 0, `${u.jobs?.cancelled ?? 0} cancelled`),
+    ].join("");
+  } catch (e) {
+    $("#usageKpis").innerHTML = `<div class="arag-alert error">${esc(e.message)}</div>`;
+  }
+}
+$("#reloadUsage").addEventListener("click", () => {
+  loadUsage();
+  $("#usage").load();
+});
+
 $("#testKb").addEventListener("click", async () => {
   try {
     const h = await api("/api/v1/admin/health");
     document.querySelector("arag-health").load();
-    $("#usage").load();
+    loadUsage();
     loadHealth();
     toast(
       h.arag?.ok ? `KB connected in ${Math.round(h.arag.ms)} ms` : `KB error: ${h.arag?.error}`,

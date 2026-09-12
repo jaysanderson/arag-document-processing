@@ -28,6 +28,8 @@ test("admin: login is required, then health, configs, jobs, logs and retention a
   await expect(page.locator("arag-health")).toContainText("connected", { timeout: 20_000 });
   await expect(page.locator("#model")).not.toBeEmpty();
   await expect(page.locator("#extractStrategy")).not.toBeEmpty();
+  await expect(page.locator("#usageKpis .arag-kpi")).toHaveCount(6);
+  await expect(page.locator("#usageKpis")).toContainText("ARAG calls");
   await page.click("#testKb");
   await expect(page.locator(".arag-toast")).toContainText("KB connected");
 

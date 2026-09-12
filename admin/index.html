@@ -51,8 +51,15 @@
             </dl>
           </div>
           <div class="arag-card pad">
-            <h3>Usage</h3>
-            <arag-json id="usage" src="/api/v1/admin/usage"></arag-json>
+            <div class="arag-row" style="justify-content:space-between">
+              <h3 style="margin:0">Usage</h3>
+              <button class="arag-btn ghost sm" id="reloadUsage">Reload</button>
+            </div>
+            <div class="arag-grid cols-3 usage-kpis" id="usageKpis" style="margin-top:10px"></div>
+            <details style="margin-top:12px">
+              <summary class="muted small">Raw JSON</summary>
+              <arag-json id="usage" src="/api/v1/admin/usage"></arag-json>
+            </details>
           </div>
         </div>
       </section>
