@@ -1,0 +1,188 @@
+/* Document Processing demo — the few styles the shared UI kit does not cover.
+   Everything else comes from /ui/arag-ui.css (tokens, cards, tables, chips, steps). */
+
+.samples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.samples-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--arag-text-muted);
+  margin-right: 4px;
+  min-width: 96px;
+}
+.config-bar {
+  align-items: center;
+  gap: 8px;
+}
+.config-bar .arag-label {
+  margin: 0;
+  white-space: nowrap;
+}
+.config-bar .arag-select {
+  flex: 1;
+  min-width: 160px;
+}
+.spacer {
+  flex: 1;
+}
+
+/* ---------- source preview ---------- */
+.doc-preview {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--arag-border);
+  border-radius: 8px;
+  background: var(--arag-surface-2, #fafafa);
+  padding: 10px;
+}
+.doc-preview img,
+.doc-preview embed {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+}
+.doc-preview embed {
+  height: 320px;
+}
+.doc-preview pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+/* ---------- record ---------- */
+.summary {
+  margin: 0;
+  font-size: 0.92rem;
+}
+.arag-table .conf-col {
+  width: 110px;
+}
+.f-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--arag-brand-50, #eef);
+  overflow: hidden;
+}
+.f-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--arag-brand-500, #5ce500);
+}
+.f-value ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.f-raw {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--arag-text-muted);
+}
+.entities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--arag-border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  background: var(--arag-surface, #fff);
+}
+.ent b {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--arag-text-muted);
+}
+
+/* ---------- prompt gallery ---------- */
+.gallery {
+  margin-top: 20px;
+}
+.prompt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.prompt-card {
+  border: 1px solid var(--arag-border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--arag-surface, #fff);
+}
+.prompt-card .pc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.prompt-card pre {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+/* ---------- config manager ---------- */
+.cfg-card {
+  border: 1px solid var(--arag-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.cfg-card .cfg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.cfg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.cfg-group {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--arag-text-muted);
+  margin: 10px 0 6px;
+}
+.cfg-field-row {
+  display: grid;
+  grid-template-columns: 1fr 130px auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .cfg-field-row {
+    grid-template-columns: 1fr;
+  }
+  .samples-label {
+    min-width: auto;
+  }
+}
+
+/* Platform UI-kit gap (arag-ui.css v0.1.2): `.arag-modal-backdrop` sets `display:flex`,
+   which overrides the `hidden` attribute — the invisible full-screen overlay then
+   swallows every click on the page. Reported upstream; this is the local workaround. */
+.arag-modal-backdrop[hidden] {
+  display: none;
+}

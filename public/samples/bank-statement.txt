@@ -1,0 +1,15 @@
+STERLING NATIONAL BANK — ACCOUNT STATEMENT
+Account Holder: Priya Nair
+Account Number: ****8842
+Statement Period: 01 July 2027 – 31 July 2027
+Currency: USD
+Opening Balance: $4,210.55
+
+Date        Description                 Debit      Credit     Balance
+2027-07-02  Salary — Northwind Logistics          $6,400.00  $10,610.55
+2027-07-05  Rent — Carlton Property Mgmt $2,150.00            $8,460.55
+2027-07-09  Grocer Market                 $184.20             $8,276.35
+2027-07-15  Electricity — PowerCo         $96.40              $8,179.95
+2027-07-28  Transfer to savings         $1,000.00             $7,179.95
+
+Closing Balance: $7,179.95

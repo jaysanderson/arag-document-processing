@@ -1,0 +1,21 @@
+COBALT MANUFACTURING INC.
+PURCHASE ORDER
+
+PO Number: PO-55218
+Order Date: 03/05/2027
+Supplier: Apex Industrial Supplies
+Ship To: 900 Foundry Way, Dayton OH 45402, USA
+Currency: USD
+
+Item                          Qty   Unit Price   Amount
+Hex bolts M12 (box of 500)     10      $85.00    $850.00
+Bearing 6205-2RS               40      $12.50    $500.00
+Hydraulic hose 3/8" (10 m)      6      $64.00    $384.00
+Safety gloves (pair)          100       $4.20    $420.00
+Cutting fluid 20 L              5      $58.00    $290.00
+
+Subtotal: $2,444.00
+Tax (7.25%): $177.19
+Total: $2,621.19
+
+Authorised by: R. Delgado, Procurement Manager

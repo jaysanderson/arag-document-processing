@@ -1,17 +1,26 @@
 {
   "name": "arag-doc-processing",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Document Intelligence Studio — visual-LLM extraction, data-augmentation agents, and JSON/XML/CSV standardization on Progress Agentic RAG. Dependency-free: runs on bare Node (native TypeScript), no npm install.",
+  "version": "1.0.0",
+  "description": "Document Processing — visual-LLM extraction, data-augmentation agents, and JSON/XML/CSV standardisation on Progress Agentic RAG. API-first, zero runtime dependencies.",
+  "license": "Apache-2.0",
   "type": "module",
-  "engines": {
-    "node": ">=22.6"
-  },
-  "comment": "npm is intentionally NOT used. Prefer the Makefile (`make test`, `make dev`, `make start`). These aliases call Node directly so `node --run <name>` works without npm.",
+  "private": true,
+  "engines": { "node": ">=22.18" },
   "scripts": {
-    "test": "node --experimental-transform-types --test bridge/test/*.test.ts",
-    "dev": "node --experimental-transform-types --watch bridge/src/index.ts",
-    "start": "node --experimental-transform-types bridge/src/index.ts",
-    "smoke": "node --experimental-transform-types scripts/smoke.ts"
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "test": "node --test --test-reporter=spec 'test/*.test.ts'",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-lines=80 'test/*.test.ts'",
+    "e2e": "playwright test",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "docs": "node vendor/arag-platform/scripts/openapi-to-md.ts http://localhost:8080/api/v1/openapi.json docs/developer/api-reference.md",
+    "smoke": "node scripts/smoke.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.0.0",
+    "@playwright/test": "1.52.0",
+    "@types/node": "22.10.0",
+    "typescript": "5.9.2"
   }
 }
