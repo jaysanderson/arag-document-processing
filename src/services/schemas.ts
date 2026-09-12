@@ -346,31 +346,6 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
     },
   },
 
-  insurance_card: {
-    name: "insurance_card_extraction",
-    docType: "insurance_card",
-    description: "Structured fields from a health/medical insurance membership card.",
-    properties: {
-      scheme: s("Medical scheme / insurer name"),
-      member_name: s("Name of the principal member printed on the card"),
-      member_number: s("Membership / policy number"),
-      plan_name: s("Plan / benefit option name"),
-      dependant_code: s("Dependant code, if this card is for a dependant"),
-      valid_from: s("Card valid-from date in ISO 8601 if determinable"),
-      valid_to: s("Card valid-to / expiry date in ISO 8601 if determinable"),
-    },
-    required: ["scheme", "member_number"],
-    labels: {
-      scheme: "Scheme / Insurer",
-      member_name: "Member Name",
-      member_number: "Member #",
-      plan_name: "Plan",
-      dependant_code: "Dependant Code",
-      valid_from: "Valid From",
-      valid_to: "Valid To",
-    },
-  },
-
   generic: {
     name: "generic_extraction",
     docType: "generic",
