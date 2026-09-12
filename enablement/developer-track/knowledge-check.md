@@ -13,8 +13,14 @@ just polling until the resource status is `PROCESSED`?**
 Because a resource's status flips to `PROCESSED` a few seconds *before* it actually
 becomes retrievable. Extracting immediately after `PROCESSED` reliably returns empty
 results. `waitSearchable` is a cheap `/find` poll that gates on actual retrievability,
-not just the status field. See the comment above stage 1 in
-`src/services/pipeline.ts` and mechanic 4 in `docs/architecture/arag-integration.md`.
+not just the status field — and, since platform v0.1.3 (DP-19 in `DECISIONS.md`), it is
+seeded with a real probe query rather than a generic one: the pipeline fetches
+`extractedText` as soon as the resource is `PROCESSED` and passes it as
+`waitSearchable`'s `query`, the same query-seeding idea `buildQuerySeed` applies to
+every later agent call. A generic probe needed roughly 20 polls to see the resource on
+the live KB; a seeded one hit on the first attempt, cutting the `process` stage from
+~38 s to ~7 s in measurement. See the comment above stage 1 in `src/services/pipeline.ts`
+and mechanic 4 in `docs/architecture/arag-integration.md`.
 </details>
 
 ---

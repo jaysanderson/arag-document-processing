@@ -46,18 +46,19 @@ an explanation of the choices, checked against the real file paths, exports and
 function signatures in this repository. Use the exercises if you want to attempt each
 step yourself first; use the lab text if you want to follow along directly.
 
-**A note on scope for sections 2 and 4:** you will edit files under `src/` and `test/`
-that are shared, tested source code — not sandboxed lab files. That is deliberate: this
-lab teaches you to extend a real product, including the parts of the test suite that
-assert exact counts and therefore need updating alongside a genuine feature addition
-(see the checkpoint in Section 2). Do the exercises on a scratch branch or be ready to
-`git checkout -- src/ test/` afterwards if you want your working tree back exactly as
-it started:
+**A note on scope for sections 2 and 4:** you will edit files under `src/` (and add to
+`test/` in Section 5) that are shared, tested source code — not sandboxed lab files.
+That is deliberate: this lab teaches you to extend a real product. Section 2 in
+particular is worth reading closely even though it turns out to need only two file
+edits — the *reason* it needs only two, not four, is itself the lesson (a single source
+of truth the test suite derives its counts from, rather than a hardcoded number). Do
+the exercises on a scratch branch or be ready to `git checkout -- src/` afterwards if
+you want your working tree back exactly as it started:
 
 ```bash
 git checkout -b lab/document-processing   # optional, recommended
 # … do the lab …
-git checkout -- src/ test/                # optional, discard lab edits when you're done
+git checkout -- src/                      # optional, discard lab edits when you're done
 ```
 
 ---
@@ -169,9 +170,13 @@ curl -sN "http://localhost:8080/api/v1/jobs/$JOB/events"
 You will see one `event: event` per pipeline stage (`process`, `classify`, `extract`,
 `entities`, `summary`, `validate`, `standardize`), and a final `event: job` carrying the
 whole job once it reaches a terminal status. Against the mock this completes in
-milliseconds; against a live Knowledge Box `process` (OCR/visual layout/embeddings, then
-a wait for the resource to become *searchable*) is the dominant cost — commonly tens of
-seconds. On the mock you can also just poll instead:
+milliseconds; against a live Knowledge Box the whole pipeline for a short text document
+typically finishes in well under 20 seconds, with `process` (OCR/visual layout/
+embeddings, then a wait for the resource to become *searchable*) usually the single
+largest stage — though it scales with document size and page count, so a multi-page
+scanned PDF takes meaningfully longer than a short text file (see the architect track's
+`sizing-deployment.md` for measured numbers). On the mock you can also just poll
+instead:
 
 ```bash
 curl -sS "http://localhost:8080/api/v1/jobs/$JOB" | jq '{status, progress}'
@@ -235,8 +240,22 @@ corpus (see the knowledge check for the fuller reasoning).
 
 ### 1.6 Clean up
 
+Everything so far — upload, read, export, ask — worked with no credential at all. `DELETE`
+is different: it also removes the KB resource, a genuine write to shared state, so it
+requires one even though `API_KEYS` is unset. Bootstrap a same-origin session once (the
+same call the demo UI makes) and reuse the cookie for the rest of this lab:
+
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' -X DELETE "http://localhost:8080/api/v1/documents/$ID"
+curl -sS -c /tmp/dip-cookies.txt -X POST http://localhost:8080/api/v1/session
+```
+
+```json
+{ "ok": true, "expiresInSec": 43200 }
+```
+
+```bash
+curl -sS -b /tmp/dip-cookies.txt -o /dev/null -w '%{http_code}\n' \
+     -X DELETE "http://localhost:8080/api/v1/documents/$ID"
 # 204
 curl -sS -o /dev/null -w '%{http_code}\n' "http://localhost:8080/api/v1/documents/$ID"
 # 404 — the record and the underlying KB resource are both gone
@@ -247,119 +266,117 @@ curl -sS -o /dev/null -w '%{http_code}\n' "http://localhost:8080/api/v1/document
 
 **Why this matters:** `DELETE` removes the record **and** calls `deleteResource` on the
 KB — a product handling other people's documents has to actually delete them, not just
-hide the local pointer. This is also why the hard rule for this lab (and for the whole
-product's `make smoke` live test) is: **delete anything you create.**
+hide the local pointer. Because that's destructive to shared state, it goes through a
+`requireWriter` guard (`src/routes/guards.ts`) that reads, uploads, exports and `ask`
+don't — any of an admin token, an API key, or this session cookie satisfies it. This is
+also why the hard rule for this lab (and for the whole product's `make smoke` live test)
+is: **delete anything you create.**
 
 ---
 
 ## 2. Add a new document type (20 min)
 
 You will add an eleventh — no, a **twelfth** — built-in document type: `insurance_card`
-(a health/medical scheme membership card). This exercises the full "how do I extend the
-schema library" path: `src/services/schemas.ts` (the schema itself), `src/types.ts`
-(the `DocType` union), `src/openapi.ts` (the public enum), and a unit test.
+(a health/medical scheme membership card). This exercises the "how do I extend the
+schema library" path: `src/types.ts` (the single source of truth for every
+document-type list in the product) and `src/services/schemas.ts` (the schema itself).
 
-### 2.1 Add the `DocType`
+### 2.1 Add it to `DOC_TYPE_VALUES` — then watch the compiler stop you
 
-Open `src/types.ts` and extend the union (around line 43):
+Open `src/types.ts`. `DocType` is *derived* from one array, not hand-written:
 
 ```ts
-export type DocType =
-  | "invoice"
-  | "receipt"
-  | "contract"
-  | "resume"
-  | "purchase_order"
-  | "medical_claim"
-  | "preauthorisation"
-  | "bank_statement"
-  | "form"
-  | "report"
-  | "generic"
-  | "insurance_card";   // ← add this
+export const DOC_TYPE_VALUES = [
+  "invoice", "receipt", "contract", "resume", "purchase_order", "medical_claim",
+  "preauthorisation", "bank_statement", "form", "report", "generic",
+] as const;
+
+export type DocType = (typeof DOC_TYPE_VALUES)[number];
 ```
+
+Add `"insurance_card"` to the array, then immediately run:
+
+```bash
+tsc --noEmit -p tsconfig.json   # or: bunx tsc --noEmit -p tsconfig.json
+```
+
+**Checkpoint:** this fails, with something like:
+
+```
+src/services/schemas.ts(58,14): error TS2741: Property 'insurance_card' is missing in
+type '{ invoice: {...}; ... }' but required in type 'Record<... | "insurance_card",
+ExtractionSchema>'.
+```
+
+Good — that's `SCHEMAS`'s type (`Record<DocType, ExtractionSchema>` in
+`src/services/schemas.ts`) refusing to compile until every `DocType` has a matching
+schema. You cannot half-add a document type here.
 
 ### 2.2 Add the schema
 
-Open `src/services/schemas.ts`. `SCHEMAS` is a `Record<DocType, ExtractionSchema>` —
-TypeScript will now refuse to compile until you add an `insurance_card` entry. Use the
-starter stub at [`starter/insurance-card.schema.ts`](starter/insurance-card.schema.ts) as your
-starting point (it sketches the shape with `TODO`s); paste the finished object into
-`SCHEMAS` (alphabetical position doesn't matter — placing it just before `generic:` is
-consistent with the file's existing order).
+Still in `src/services/schemas.ts`, use the starter stub at
+[`starter/insurance-card.schema.ts`](starter/insurance-card.schema.ts) as your starting
+point (it sketches the shape with `TODO`s); paste the finished object into `SCHEMAS`
+(alphabetical position doesn't matter — placing it just before `generic:` is consistent
+with the file's existing order).
 
 Each schema is an OpenAI-function-style JSON Schema, terse by design via the file's
 `s()` (string), `money()` (string, but documented as an amount — see the comment above
 `money()` for *why* amounts are never declared as JSON `number`), `n()` (number) and
 `arr()` (string array) helpers.
 
-### 2.3 Add it to the OpenAPI document
-
-`src/openapi.ts` keeps its own `DOC_TYPES` enum (around line 17) for the `docType` and
-`Schema.docType` JSON Schema properties — it is **not** derived from `src/types.ts` at
-build time, so it needs the same addition by hand:
-
-```ts
-const DOC_TYPES = [
-  "invoice", "receipt", "contract", "resume", "purchase_order", "medical_claim",
-  "preauthorisation", "bank_statement", "form", "report", "generic",
-  "insurance_card",   // ← add this
-] as const;
+```bash
+tsc --noEmit -p tsconfig.json   # now passes
 ```
 
-Skipping this step doesn't break the build — but it does mean a real client validating
-responses against the spec would reject a document classified as `insurance_card`,
-because `openapi.ts` is the platform's single source of truth for the public contract.
-
-### 2.4 See it appear
+### 2.3 See it appear — everywhere, with no further edits
 
 ```bash
 curl -sS http://localhost:8080/api/v1/schemas | jq '.items[] | select(.docType=="insurance_card")'
+curl -sS http://localhost:8080/api/v1/openapi.json \
+  | jq '.components.schemas.Document.properties.docType.enum'
 ```
 
 (Restart `make dev` first if it isn't already picking up the change — it runs under
-`node --watch`, so it usually reloads on save.) You should see your new schema's `name`,
-`description`, `required` fields and `fields` list. It will also appear, automatically,
-in the demo's config selector — `configs.list()` builds the built-in list from
-`DOC_TYPES`/`SCHEMAS` dynamically, so no UI code needs to change.
+`node --watch`, so it usually reloads on save.) You should see your new schema's fields
+from the first call, and `"insurance_card"` already present in the second — `openapi.ts`
+imports `DOC_TYPE_VALUES` from `types.ts` and builds every `docType` enum in the spec
+from it, so step 2.1 alone already updated the public contract. It will also appear,
+automatically, in the demo's config selector — `configs.list()` builds the built-in list
+from `DOC_TYPES` (itself `[...DOC_TYPE_VALUES]`) dynamically.
 
-### 2.5 Run the tests — and read the failure
+### 2.4 Run the tests — and notice what *doesn't* break
 
 ```bash
 make test
 ```
 
-**Checkpoint (important):** two tests now fail, both in `test/api.test.ts`:
+**Checkpoint:** `fail 0` — with **no test file edited**. `test/api.test.ts`'s
+extraction-config and schema-catalogue tests, and `test/e2e/admin.spec.ts`'s admin
+config-table assertion, all import `DOC_TYPE_VALUES` from `src/types.ts` and assert
+against `DOC_TYPE_VALUES.length`, not a literal number — the count moved with you.
 
-```
-extraction configs: built-ins listed, custom created + provisioned + deletable
-  Expected values to be strictly equal: 12 !== 11
+**Why this matters:** this product used to keep the document-type list in three unsynced
+places (a hand-written union, a duplicate array in `openapi.ts`, and a literal `11`
+baked into three tests) — adding a type meant four coordinated hand-edits, and
+forgetting one either broke the build, silently drifted the public spec from the code,
+or left a test looking green while it had quietly stopped checking anything. Collapsing
+it to one source of truth (`DOC_TYPE_VALUES`) didn't remove the compiler's guard rail
+from Section 2.1 — it removed the *manual, easy-to-forget synchronisation* that used to
+sit next to it. A hardcoded count in a test is often a symptom of a missing single
+source of truth in the code under test, not a permanent fact of life.
 
-the schema catalogue lists every document type and its fields
-  Expected values to be strictly equal: 12 !== 11
-```
-
-This is not a mistake in your code — it's the contract test suite doing its job. Two
-tests hardcode "there are 11 built-in document types" as an explicit assertion (and a
-third, `test/e2e/admin.spec.ts`, asserts `#cfgTable tbody tr` has exactly `11` rows in
-the admin panel). Update all three to `12` — this is a normal, expected part of adding a
-document type to this product, not a workaround. See
-[`solutions/02-add-a-document-type.md`](solutions/02-add-a-document-type.md) for the exact lines.
+Also run `test/agents.test.ts`'s `"every schema is internally consistent"` test in
+isolation once — it iterates every schema (yours included) and checks that every
+`required` key exists in `properties` and every property has a label, which is the
+closest thing to a dedicated unit test your new schema needs:
 
 ```bash
-make test    # now green again
+node --test --test-reporter=spec test/agents.test.ts
 ```
 
-**Why this matters:** a count hardcoded in a contract test is a *feature*, not friction
-— it is the thing that stops "I added a schema" from silently drifting the public API
-surface without anyone noticing. Every real addition to this catalogue touches four
-files (`types.ts`, `schemas.ts`, `openapi.ts`, and the tests that pin the count); a lab
-that only touched `schemas.ts` would teach you an incomplete — and wrong — mental model
-of how to extend this product.
-
 If you want your working tree back exactly as it started, this is a good point to run
-`git checkout -- src/ test/` before moving on — Sections 3–5 do not depend on this
-change.
+`git checkout -- src/` before moving on — Sections 3–5 do not depend on this change.
 
 ---
 
@@ -370,8 +387,12 @@ lets a caller define one on the fly.
 
 ### 3.1 Through the API
 
+Creating a config is a write to shared state (it provisions a real ARAG search
+configuration), so — unlike the upload in Section 1 — it needs the session credential
+from Section 1.6. Reuse the cookie jar you already made:
+
 ```bash
-curl -sS -X POST 'http://localhost:8080/api/v1/extraction-configs' \
+curl -sS -b /tmp/dip-cookies.txt -X POST 'http://localhost:8080/api/v1/extraction-configs' \
      -H 'Content-Type: application/json' \
      -d '{
            "name": "Insurance Card",
@@ -409,44 +430,30 @@ provisioning happen in the same call (`ConfigsService.create`).
 Open <http://localhost:8080/> (the demo), find the config manager section, add the same
 three fields by hand, and click save. It calls the exact same
 `POST /api/v1/extraction-configs` endpoint — the demo UI has no separate config logic;
-it is a thin client over `/api/v1`, same as `curl`. Your new config appears immediately
-in the "Custom" group of the upload selector.
+it is a thin client over `/api/v1`, same as `curl` (it obtains its own session
+automatically on page load, which is why you didn't need to log in to use it). Your new
+config appears immediately in the "Custom" group of the upload selector.
 
 ### 3.3 Inspect the stored ARAG search configuration
 
-The extraction-config API returns the config's own summary, not the raw ARAG payload.
-To see exactly what got written to the (mock) Knowledge Box, write a short throwaway
-script that boots the product the same way the tests do and calls the platform's
-`AragClient` directly — this mirrors the pattern in `test/api.test.ts`
-("The stored ARAG search configuration really exists in the (mock) KB"):
+`GET /api/v1/admin/search-configurations` reads the `dip_*` search configurations
+straight from the Knowledge Box — exactly what the extraction agents run against — so
+you can see the raw ARAG payload without opening the ARAG dashboard or writing any code.
+It's gated by the **admin** credential (the `ADMIN_TOKEN` you set in Section 0), a
+different, stronger gate than the session cookie above:
 
 ```bash
-cat > /tmp/inspect-config.ts <<'EOF'
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createProduct } from "./src/server.ts";
-import { Logger, readEnv } from "./vendor/arag-platform/src/index.ts";
-
-const env = readEnv({ ARAG_MOCK: "1", ADMIN_TOKEN: "inspect", DATA_DIR: mkdtempSync(join(tmpdir(), "dip-")) });
-const product = await createProduct(env, { log: new Logger({ level: "error", write: () => undefined }), persist: false });
-const created = await product.configs.create({
-  name: "Insurance Card",
-  fields: [{ label: "Policy Number", required: true }, { label: "Insurer" }],
-});
-console.log(JSON.stringify(await product.arag.getSearchConfiguration(created.aragConfig), null, 2));
-await product.close();
-EOF
-node /tmp/inspect-config.ts
-rm /tmp/inspect-config.ts
+curl -sS http://localhost:8080/api/v1/admin/search-configurations \
+     -H "Authorization: Bearer lab-admin-token" \
+  | jq '.items[] | select(.name=="dip_custom_insurance_card")'
 ```
-
-You should see:
 
 ```json
 {
+  "name": "dip_custom_insurance_card",
   "kind": "ask",
   "config": {
+    "generative_model": "chatgpt-azure-4o",
     "reranker": "predict",
     "rag_strategies": [{ "name": "full_resource" }],
     "prompt": { "system": "You are a precise document-data extraction engine. …" },
@@ -467,9 +474,12 @@ in the Knowledge Box**, not in this service. That means they can be inspected an
 directly in the ARAG dashboard, and every client of the KB — not just this product —
 gets the same extraction contract. Provisioning is idempotent (`POST`, falling back to
 `PATCH` on 409), so re-running it (`POST /api/v1/admin/provision` in the admin panel) is
-always safe, including after a KB reset.
+always safe, including after a KB reset. Before `GET /api/v1/admin/search-configurations`
+existed, seeing this payload meant a throwaway script calling `AragClient` directly, or
+the ARAG dashboard — this endpoint makes it a first-class, discoverable operation.
 
-Clean up your test config when you're done: `DELETE /api/v1/extraction-configs/cfg_...`
+Clean up your test config when you're done (reusing the session cookie again):
+`curl -b /tmp/dip-cookies.txt -X DELETE http://localhost:8080/api/v1/extraction-configs/cfg_...`
 (built-ins answer `409 Conflict` if you try — they aren't deletable).
 
 ---

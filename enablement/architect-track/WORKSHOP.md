@@ -268,26 +268,32 @@ calls only pass `search_configuration` plus request-scoped fields (query, filter
 temperature, tokens); the model comes from the stored config, full stop.
 </details>
 
-### Scenario C — "Volume is about to go from 50 documents/day to 5,000/day."
+### Scenario C — "Volume is about to go from 50 documents/day to 50,000/day."
 
 The customer's pilot ran at low volume on a single small Fly machine. They've just
-signed a bigger contract and want to know what breaks first and what to change.
+signed a much bigger contract and want to know what breaks first and what to change.
 
 <details><summary>Model answer</summary>
 
 Work through `sizing-deployment.md`'s throughput maths with the group rather than
-guessing: at ~50 s of wall-clock pipeline time per document (dominated by ARAG
-processing/indexing, ~36 s of that) and a concurrency of 2 per instance, one instance's
-practical ceiling is on the order of a few thousand documents per day, not tens of
-thousands — so 5,000/day is close to, not comfortably under, a single instance's limit
-before considering retries, larger files, or bursty arrival patterns.
+guessing — and check which numbers you're using, because they moved: after DP-19 (the
+searchability probe is now seeded with the document's own text instead of a generic
+query), a small document's full pipeline run dropped from ~50 s to ~14 s. At concurrency
+2, that puts one instance's *theoretical* ceiling around 12,000+ documents/day, and a
+realistic planning number (headroom for retries, larger files, bursty arrival) around
+5,000–7,000/day for documents of similar size to what was measured. **50,000/day is
+still well past a single instance either way** — this scenario is deliberately sized to
+land in "needs a real architecture conversation" territory regardless of which set of
+numbers you're working from, which is the point: better per-document latency raises the
+ceiling, it doesn't remove it.
 
 What breaks first, in order:
 
 1. **Job concurrency (2 per instance)** queues rather than parallelises beyond that —
    the fix is either raising `concurrency` in `new JobManager(store, log, {
    concurrency: 2 })` (a code change, bounded by how many concurrent ARAG calls the KB
-   and its rate limits can actually sustain) or running more instances.
+   and its rate limits can actually sustain) or running more instances. This alone gets
+   nowhere near 50,000/day on one instance even at an aggressive concurrency of 8.
 2. **More instances means the JSON store stops working as designed** — it's an
    in-memory-per-process, single-file-per-collection store on one Fly volume; two
    instances writing `documents.json` independently is a correctness bug, not just a
@@ -295,15 +301,17 @@ What breaks first, in order:
    path without a shared store — this is the single biggest architectural fact to raise
    with the customer's timeline, because it's a product change, not a `fly scale`
    command.
-3. Given (2), the practical near-term answer is **vertical**: a bigger single machine
-   (more CPU/RAM headroom for concurrent ARAG calls and a larger in-memory JSON index),
-   a bigger volume, and raising `concurrency` as far as the KB's own limits allow —
-   covered with concrete numbers in `sizing-deployment.md`.
+3. Given (2), there is no vertical-only path to 50,000/day: even a generous
+   `performance-2x` instance at concurrency 8 tops out on the order of ~8,000/day
+   realistically. This is qualitatively different from the pre-DP-19 conversation, where
+   "buy a bigger machine and raise concurrency a bit" was at least a plausible stopgap —
+   at this volume it no longer is, and the group should say so plainly rather than
+   reach for the familiar vertical-scaling answer out of habit.
 
-The scenario should end with the group agreeing on a recommendation *and* an explicit
-flag to the product owner that horizontal scaling requires a real architecture change
-(replacing the JSON store with a shared database), not a deployment tweak — this is
-exactly the kind of finding `design-review-checklist.md`'s reliability section exists to
-catch before a customer commitment is made on the strength of "we can just add
-machines."
+The scenario should end with the group agreeing that this volume genuinely requires
+replacing the JSON store with a shared database (the platform's own stated GA direction)
+before a commitment is made — not a deployment tweak, and not "let's try a bigger Fly
+plan and see." This is exactly the kind of finding `design-review-checklist.md`'s
+reliability section exists to catch before a customer commitment is made on the
+strength of a raw throughput number that improved.
 </details>
