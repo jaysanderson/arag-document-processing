@@ -131,11 +131,27 @@
   white-space: nowrap;
   max-width: 190px;
 }
+/* The tagline wraps rather than truncating: "Documents in, validated records out" says
+   what the product is, and half of it says nothing. Two lines, then ellipsis. */
+.dip-brandmark__tagline {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--arag-text-subtle);
+  max-width: 190px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .dip-brandmark__stack {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   align-items: flex-start;
+}
+/* The partner mark, when there is one, needs air between it and the product name. */
+.dip-brandmark__stack img:not([hidden]) + .dip-brandmark__name {
+  margin-top: 6px;
 }
 
 /* ── sidebar nav ───────────────────────────────────────────────────────────── */

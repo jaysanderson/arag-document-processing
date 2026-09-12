@@ -9,9 +9,9 @@ effective branding from `GET /api/v1/branding` before they paint.
 
 | Variable | Default | What it changes |
 |---|---|---|
-| `BRAND_PRODUCT_NAME` | `Document Processing` | Header wordmark, page titles |
-| `BRAND_TAGLINE` | `Documents in, validated records out` | Small line beside the name |
-| `BRAND_LOGO_URL` | *(none — wordmark only)* | Logo image in the header |
+| `BRAND_PRODUCT_NAME` | `Document Processing` | The name at the top of the sidebar, and page titles |
+| `BRAND_TAGLINE` | `Documents in, validated records out` | Small line under the name |
+| `BRAND_LOGO_URL` | *(none — the name alone)* | Your mark above the name at the top of the sidebar, and on the admin sign-in card. The Progress Agentic RAG wordmark stays in the top band (see `BRAND_POWERED_BY`) |
 | `BRAND_PRIMARY_COLOR` | platform brand colour | `--arag-brand-500/600/700` CSS variables |
 | `BRAND_ACCENT_COLOR` | platform accent | `--arag-accent-400/500` |
 | `BRAND_POWERED_BY` | `1` | `0` hides the "Built on Progress Agentic RAG" band and footer credit |

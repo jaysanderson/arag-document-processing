@@ -116,7 +116,15 @@ function mountShell() {
       { label: "Open app", href: "/" },
     ],
   });
-  if (window.__branding) applyShellBranding({ ...window.__branding, productName: "Operations" });
+  // The admin head reads "Operations" over whatever the product is called, so a partner
+  // sees their own product name under the operator label rather than the platform tagline.
+  if (window.__branding) {
+    applyShellBranding({
+      ...window.__branding,
+      productName: "Operations",
+      tagline: window.__branding.productName,
+    });
+  }
 }
 
 /** Any 401 anywhere means the cookie expired: return to the door, saying so. */

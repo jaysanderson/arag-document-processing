@@ -338,8 +338,11 @@ export function renderShell(root, opts) {
         <aside class="dip-sidebar" id="sidebar">
           <a class="dip-brandmark" href="${esc(nav[0].href)}">
             <span class="dip-brandmark__stack">
-              <img data-brand-logo src="/brand/arag-logo.svg" alt="Progress Agentic RAG" />
+              <!-- The Progress wordmark lives in the band, once. The sidebar head carries the
+                   product's own identity, and a partner's mark when BRAND_LOGO_URL is set. -->
+              <img data-brand-logo alt="" hidden />
               <span class="dip-brandmark__name" data-brand-name>${esc(productName)}</span>
+              <span class="dip-brandmark__tagline" data-brand-tagline${tagline ? "" : " hidden"}>${esc(tagline)}</span>
             </span>
           </a>
           <nav class="dip-sidenav" aria-label="${esc(ariaLabel)}">
@@ -354,7 +357,6 @@ export function renderShell(root, opts) {
           </nav>
           <div class="dip-sidebar__foot">
             <arag-status endpoint="/readyz" label="Knowledge Box"></arag-status>
-            <span data-brand-tagline>${esc(tagline)}</span>
             <span data-brand-footer data-powered-by-credit>Built on Progress Agentic RAG</span>
           </div>
         </aside>
@@ -403,14 +405,25 @@ export function applyShellBranding(b) {
   const name = document.querySelector("[data-brand-name]");
   if (name && b.productName) name.textContent = b.productName;
   const tag = document.querySelector("[data-brand-tagline]");
-  if (tag) tag.textContent = b.tagline || "";
+  if (tag) {
+    tag.textContent = b.tagline || "";
+    tag.hidden = !b.tagline;
+  }
+  // A partner mark replaces nothing — it *is* the sidebar head's image, which is absent
+  // otherwise. A broken one hides itself rather than leaving a torn icon above the name.
   const logo = document.querySelector("[data-brand-logo]");
-  if (logo && b.logoUrl) {
-    logo.src = b.logoUrl;
-    logo.alt = b.productName || "";
-    logo.addEventListener("error", () => {
+  if (logo) {
+    if (b.logoUrl) {
+      logo.addEventListener("error", () => {
+        logo.hidden = true;
+      });
+      logo.src = b.logoUrl;
+      logo.alt = b.productName || "";
+      logo.hidden = false;
+    } else {
+      logo.removeAttribute("src");
       logo.hidden = true;
-    });
+    }
   }
   if (b.footerText) {
     const foot = document.querySelector("[data-brand-footer]");

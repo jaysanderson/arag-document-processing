@@ -15,9 +15,13 @@ test("first run offers the guided sample and is honest about the mock Knowledge 
   await expect(page.locator(".arag-alert.warn")).toContainText("mock Knowledge Box");
   await expect(page.locator(".dip-sidenav a")).toHaveCount(5);
   await expect(page.locator('[data-nav="documents"]')).toContainText("Documents");
-  // The Progress wordmark is the default, non-white-labelled brand.
+  // The Progress wordmark appears once, in the band. The sidebar head carries the product's
+  // own identity — name and tagline — and no image unless a partner logo is configured.
   await expect(page.locator(".dip-bandmark img")).toHaveAttribute("src", "/brand/arag-logo-alt.svg");
-  await expect(page.locator(".dip-brandmark img")).toHaveAttribute("src", "/brand/arag-logo.svg");
+  await expect(page.locator(".dip-brandmark img")).toBeHidden();
+  await expect(page.locator(".dip-brandmark__name")).toHaveText("Document Processing");
+  await expect(page.locator(".dip-brandmark__tagline")).toHaveText("Documents in, validated records out");
+  expect(await page.locator('img[src*="arag-logo"]').count()).toBe(1);
 });
 
 test("the guided sample processes a document and lands in the queue", async ({ page }) => {

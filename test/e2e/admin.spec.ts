@@ -10,6 +10,7 @@ test("admin: the sign-in is a door, and a wrong token says so plainly", async ({
   await expect(page.locator(".dip-signin")).toBeVisible();
   // No navigation before sign-in: a nav the visitor cannot use is noise.
   await expect(page.locator(".dip-sidenav")).toHaveCount(0);
+  // The sign-in card is a door into a different product, so it keeps the wordmark.
   await expect(page.locator(".dip-signin__card img")).toHaveAttribute("src", "/brand/arag-logo.svg");
 
   await page.fill("#token", "nope");
@@ -21,6 +22,11 @@ test("admin: the sign-in is a door, and a wrong token says so plainly", async ({
   await page.press("#token", "Enter");
   await expect(page.locator(".dip-sidenav")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".dip-sidenav a")).toHaveCount(8);
+  // Signed in, the wordmark is in the band only; the sidebar head is the operator identity.
+  await expect(page.locator(".dip-brandmark img")).toBeHidden();
+  await expect(page.locator(".dip-brandmark__name")).toHaveText("Operations");
+  await expect(page.locator(".dip-brandmark__tagline")).toHaveText("Document Processing");
+  expect(await page.locator('img[src*="arag-logo"]').count()).toBe(1);
 });
 
 test("admin: overview, connection and configs are an operator product", async ({ page }) => {
