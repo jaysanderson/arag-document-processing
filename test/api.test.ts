@@ -630,6 +630,16 @@ test("bulk export bundles several records into one file per format", async () =>
   assert.equal(partial.headers.get("x-skipped-ids"), "nope");
   assert.equal((JSON.parse(partial.text) as unknown[]).length, 1);
 
+  // Every id stale (the selection was deleted in another tab) still yields a valid, empty
+  // file rather than a truncated one.
+  const stale = await c.request("POST", "/api/v1/documents/bulk-export", {
+    json: { ids: ["gone-1", "gone-2"], format: "xml" },
+  });
+  assert.equal(stale.status, 200);
+  assert.equal(stale.headers.get("x-skipped-ids"), "gone-1,gone-2");
+  assert.match(stale.text, /<documents count="0">/);
+  assert.equal(stale.text.match(/<\?xml/g)?.length, 1);
+
   assert.equal(
     (await c.request("POST", "/api/v1/documents/bulk-export", { json: { ids: [], format: "json" } })).status,
     400,
@@ -686,6 +696,19 @@ test("a document can be reprocessed without re-uploading it", async () => {
   const after = (await c.get(`/api/v1/documents/${id}`)).json as { status: string; fields: unknown[] };
   assert.equal(after.status, "ready");
   assert.equal(after.fields.length, before.fields.length);
+
+  // Reprocessing a document that is still in flight would queue a second job over itself.
+  const busy = await c.request("POST", "/api/v1/documents?config=invoice", {
+    body: INVOICE as unknown as BodyInit,
+    headers: { "Content-Type": "text/plain", "X-Filename": "busy.txt" },
+  });
+  const busyDoc = (busy.json as { document: { id: string }; job: { id: string } }).document;
+  const conflicted = await c.request("POST", `/api/v1/documents/${busyDoc.id}/reprocess`, {
+    headers: writer,
+  });
+  assert.equal(conflicted.status, 409, "a pending or processing document cannot be reprocessed");
+  assert.match((conflicted.json as { detail: string }).detail, /pending|processing/);
+  await waitForJob((busy.json as { job: { id: string } }).job.id);
 
   // A config that does not exist is rejected before anything is queued.
   assert.equal(
@@ -831,10 +854,16 @@ test("the documents page carries collection-wide facets", async () => {
   for (const d of (grounded.json as { items: Array<{ meta: { groundingScore?: number } }> }).items) {
     assert.ok((d.meta.groundingScore ?? 0) >= 0.5);
   }
-  // A repeated doc_type is a multi-select.
+  // `doc_type` is a repeatable parameter: one value or several, both documented.
+  const one = await c.get("/api/v1/documents?doc_type=invoice&page_size=200");
+  for (const d of (one.json as { items: Array<{ docType: string }> }).items) {
+    assert.equal(d.docType, "invoice");
+  }
   const multi = await c.get("/api/v1/documents?doc_type=invoice&doc_type=contract&page_size=200");
   const types = new Set((multi.json as { items: Array<{ docType: string }> }).items.map((d) => d.docType));
+  assert.ok(types.size >= 2, "both requested types come back");
   for (const t of types) assert.ok(["invoice", "contract"].includes(t), `unexpected ${t}`);
+  assert.equal((await c.get("/api/v1/documents?doc_type=not-a-type")).status, 400);
 });
 
 test("jobs are paged, sorted and searchable", async () => {

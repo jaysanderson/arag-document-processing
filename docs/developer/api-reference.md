@@ -23,7 +23,7 @@ Parameters:
 | `page` | query | integer |  |  |
 | `page_size` | query | integer |  |  |
 | `status` | query | string |  |  |
-| `doc_type` | query | string |  |  |
+| `doc_type` | query | array of string |  | Document type. Repeat the parameter to select several (`?doc_type=invoice&doc_type=receipt`). |
 | `q` | query | string |  | Free-text search over filename, summary, tags and extracted field values |
 | `sort` | query | string |  | Field to order by (default `created_at`) |
 | `order` | query | string |  |  |
@@ -172,7 +172,7 @@ Auth: ApiKey or Bearer
 
 ### `POST /api/v1/documents/{id}/ask`
 
-**Ask a grounded question about one document**
+**Ask a grounded question about one document** — Answers from this document's own text. Every call is a generative model call against the Knowledge Box, so this route has its own, tighter rate-limit bucket than the shared public one — an anonymous caller can still try the product without a credential, but cannot use it as an unbounded model proxy.
 
 Parameters:
 

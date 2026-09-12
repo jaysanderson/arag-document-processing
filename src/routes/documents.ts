@@ -26,7 +26,6 @@ export function registerDocumentRoutes(
         page: Number(ctx.queryObj.page ?? 1),
         pageSize: Number(ctx.queryObj.page_size ?? 50),
         status: ctx.queryObj.status as string | undefined,
-        docType: ctx.queryObj.doc_type as string | undefined,
         q: ctx.queryObj.q as string | undefined,
         sort: ctx.queryObj.sort as SortKey | undefined,
         order: ctx.queryObj.order as "asc" | "desc" | undefined,
@@ -37,12 +36,9 @@ export function registerDocumentRoutes(
         hasIssues: ctx.queryObj.has_issues as boolean | undefined,
         minGrounding:
           ctx.queryObj.min_grounding === undefined ? undefined : Number(ctx.queryObj.min_grounding),
-        // `?doc_type=invoice&doc_type=receipt` — the multi-select filter. `queryObj` keeps
-        // only the last value, so the raw params are read for the repeated form.
-        docTypes: ctx.query
-          .getAll("doc_type")
-          .flatMap((v) => v.split(","))
-          .filter(Boolean),
+        // Declared in the spec as a repeatable parameter, so the platform hands back an
+        // array whether one type or several were asked for.
+        docTypes: ctx.queryObj.doc_type as string[] | undefined,
       }),
     {
       auth: "api",
@@ -212,6 +208,10 @@ export function registerDocumentRoutes(
     },
     {
       auth: "api",
+      // Its own bucket, for the same reason the SSE route has one: every ask is a real
+      // generative call against the Knowledge Box. Anonymous callers can still try the
+      // product — that is the point of the guided sample — but not at the full public rate.
+      rateLimit: { rps: 1, burst: 10 },
       validate: operationSchemas(openapi, "/api/v1/documents/{id}/ask", "post"),
       operationId: "askDocument",
     },

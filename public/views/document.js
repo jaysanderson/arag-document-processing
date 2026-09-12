@@ -33,6 +33,7 @@ import {
   statusChip,
   toast,
   verifyOf,
+  wireTabs,
 } from "../lib/core.js";
 import { exportOne, reprocess } from "./documents.js";
 
@@ -164,6 +165,7 @@ export async function renderDocument(main, { params, query, stale }, tab = "") {
   );
 
   const panel = $("#tabPanel", main);
+  wireTabs($(".dip-tabs", main), panel);
   if (tab === "source") await renderSource(panel, doc, query);
   else if (tab === "pipeline") await renderPipeline(panel, doc);
   else if (tab === "ask") renderAskTab(panel, doc);

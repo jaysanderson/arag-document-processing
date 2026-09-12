@@ -298,6 +298,7 @@ function renderList(main, page, f, query) {
   const to = Math.min(page.page * page.page_size, page.total);
   const pageIds = page.items.map((d) => d.id);
   const allOnPage = pageIds.every((id) => selected.has(id));
+  const someOnPage = !allOnPage && pageIds.some((id) => selected.has(id));
 
   host.innerHTML = `
     <div class="dip-tablewrap">
@@ -305,7 +306,7 @@ function renderList(main, page, f, query) {
       <table class="arag-table dip-datatable" id="docsTable">
         <caption class="sr-only">Documents, ${esc(SORTS.find(([v]) => v === f.sort)?.[1] ?? "")}</caption>
         <thead><tr>
-          <th class="dip-datatable__check"><input type="checkbox" id="selectAll" aria-label="Select all documents on this page"${allOnPage ? " checked" : ""} /></th>
+          <th class="dip-datatable__check"><input type="checkbox" id="selectAll" aria-label="Select all documents on this page"${allOnPage ? " checked" : ""}${someOnPage ? ' data-partial="1"' : ""} /></th>
           ${COLUMNS.map(([key, text]) => {
             if (!key) return `<th>${esc(text)}</th>`;
             const sorted = key === sortKey ? (sortOrder === "asc" ? "ascending" : "descending") : "none";
@@ -366,7 +367,16 @@ function renderList(main, page, f, query) {
   }
 
   // selection
+  // A partial page selection is neither checked nor unchecked, and must not look like
+  // "nothing is selected" to someone about to press the header checkbox.
+  const syncSelectAll = () => {
+    const box = $("#selectAll", host);
+    const on = pageIds.filter((id) => selected.has(id)).length;
+    box.checked = on === pageIds.length;
+    box.indeterminate = on > 0 && on < pageIds.length;
+  };
   const refreshBulk = () => {
+    syncSelectAll();
     const bar = $("#bulkbar", host);
     bar.hidden = selected.size === 0;
     $(".dip-bulkbar__count", bar).textContent = `${selected.size} selected`;
@@ -391,6 +401,7 @@ function renderList(main, page, f, query) {
       refreshBulk();
     });
   }
+  syncSelectAll();
   $("#clearSelection", host)?.addEventListener("click", () => {
     selected.clear();
     for (const cb of $$("[data-check]", host)) cb.checked = false;

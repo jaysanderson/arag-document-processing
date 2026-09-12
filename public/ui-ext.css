@@ -731,7 +731,9 @@ a.dip-statstrip__tile:hover {
   background: var(--arag-accent-500);
 }
 .dip-grounding[data-band="partial"] .arag-progress > i {
-  background: #e0ab00;
+  /* The kit's warn token, not a hand-picked amber: it is tuned for contrast and it swaps
+     in dark mode, which every sibling warn indicator already does. */
+  background: var(--arag-warn-fg);
 }
 .dip-grounding[data-band="weak"] .arag-progress > i {
   background: var(--arag-danger-fg);

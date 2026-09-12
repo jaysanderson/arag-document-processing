@@ -16,6 +16,7 @@ import {
   pct,
   shortId,
   skeletonRows,
+  wireTabs,
 } from "../lib/core.js";
 
 const TABS = [
@@ -47,6 +48,7 @@ export async function renderSettings(main, { params, stale }) {
   }
   if (stale()) return;
   const panel = $("#panel", main);
+  wireTabs($(".dip-tabs", main), panel);
   if (tab === "connection") connection(panel, settings, stats);
   else if (tab === "extraction") extraction(panel, settings);
   else if (tab === "branding") branding(panel, settings);

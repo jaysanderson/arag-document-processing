@@ -469,11 +469,22 @@ export function openDrawer({ title, body, foot = "", wide = false, onClose }) {
   document.body.appendChild(host);
   const el = $(".dip-drawer", host);
   requestAnimationFrame(() => el.classList.add("is-open"));
+  // The rest of the page is not just untabbable but unreachable: a screen reader's virtual
+  // cursor would otherwise wander behind the drawer.
+  const app = document.querySelector(".dip-app");
+  if (app) {
+    app.inert = true;
+    app.setAttribute("aria-hidden", "true");
+  }
   const trigger = document.activeElement;
   $("#drawerTitle", host).focus();
   trapFocus(el);
   const close = () => {
     host.remove();
+    if (app) {
+      app.inert = false;
+      app.removeAttribute("aria-hidden");
+    }
     openOverlay = null;
     trigger?.focus?.();
     onClose?.();
@@ -596,6 +607,39 @@ export function menuButton(itemsFactory, { ariaLabel }) {
     });
   });
   return wrap;
+}
+
+/**
+ * Anchor-based tabs: each tab is a real route, so Enter and middle-click work natively.
+ * This adds the keyboard behaviour a tablist owes a screen-reader user — Left/Right between
+ * tabs, Home/End to the ends, Space to activate — and points the panel back at its tab.
+ */
+export function wireTabs(tablist, panel) {
+  if (!tablist) return;
+  const tabs = $$('[role="tab"]', tablist);
+  const selected = tabs.find((t) => t.getAttribute("aria-selected") === "true") ?? tabs[0];
+  if (selected && panel) {
+    if (!selected.id) selected.id = `tab-${Math.random().toString(36).slice(2, 8)}`;
+    panel.setAttribute("aria-labelledby", selected.id);
+    selected.setAttribute("aria-controls", panel.id || "tabPanel");
+  }
+  tablist.addEventListener("keydown", (e) => {
+    const i = tabs.indexOf(document.activeElement);
+    if (i === -1) return;
+    let next = null;
+    if (e.key === "ArrowRight") next = tabs[(i + 1) % tabs.length];
+    else if (e.key === "ArrowLeft") next = tabs[(i - 1 + tabs.length) % tabs.length];
+    else if (e.key === "Home") next = tabs[0];
+    else if (e.key === "End") next = tabs[tabs.length - 1];
+    else if (e.key === " ") {
+      e.preventDefault();
+      tabs[i].click();
+      return;
+    }
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+  });
 }
 
 /** A small explanatory popover, opened from a `What is this?` button. */

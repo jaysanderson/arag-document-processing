@@ -597,7 +597,14 @@ export const openapi = buildOpenApi({
             in: "query",
             schema: { type: "string", enum: ["pending", "processing", "ready", "failed"] },
           },
-          { name: "doc_type", in: "query", schema: { type: "string", enum: [...DOC_TYPES] } },
+          {
+            name: "doc_type",
+            in: "query",
+            description:
+              "Document type. Repeat the parameter to select several (`?doc_type=invoice&doc_type=receipt`).",
+            explode: true,
+            schema: { type: "array", items: { type: "string", enum: [...DOC_TYPES] } },
+          },
           {
             name: "q",
             in: "query",
@@ -775,6 +782,11 @@ export const openapi = buildOpenApi({
         operationId: "askDocument",
         tags: ["documents"],
         summary: "Ask a grounded question about one document",
+        description:
+          "Answers from this document's own text. Every call is a generative model call " +
+          "against the Knowledge Box, so this route has its own, tighter rate-limit bucket " +
+          "than the shared public one — an anonymous caller can still try the product " +
+          "without a credential, but cannot use it as an unbounded model proxy.",
         requestBody: jsonBody({ $ref: "#/components/schemas/AskRequest" }),
         responses: { 200: jsonResponse({ $ref: "#/components/schemas/AskResponse" }), ...standardResponses },
         security: apiSecurity,

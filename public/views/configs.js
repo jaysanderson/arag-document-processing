@@ -365,10 +365,18 @@ export async function renderConfigBuilder(main, { params, stale }) {
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "") || "field";
   function updateKeys() {
+    // Mirror `buildCustomSchema`'s de-duplication, so the preview shows the keys that will
+    // actually be saved rather than two identical ones.
+    const seen = new Map();
     const keys = $$(".fld-label", rows)
       .map((i) => i.value.trim())
       .filter(Boolean)
-      .map(toKey);
+      .map((labelText) => {
+        const base = toKey(labelText);
+        const n = (seen.get(base) ?? 0) + 1;
+        seen.set(base, n);
+        return n === 1 ? base : `${base}_${n}`;
+      });
     $("#keyPreview", main).textContent = keys.join(", ") || "—";
   }
 

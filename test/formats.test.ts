@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { csvCell, serialize, toCsv, toJson, toXml } from "../src/services/formats.ts";
+import { csvCell, serialize, serializeMany, toCsv, toJson, toXml } from "../src/services/formats.ts";
 import type { DocumentRecord } from "../src/types.ts";
 
 function sample(): DocumentRecord {
@@ -131,4 +131,36 @@ test("toCsv carries each field's quote and verification alongside its value", ()
   // A field with no evidence still produces a well-formed row with empty columns.
   const lineItems = rows.find((r) => r.includes("line_items"))!;
   assert.ok(lineItems.endsWith(",,"), lineItems);
+});
+
+test("serializeMany bundles records, and stays well formed with nothing selected", () => {
+  const a = { ...sample(), id: "a", filename: "a.txt" };
+  const b = { ...sample(), id: "b", filename: "b.txt" };
+
+  const json = JSON.parse(serializeMany([a, b], "json")) as unknown[];
+  assert.equal(json.length, 2);
+
+  const xml = serializeMany([a, b], "xml");
+  assert.equal(xml.match(/<\?xml/g)?.length, 1, "one declaration, not one per document");
+  assert.match(xml, /<documents count="2">/);
+  assert.equal(xml.match(/<document /g)?.length, 2);
+
+  const csv = serializeMany([a, b], "csv");
+  const lines = csv.trim().split("\n");
+  assert.equal(lines.filter((l) => l.startsWith("document_id,")).length, 1, "one header for the batch");
+  assert.equal(lines.length, 1 + a.fields.length + b.fields.length);
+
+  // An entirely stale selection (every id already deleted) still has to produce a valid
+  // file rather than a truncated one — bulkExport skips unknown ids rather than failing.
+  assert.deepEqual(JSON.parse(serializeMany([], "json")), []);
+  const emptyXml = serializeMany([], "xml");
+  assert.equal(emptyXml.match(/<\?xml/g)?.length, 1);
+  assert.match(emptyXml, /<documents count="0">\n<\/documents>$/);
+  const emptyCsv = serializeMany([], "csv");
+  assert.equal(emptyCsv.trim().split("\n").length, 1, "just the header");
+  assert.match(emptyCsv, /^document_id,filename,doc_type,/);
+
+  // A record with no extracted fields contributes a header and no rows.
+  const bare = { ...sample(), fields: [], evidence: [] };
+  assert.equal(serializeMany([bare], "csv").trim().split("\n").length, 1);
 });
