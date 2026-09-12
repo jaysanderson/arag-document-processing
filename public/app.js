@@ -453,17 +453,25 @@ function renderPrompts() {
   }
 }
 
-// ── health banner (extract strategy) ────────────────────────────────────────
+// ── header chip: mock vs live, and whether visual extraction is on ──────────
 async function loadStrategyHint() {
   try {
     const r = await api("/readyz");
+    const chip = $("#strategyChip");
     if (r?.arag?.mock) {
-      $("#strategyChip").hidden = false;
-      $("#strategyChip").textContent = "mock ARAG";
-      $("#strategyChip").className = "arag-chip warn";
+      chip.textContent = "mock ARAG — deterministic fixtures";
+      chip.className = "arag-chip warn";
+    } else if (r?.visualExtraction) {
+      chip.textContent = "visual extraction on for images & PDFs";
+      chip.className = "arag-chip info";
+      chip.title = "Images and PDFs are read by a multimodal LLM at ingestion (ARAG extract strategy).";
+    } else {
+      chip.textContent = "default ARAG processing";
+      chip.className = "arag-chip neutral";
     }
+    chip.hidden = false;
   } catch {
-    /* ignore */
+    /* ignore — the chip is decoration */
   }
 }
 

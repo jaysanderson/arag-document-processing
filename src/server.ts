@@ -146,6 +146,9 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
   healthRoutes(app, async () => ({
     version: VERSION,
     arag: { ...(await arag.health()), mock: env.arag.mock },
+    // Whether an ingestion-time visual-LLM extract strategy is configured — a boolean, not
+    // the strategy id (that stays behind the admin token).
+    visualExtraction: Boolean(product.extractStrategy),
   }));
   app.docs("/api/v1", openapi, { title: "Document Processing" });
 
