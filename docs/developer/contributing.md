@@ -42,10 +42,12 @@ its own change, separate from product code changes.
 ## The bar before you're done
 
 ```bash
-make check   # Biome + tsc --noEmit + unit/integration/contract tests, coverage ≥ 80% on src/
+make check   # Biome + tsc --noEmit + unit/integration/contract tests (coverage ≥ 80% on src/) + dependency audit
 make e2e     # Playwright: demo + admin happy paths against a mock-backed server
 ```
 
 Both must be green before opening a PR. If you touched the API surface, also run
 `make docs` and commit the regenerated `docs/developer/api-reference.md` — it's generated,
-but the generated output is still checked in and reviewed like any other file.
+but the generated output is still checked in and reviewed like any other file. If you
+touched anything under `docs/`, run `make links` (a CI gate) and fix any link it flags
+before opening the PR.

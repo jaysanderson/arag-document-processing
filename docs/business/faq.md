@@ -95,10 +95,12 @@ and addressable by document-type name. See
 ## How fast is it?
 
 Export, listing and asking a question are effectively instant (no new ARAG ingestion
-involved). A fresh upload's full pipeline — against a real Knowledge Box — takes roughly a
-minute end to end, dominated by ARAG's own document ingestion (OCR, visual layout,
-embeddings), not this product's code. Against the built-in mock it completes in well under
-a second, which is useful for development but not representative of real timing. See
+involved). A fresh upload's full pipeline — against a real Knowledge Box, for a small
+document — takes on the order of 15 seconds end to end, dominated by ARAG's own document
+ingestion (OCR, visual layout, embeddings), not this product's code; a larger or
+image-heavy document takes longer, since that ingestion step scales with document size.
+Against the built-in mock it completes in well under a second, which is useful for
+development but not representative of real timing. See
 [`../architecture/scaling.md`](../architecture/scaling.md) for the real stage-by-stage
 numbers.
 

@@ -97,7 +97,13 @@ before ARAG has done any work.
   always available at `GET /api/v1/documents/{id}` regardless.
 - Pipeline stages are `soft` ([DP-09](../../DECISIONS.md)): a failing stage records a stage
   error in the job's events and the pipeline continues with the best record it has. Only a
-  missing document record fails the job outright.
+  missing document record fails the job outright. A soft failure is also surfaced on the
+  record itself, not just the job: `record.meta.stageErrors` (`"<stage>: <message>"`) is
+  set whenever any stage failed, and the same failures are appended to `record.issues` as
+  `severity: "error"` — so an API caller who only ever reads `GET /documents/{id}` still
+  sees that something degraded, rather than reading a `ready` record with quietly missing
+  output as if nothing had gone wrong. The admin panel's Overview tab counts these as
+  **degraded** documents.
 
 Full stage-by-stage detail, including what each stage calls in ARAG and why, is in
 [`data-flow.md`](data-flow.md) and [`arag-integration.md`](arag-integration.md) (the latter

@@ -27,7 +27,9 @@ install:
 
 dev:
 	@test -f .env || cp .env.example .env
-	@if grep -qE '^ARAG_API_KEY=.+' .env 2>/dev/null; then \
+	@# A value, not just the trailing comment in .env.example — otherwise a fresh clone
+	@# with no credentials would try to run live and fail at assertAragEnv().
+	@if grep -qE '^ARAG_API_KEY=[^[:space:]#]' .env 2>/dev/null; then \
 		PORT=$(PORT) $(NODE) --watch src/index.ts; \
 	else \
 		ARAG_MOCK=1 PORT=$(PORT) $(NODE) --watch src/index.ts; \

@@ -24,8 +24,11 @@ On the right:
 
 - **"Pipeline settings"** — a small key/value list: **Extract strategy** (the configured
   ARAG extract-strategy id, or a dash if none), **Generative model**, **Documents** (a
-  running count by status). Next to the heading, a **"Test KB connection"** button re-runs
-  the health check on demand rather than waiting for the panel's own refresh.
+  running count by status, including **degraded** — a document that finished but lost one
+  pipeline stage along the way; this count is highlighted whenever it's above zero, since
+  it's the one status worth an operator's attention). Next to the heading, a **"Test KB
+  connection"** button re-runs the health check on demand rather than waiting for the
+  panel's own refresh.
 - **"Usage"** — six KPI tiles: **Requests** (with uptime), **ARAG calls** (with average
   latency), **ARAG errors**, **Documents** (with ready/failed counts), **Jobs succeeded**
   (with running/queued counts), and **Jobs failed** (with cancelled count) — refreshed with

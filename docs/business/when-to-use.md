@@ -29,9 +29,9 @@
 ## Poor fits
 
 - **Real-time, sub-second extraction.** Processing a document against a real ARAG Knowledge
-  Box takes on the order of a minute end to end (see
-  [`architecture/scaling.md`](../architecture/scaling.md)) — dominated by ARAG's own
-  ingestion pipeline, not this product. If you need extraction in the time it takes to
+  Box takes on the order of several to tens of seconds end to end depending on document
+  size (see [`architecture/scaling.md`](../architecture/scaling.md)) — dominated by ARAG's
+  own ingestion pipeline, not this product. If you need extraction in the time it takes to
   render a page, this isn't it.
 - **Very high-volume, latency-insensitive batch pipelines at scale (thousands per hour).**
   The MVP runs two documents at a time per instance and isn't built to run multiple

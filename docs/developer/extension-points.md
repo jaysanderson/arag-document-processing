@@ -5,22 +5,26 @@ None of these require touching the vendored platform.
 
 ## Add a document type (extraction schema)
 
-File: [`src/services/schemas.ts`](../../src/services/schemas.ts).
+`DOC_TYPE_VALUES` in [`src/types.ts`](../../src/types.ts) is the single source of truth for
+document types — `DocType` is derived from it, `SCHEMAS` (`src/services/schemas.ts`) is
+typed `Record<DocType, ExtractionSchema>`, and `openapi.ts` builds every `docType`/`doc_type`
+enum from the same list, so the spec can never drift from the code.
 
-1. Add the type to the `DocType` union in [`src/types.ts`](../../src/types.ts).
-2. Add an `ExtractionSchema` entry to `SCHEMAS` (`name`, `docType`, `description`,
-   `properties`, `required`, `labels`). Use the `s()` / `money()` / `n()` / `arr()` helpers
-   already in the file — in particular, declare monetary fields with `money()` (a string),
-   never `n()` (a number): forcing the model to emit a JSON `number` for a currency string
-   like `"$96,000.00"` is unreliable and frequently returns `0`.
+1. Add the new type to the `DOC_TYPE_VALUES` array in `src/types.ts`. This alone won't
+   compile yet — `SCHEMAS` is now missing an entry, which is the point: the compiler
+   refuses until you add the schema.
+2. Add an `ExtractionSchema` entry to `SCHEMAS` in
+   [`src/services/schemas.ts`](../../src/services/schemas.ts) (`name`, `docType`,
+   `description`, `properties`, `required`, `labels`). Use the `s()` / `money()` / `n()` /
+   `arr()` helpers already in the file — in particular, declare monetary fields with
+   `money()` (a string), never `n()` (a number): forcing the model to emit a JSON `number`
+   for a currency string like `"$96,000.00"` is unreliable and frequently returns `0`.
    `validateNormalize` parses the string deterministically instead (see
    [`arag-integration.md`](../architecture/arag-integration.md)).
-3. Add it to `DOC_TYPES` in `openapi.ts`'s `DOC_TYPES` array (it drives the `docType` enum
-   on the `Document` schema and the `doc_type` query parameter) — **update `openapi.ts`
-   first** per the API-first rule below.
-4. That's it: `schemaToFields`, the config catalogue (`GET /api/v1/schemas`), the classifier
-   (`DOC_TYPES` in `agents.ts`), and provisioning (`provisionBuiltins`) all derive from
-   `SCHEMAS` automatically.
+3. That's it for `openapi.ts` — its `docType`/`doc_type` enums are built from
+   `DOC_TYPE_VALUES`, not maintained separately. `schemaToFields`, the config catalogue
+   (`GET /api/v1/schemas`), the classifier, and provisioning (`provisionBuiltins`) all
+   derive from `SCHEMAS` automatically too.
 
 Test it in `test/agents.test.ts` — there is already a test that every schema is internally
 consistent (every `required` key has a matching property, every property has a label).

@@ -41,8 +41,10 @@ data/              DATA_DIR — JSON stores (gitignored)
 | `make lint` | `biome check .` |
 | `make format` | `biome check --write .` |
 | `make typecheck` | `tsc --noEmit -p tsconfig.json` |
-| `make check` | `lint` + `typecheck` + `coverage` — the pre-merge bar. |
-| `make docs` | Regenerates `docs/developer/api-reference.md` from `openapi.json` via the platform's `openapi-to-md.ts`. Never hand-edit that file. |
+| `make audit` | `scripts/audit.ts` — fails on any dependency advisory not explicitly accepted (with a reason and an expiry date), instead of the all-or-nothing of raw `bun audit`. The one current acceptance (a dev-only `@playwright/test` advisory, never run in CI or the image) expires 2026-12-01. |
+| `make check` | `lint` + `typecheck` + `coverage` + `audit` — the pre-merge bar. |
+| `make docs` | Regenerates `docs/developer/api-reference.md` from `openapi.json` via the platform's `openapi-to-md.ts`, then runs the link check (below). Never hand-edit that file. |
+| `make links` | `scripts/link-check.ts` — verifies every relative link in `docs/`, `enablement/` and `showcase/` resolves to a real file. A CI gate; run it after any doc change. |
 | `make showcase` | Wipes `data/showcase` and `showcase/out`, records the Playwright walkthrough (`showcase/record.spec.ts`) with video on. |
 | `make smoke` | **Opt-in.** Runs `scripts/smoke.ts` against the real KB from `.env` credentials — uploads, processes, asserts, then deletes what it created. Never run in CI. |
 | `make docker` | `docker build -t arag-doc-processing:local .` |
@@ -124,6 +126,11 @@ The server creates the directory on boot if it's missing. `test/*.test.ts` uses 
   took effect.
 - `GET /api/v1/admin/usage` (admin) shows request/ARAG-call counters and job counts by
   status — a quick way to tell whether a stuck demo is a slow ARAG call or a hung process.
+- `GET /api/v1/admin/search-configurations` (admin) reads the stored `dip_*` search
+  configurations straight from the Knowledge Box — the actual model, RAG strategy, prompt
+  and `answer_json_schema` extraction is running against, not a local reconstruction. Useful
+  for confirming a config really provisioned the way you expect, or diagnosing why
+  extraction against a real KB behaves differently than the schema in `schemas.ts` implies.
 - The admin panel's Jobs tab shows the same job timeline as the demo, for any job, including
   ones the demo UI never rendered (e.g. one you drove entirely with curl).
 

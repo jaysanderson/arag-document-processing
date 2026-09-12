@@ -110,8 +110,8 @@ curl -sS "http://localhost:8080/api/v1/documents/$ID" | jq .
 
 ```json
 {
-  "id": "b3ab630aaf4046a296d61ab669970d35",
-  "resourceId": "b3ab630aaf4046a296d61ab669970d35",
+  "id": "0bef696b45cc4bc6b04367b8cf752170",
+  "resourceId": "0bef696b45cc4bc6b04367b8cf752170",
   "filename": "invoice.txt",
   "contentType": "text/plain",
   "bytes": 1137,
@@ -131,17 +131,17 @@ curl -sS "http://localhost:8080/api/v1/documents/$ID" | jq .
   "tags": ["document", "invoice", "sample"],
   "issues": [],
   "meta": {
-    "processedAt": "2026-09-12T02:46:03.180Z",
+    "processedAt": "2026-09-12T03:17:02.042Z",
     "schema": "invoice_extraction",
     "model": "chatgpt-azure-4o",
     "sourceChars": 1136,
     "config": "invoice",
     "forced": false,
     "searchConfiguration": "dip_invoice_extraction",
-    "durationsMs": {}
+    "durationsMs": { "process": 3, "classify": 3, "extract": 3, "entities": 3, "summary": 1, "validate": 0, "standardize": 0 }
   },
-  "createdAt": "2026-09-12T02:46:03.172Z",
-  "updatedAt": "2026-09-12T02:46:03.180Z"
+  "createdAt": "2026-09-12T03:17:02.029Z",
+  "updatedAt": "2026-09-12T03:17:02.042Z"
 }
 ```
 
@@ -150,6 +150,12 @@ extracted as `"15/06/2026"`, normalised to ISO `"2026-06-15"`, with the original
 `raw`. `total` was captured as the string `"$116,160.00"` by the model and parsed to the
 number `116160` — see [`arag-integration.md`](../architecture/arag-integration.md) for why
 amounts are extracted as strings in the first place.
+
+If a pipeline stage failed but the run still finished (soft-failure degradation, see
+[`architecture.md`](../architecture/architecture.md#the-job--sse-model)), `meta` also
+carries a `stageErrors` array — one `"<stage>: <message>"` string per failed stage — and
+the same failures appear in `issues` with `severity: "error"`. It's only present when at
+least one stage actually failed; a clean run has no `stageErrors` key at all.
 
 ## Export formats
 
@@ -167,10 +173,10 @@ curl -sS "http://localhost:8080/api/v1/documents/$ID/export?format=xml"
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<document id="b3ab630aaf4046a296d61ab669970d35" type="invoice">
+<document id="0bef696b45cc4bc6b04367b8cf752170" type="invoice">
   <filename>invoice.txt</filename>
   <contentType>text/plain</contentType>
-  <resourceId>b3ab630aaf4046a296d61ab669970d35</resourceId>
+  <resourceId>0bef696b45cc4bc6b04367b8cf752170</resourceId>
   <status>ready</status>
   <summary>ACME ROBOTICS PTY LTD Unit 7, 142 Burwood Road, Hawthorn VIC 3122, Australia ABN 51 824 753 556.</summary>
   <fields>
@@ -205,10 +211,10 @@ curl -sS "http://localhost:8080/api/v1/documents/$ID/export?format=csv"
 
 ```csv
 document_id,filename,doc_type,field_key,field_label,value,confidence
-b3ab630aaf4046a296d61ab669970d35,invoice.txt,invoice,vendor_name,Vendor,ACME ROBOTICS PTY LTD,0.95
-b3ab630aaf4046a296d61ab669970d35,invoice.txt,invoice,invoice_date,Invoice Date,2026-06-15,0.85
-b3ab630aaf4046a296d61ab669970d35,invoice.txt,invoice,total,Total,116160,0.95
-b3ab630aaf4046a296d61ab669970d35,invoice.txt,invoice,line_items,Line Items,"Industrial 3D Printer (Model X9)      2    $48,000.00  $96,000.00; On-site Installation & Calibration    1     $3,200.00   $3,200.00",0.85
+0bef696b45cc4bc6b04367b8cf752170,invoice.txt,invoice,vendor_name,Vendor,ACME ROBOTICS PTY LTD,0.95
+0bef696b45cc4bc6b04367b8cf752170,invoice.txt,invoice,invoice_date,Invoice Date,2026-06-15,0.85
+0bef696b45cc4bc6b04367b8cf752170,invoice.txt,invoice,total,Total,116160,0.95
+0bef696b45cc4bc6b04367b8cf752170,invoice.txt,invoice,line_items,Line Items,"Industrial 3D Printer (Model X9)      2    $48,000.00  $96,000.00; On-site Installation & Calibration    1     $3,200.00   $3,200.00",0.85
 ```
 
 Long format keeps documents with wildly different schemas in one spreadsheet-friendly
@@ -227,7 +233,7 @@ curl -sS -X POST "http://localhost:8080/api/v1/documents/$ID/ask" \
 {
   "answer": "... TOTAL DUE:         $116,160.00 AUD ...",
   "sources": ["invoice.txt"],
-  "ms": 2
+  "ms": 3
 }
 ```
 
@@ -286,6 +292,14 @@ Creating the config immediately provisions a stored ARAG search configuration
 (`dip_custom_insurance_card`) that pins the model, `full_resource` grounding, the grounding
 prompt and an `answer_json_schema` built from these fields (see
 [`arag-integration.md`](../architecture/arag-integration.md#stored-search-configurations)).
+To confirm exactly what got provisioned — straight from the Knowledge Box, not a local
+reconstruction — an admin can read it back:
+
+```bash
+curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" \
+     http://localhost:8080/api/v1/admin/search-configurations | jq '.items[] | select(.name=="dip_custom_insurance_card")'
+```
+
 Use the returned `id` as `config` on upload — uploading itself needs no credential:
 
 ```bash
@@ -411,8 +425,8 @@ curl -sS "http://localhost:8080/api/v1/documents/doesnotexist"
   "title": "Validation failed",
   "status": 400,
   "detail": "Invalid body: /question is required",
-  "instance": "/api/v1/documents/b3ab630aaf4046a296d61ab669970d35/ask",
-  "requestId": "0bcac0fd-e8cd-453a-8b2a-1fd2eb8a78fa",
+  "instance": "/api/v1/documents/0bef696b45cc4bc6b04367b8cf752170/ask",
+  "requestId": "ea136591-f793-431f-891d-ffbd8e96122a",
   "errors": [{ "path": "/question", "message": "is required" }]
 }
 ```

@@ -45,40 +45,52 @@ To raise throughput on a single instance, in order of effort:
 
 ## Rough throughput maths
 
-Real stage timings from a live smoke run against the actual Progress Agentic RAG Knowledge
-Box (not the mock, which completes every stage in low single-digit milliseconds and is not
-representative of real throughput):
+Real stage timings from live `make smoke` runs against the actual Progress Agentic RAG
+Knowledge Box with `public/samples/invoice.txt` (not the mock, which completes every stage
+in low single-digit milliseconds and is not representative of real throughput), measured
+twice, before and after [DP-19](../../DECISIONS.md) (seeding the searchability probe with
+the document's own extracted text instead of a generic query — see ARAG mechanic 4 in
+[`arag-integration.md`](arag-integration.md)):
 
-| Stage | ~Time |
-|---|---|
-| `process` (ARAG OCR/visual/layout/embeddings + searchable-gate poll) | ~36 s |
-| `classify` | ~2 s |
-| `extract` | ~2 s |
-| `entities` | ~2 s |
-| `summary` | ~6 s |
-| `validate` / `standardize` | negligible (no ARAG call) |
-| **Total per document** | **~48 s** |
+| Stage | Before DP-19 | After DP-19 |
+|---|---|---|
+| `process` (ARAG OCR/visual/layout/embeddings + searchable-gate poll) | 37.8 s | 6.7–7.8 s |
+| `classify` | 2.2 s | 1.6–1.9 s |
+| `extract` | 1.8 s | 2.0 s |
+| `entities` | 1.8 s | 2.1–2.4 s |
+| `summary` | 6.1 s | 1.8–2.6 s |
+| `validate` / `standardize` | ~0 ms | 1–2 ms |
+| **Total per document** | **≈ 50 s** | **≈ 14 s** |
 
-`process` dominates — it's mostly ARAG's own ingestion pipeline (OCR, visual layout,
-embeddings) plus the `waitProcessed`/`waitSearchable` poll loop, not this product's code.
+`process` still dominates — it's mostly ARAG's own ingestion pipeline (OCR, visual layout,
+embeddings), not this product's code — but it is no longer padded by a polling artefact:
+seeding the readiness probe with the document's own text finds the resource on the first
+`/find` call instead of needing ~20 polls of a generic query. Two caveats before treating
+"≈ 14 s" as a general number: this is one small text document against one Knowledge Box,
+and `process` is ARAG-side work that scales with document size and page count — a
+multi-page scanned PDF with heavy visual extraction will take meaningfully longer than a
+1 KB text file, however well the readiness probe is seeded.
 
-With `concurrency: 2` and ~48s per document end to end:
+With `concurrency: 2` and ≈14s per document end to end (post-DP-19, for a document like the
+sample invoice):
 
-- **Per instance:** 2 documents every ~48s ≈ **2.5 documents/minute ≈ 150 documents/hour**
-  (theoretical steady state; real-world traffic is bursty, and this ignores queueing delay
-  once more than 2 documents are in flight — the 3rd+ document waits for a slot).
-- **At `concurrency: 4`** (still I/O-bound, plausible on one machine): ~5 documents/minute
-  ≈ 300/hour, *if* the KB and generative model tolerate 4 concurrent `full_resource`
-  extraction calls without added latency or errors — verify this against your own KB before
-  relying on it.
+- **Per instance:** 2 documents every ≈14s ≈ **8.6 documents/minute ≈ 514 documents/hour**
+  (theoretical steady state for a document of this size; real-world traffic is bursty, and
+  this ignores queueing delay once more than 2 documents are in flight — the 3rd+ document
+  waits for a slot).
+- **At `concurrency: 4`** (still I/O-bound, plausible on one machine): roughly double, ≈17
+  documents/minute ≈ 1,000/hour, *if* the KB and generative model tolerate 4 concurrent
+  `full_resource` extraction calls without added latency or errors — verify this against
+  your own KB before relying on it.
 - **Per document, wall-clock latency for the caller is unchanged by concurrency** — a
-  single upload still takes ~48s end to end from `202` to `status: "ready"`; concurrency
-  only affects how many documents can be *in flight* at once, not how fast any one finishes.
+  single upload still takes ≈14s end to end from `202` to `status: "ready"` for a document
+  like the sample invoice; concurrency only affects how many documents can be *in flight*
+  at once, not how fast any one finishes. A larger or image-heavy document will take longer
+  regardless of concurrency.
 
 These numbers are a starting point for capacity planning, not a guarantee — real documents
-vary (a multi-page PDF with heavy visual extraction takes longer than a short text file;
-`ARAG_TIMEOUT_MS` defaults to 60s per ARAG call, which the `process` stage alone can
-approach on a large scanned document).
+vary, and `ARAG_TIMEOUT_MS` defaults to 60s per ARAG call, which the `process` stage can
+still approach on a large scanned document even with a seeded readiness probe.
 
 ## Related
 

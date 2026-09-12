@@ -17,10 +17,17 @@ If you don't have a document handy, use the sample buttons directly below the dr
   processing.
 - **Image samples** — Invoice, Purchase order, Pre-auth form, Remittance (each prefixed with
   a small image icon). These demonstrate extraction from an actual scanned-looking image
-  rather than plain text, using ARAG's visual-LLM extraction.
+  rather than plain text, using ARAG's visual-LLM extraction — on a deployment connected to
+  a real Knowledge Box. **Running against the mock (the default with no ARAG credentials
+  configured), a helper note appears above the sample buttons explaining that extraction
+  instead comes from deterministic fixtures keyed by filename**, so the extracted fields
+  will not match what's actually drawn in an image sample's pixels — worth knowing before
+  demoing an image sample as if it had been genuinely read.
 
-Above the dropzone, a small **"visual extraction"** chip appears when the deployment has an
-extract strategy configured (relevant for image/PDF uploads specifically).
+Above the dropzone, a small chip reports what's backing extraction: **"mock ARAG —
+deterministic fixtures"** when running against the mock, **"visual extraction on for
+images & PDFs"** when connected to a real Knowledge Box with an extract strategy
+configured, or **"default ARAG processing"** otherwise.
 
 Below the samples is the **extraction config** row: a dropdown (default "Auto-detect") and a
 **"Manage…"** button.

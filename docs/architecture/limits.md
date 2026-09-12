@@ -16,7 +16,7 @@ it lives in so it can be verified or changed.
 
 | Limit | Value | Where |
 |---|---|---|
-| Built-in document types / schemas | 11: invoice, receipt, contract, resume, purchase_order, medical_claim, preauthorisation, bank_statement, form, report, generic | `SCHEMAS`, `src/services/schemas.ts`; `DOC_TYPES`, `src/openapi.ts` |
+| Built-in document types / schemas | 11: invoice, receipt, contract, resume, purchase_order, medical_claim, preauthorisation, bank_statement, form, report, generic | `DOC_TYPE_VALUES`, `src/types.ts` (single source of truth — `SCHEMAS` and every `openapi.ts` enum derive from it) |
 | Custom config: max fields | 40 | `ExtractionConfigCreate.fields.maxItems`, `src/openapi.ts` |
 | Custom config: field label length | 1–80 characters | `ExtractionConfigCreate`, `src/openapi.ts` |
 | Custom config: name length | 1–80 characters | `ExtractionConfigCreate.name`, `src/openapi.ts` |
@@ -34,7 +34,9 @@ it lives in so it can be verified or changed.
 | `limit` (admin logs) | default 200, max 500 | `src/openapi.ts` |
 | `contains` filter length (admin logs) | ≤200 characters | `src/openapi.ts` |
 | Config id (`config` query param, path `id`) | ≤80 / ≤128 characters | `src/openapi.ts` |
-| Default rate limit | 5 requests/sec, burst 20, per IP or API key | `RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`, `.env.example` |
+| Default rate limit | 5 requests/sec, burst 20, per IP (or per API key when one is presented) | `RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`, `.env.example` |
+| Client-IP source for rate limiting | `TRUST_PROXY`: `fly` (default, trusts `Fly-Client-IP`) \| `xff` (first `X-Forwarded-For` entry) \| `none` (raw socket address) | `Ctx.ip`, `vendor/arag-platform/src/http/app.ts` |
+| SSE job-events stream | *Opening* the stream costs one rate-limit token like any other request (verified: 30 rapid opens against a fresh burst-20 bucket returned `429` from the 20th/21st onward); the long-lived stream itself is not separately throttled once open, so a scripted demo that opens many streams quickly can be rate-limited | `src/routes/jobs.ts` |
 
 ## Storage and logging
 
@@ -66,7 +68,7 @@ it lives in so it can be verified or changed.
 
 | Aspect | Mock ARAG (`ARAG_MOCK=1`) | Live ARAG |
 |---|---|---|
-| Stage timings | Milliseconds (synchronous, in-process) | Seconds (`process` ~36s, `classify`/`extract`/`entities` ~2s each, `summary` ~6s — see [`scaling.md`](scaling.md)) |
+| Stage timings | Milliseconds (synchronous, in-process) | Seconds — `process` (ARAG ingestion) still dominates at roughly 7–8s for a small document after [DP-19](../../DECISIONS.md)'s seeded readiness probe (was ~38s before it); `classify`/`extract`/`entities` ~2s each, `summary` ~2–3s — see [`scaling.md`](scaling.md) for the full before/after table |
 | Extraction quality | Synthesised per-field placeholder values (`synthesizeJson`) — exercises the pipeline shape, not real document understanding | Genuine multimodal-LLM extraction grounded in the actual document |
 | Classification | Heuristic/synthesised, not a real judgement of document type | Real classification via `answer_json_schema` |
 | Data Augmentation agent fields | Only present if a test seeds them directly on the mock resource (`resource.fields.da_fields = ...`) | Only present if a DA "ask" agent is configured on the Knowledge Box in the ARAG dashboard |
