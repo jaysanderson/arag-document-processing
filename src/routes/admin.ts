@@ -4,6 +4,7 @@ import {
   type AragClient,
   constantTimeEqual,
   describeEnv,
+  forbidden,
   type JobManager,
   type Logger,
   operationSchemas,
@@ -35,8 +36,11 @@ export function registerAdminRoutes(app: App, deps: AdminDeps): void {
     "/api/v1/admin/login",
     (ctx) => {
       const { token } = ctx.body as { token: string };
-      if (!deps.env.adminToken || !constantTimeEqual(token, deps.env.adminToken))
-        throw unauthorized("Invalid admin token");
+      // STANDARDS §4: "admin disabled" is a 403 with an explanation, not a 401 that
+      // implies the caller merely typed the wrong token.
+      if (!deps.env.adminToken)
+        throw forbidden("Admin access is disabled: set ADMIN_TOKEN to enable the admin panel.");
+      if (!constantTimeEqual(token, deps.env.adminToken)) throw unauthorized("Invalid admin token");
       ctx.setCookie("arag_admin", token, { maxAge: 12 * 3600 });
       return { ok: true };
     },

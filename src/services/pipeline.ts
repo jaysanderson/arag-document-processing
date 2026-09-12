@@ -13,7 +13,7 @@
  * best record it has rather than dying, and the failure is surfaced as a stage error.
  */
 import type { AragClient, JobContext, Logger } from "../../vendor/arag-platform/src/index.ts";
-import type { DocumentRecord } from "../types.ts";
+import type { DocumentRecord, StageName } from "../types.ts";
 import type { Agents } from "./agents.ts";
 import { buildQuerySeed, fieldsFromObject, validateNormalize } from "./agents.ts";
 import type { ConfigsService } from "./configs.ts";
@@ -50,12 +50,39 @@ export async function runPipeline(
   const durations = record.meta.durationsMs;
   const useAgentFields = input.config === "agent";
   const forced = deps.configs.resolve(input.config);
+  const stageErrors: string[] = [];
+  /**
+   * Wrapper around `ctx.stage` that does three things the pipeline needs:
+   *   - records the stage duration on the *record* (`ctx.stage` only times the job);
+   *   - collects failures so they can be surfaced on the record rather than only in the
+   *     job's event log (a `soft` failure otherwise looks like "no fields in this
+   *     document" to an API caller);
+   *   - implements `soft` here rather than in `ctx.stage`, so the error still reaches
+   *     this catch block. The emitted job events are identical either way.
+   */
+  const stage = async <T>(
+    name: StageName,
+    message: string,
+    fn: () => Promise<T>,
+    opts: { soft?: boolean; progress?: number } = {},
+  ): Promise<T | undefined> => {
+    const t0 = performance.now();
+    try {
+      return (await ctx.stage(name, message, fn, { progress: opts.progress })) as T | undefined;
+    } catch (err) {
+      stageErrors.push(`${name}: ${(err as Error).message}`);
+      if (opts.soft) return undefined;
+      throw err;
+    } finally {
+      durations[name] = Math.round(performance.now() - t0);
+    }
+  };
 
   // 1. Wait for ARAG to finish OCR/visual/layout/embedding processing, THEN wait until
   //    the resource is actually searchable. A resource's status flips to PROCESSED a few
   //    seconds BEFORE retrieval is ready — extracting too early yields empty results, so
   //    the pipeline gates on a cheap /find poll (`waitSearchable`) as well.
-  await ctx.stage(
+  await stage(
     "process",
     "Progress Agentic RAG is processing the document (OCR, visual layout, embeddings)…",
     async () => {
@@ -87,7 +114,7 @@ export async function runPipeline(
   //     resource (configured in the ARAG dashboard). Falls back to live extraction.
   let agentHandled = false;
   if (useAgentFields) {
-    const persisted = await ctx.stage(
+    const persisted = await stage(
       "classify",
       "Reading fields written by the ARAG Data Augmentation agent…",
       () => deps.agents.readPersistedFields(resourceId, { signal: ctx.signal }),
@@ -126,7 +153,7 @@ export async function runPipeline(
     record.meta.config = forced.label;
     record.meta.forced = true;
   } else {
-    const cls = await ctx.stage(
+    const cls = await stage(
       "classify",
       "Classifying document type…",
       () => deps.agents.classify(resourceId, seed, ctx.signal),
@@ -149,7 +176,7 @@ export async function runPipeline(
   //    pass comes back empty — guards against residual indexing lag. Skipped when the
   //    DA-agent path already loaded persisted fields.
   if (!agentHandled) {
-    const fields = await ctx.stage(
+    const fields = await stage(
       "extract",
       `Extracting ${schema.docType.replace(/_/g, " ")} fields with the visual LLM…`,
       async () => {
@@ -168,7 +195,7 @@ export async function runPipeline(
   // 4. Entity enrichment then summarisation — run SEQUENTIALLY, not concurrently.
   //    Two simultaneous full_resource generations against the same resource make one
   //    of them return empty; sequencing trades ~2 s of latency for reliability.
-  const entities = await ctx.stage(
+  const entities = await stage(
     "entities",
     "Surfacing named entities…",
     async () => {
@@ -183,7 +210,7 @@ export async function runPipeline(
   );
   record.entities = entities ?? [];
 
-  const summ = await ctx.stage(
+  const summ = await stage(
     "summary",
     "Summarising and tagging…",
     () => deps.agents.summarize(resourceId, seed, ctx.signal),
@@ -195,7 +222,7 @@ export async function runPipeline(
   }
 
   // 5. Deterministic validation + normalisation (no model call).
-  await ctx.stage(
+  await stage(
     "validate",
     "Normalising values and validating consistency…",
     async () => {
@@ -213,6 +240,17 @@ export async function runPipeline(
   // 6. Standardise — the record is ready for JSON/XML/CSV serialisation.
   record.meta.processedAt = new Date().toISOString();
   record.status = "ready";
+  // A soft stage failure must not look like "this document simply had no fields":
+  // surface it on the record itself so an API caller never has to read job events.
+  if (stageErrors.length) {
+    record.meta.stageErrors = stageErrors;
+    for (const message of stageErrors) {
+      const [field] = message.split(":");
+      record.issues.push({ field: field ?? "pipeline", severity: "error", message });
+    }
+  }
+
+  durations.standardize = 0;
   ctx.emit("standardize", "ok", {
     message: "Canonical record ready (JSON · XML · CSV)",
     data: { fields: record.fields.length },

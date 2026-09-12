@@ -2,6 +2,7 @@
 import {
   type App,
   badRequest,
+  HttpError,
   notFound,
   operationSchemas,
   parseMultipart,
@@ -10,6 +11,7 @@ import {
 import { openapi } from "../openapi.ts";
 import type { DocumentsService } from "../services/documents.ts";
 import type { Format } from "../services/formats.ts";
+import { requireWriter } from "./guards.ts";
 
 const FORMATS = new Set(["json", "xml", "csv"]);
 
@@ -44,9 +46,16 @@ export function registerDocumentRoutes(app: App, deps: { documents: DocumentsSer
       let fields: Record<string, string> = {};
       let file: UploadedFile | undefined;
       if (contentType.toLowerCase().startsWith("multipart/form-data")) {
-        const parsed = parseMultipart(ctx.rawBody ?? Buffer.alloc(0), contentType);
-        fields = parsed.fields;
-        file = parsed.files.find((f) => f.field === "file") ?? parsed.files[0];
+        try {
+          const parsed = parseMultipart(ctx.rawBody ?? Buffer.alloc(0), contentType);
+          fields = parsed.fields;
+          file = parsed.files.find((f) => f.field === "file") ?? parsed.files[0];
+        } catch (err) {
+          // The platform's parser calls decodeURIComponent on the part filename without a
+          // guard, so `filename="100%"` throws a raw URIError that would surface as a 500.
+          if (err instanceof HttpError) throw err;
+          throw badRequest(`Could not parse the multipart body: ${(err as Error).message}`);
+        }
       }
       const bytes = file ? file.data : ctx.rawBody;
       if (!bytes || bytes.length === 0) {
@@ -109,6 +118,7 @@ export function registerDocumentRoutes(app: App, deps: { documents: DocumentsSer
   app.delete(
     "/api/v1/documents/:id",
     async (ctx) => {
+      requireWriter(ctx);
       if (!(await deps.documents.delete(ctx.params.id!))) throw notFound("Document");
       ctx.noContent();
     },

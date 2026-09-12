@@ -11,6 +11,7 @@ import {
   operationSchemas,
 } from "../../vendor/arag-platform/src/index.ts";
 import { openapi } from "../openapi.ts";
+import { requireWriter } from "./guards.ts";
 
 const TERMINAL = ["succeeded", "failed", "cancelled"];
 
@@ -40,6 +41,7 @@ export function registerJobRoutes(app: App, deps: { jobs: JobManager }): void {
   app.delete(
     "/api/v1/jobs/:id",
     (ctx) => {
+      requireWriter(ctx);
       if (!deps.jobs.get(ctx.params.id!)) throw notFound("Job");
       deps.jobs.cancel(ctx.params.id!);
       ctx.noContent();
@@ -71,6 +73,8 @@ export function registerJobRoutes(app: App, deps: { jobs: JobManager }): void {
       });
       sse.onClose(unsub);
     },
-    { auth: "api", noRateLimit: true, operationId: "jobEvents" },
+    // Rate-limited like any other route: an SSE *open* costs a token, so an anonymous
+    // client cannot hold unbounded concurrent streams (the stream itself is not throttled).
+    { auth: "api", operationId: "jobEvents" },
   );
 }

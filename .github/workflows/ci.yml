@@ -17,7 +17,9 @@ jobs:
       - run: bunx biome ci .
       - run: bunx tsc --noEmit -p tsconfig.json
       - run: node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-exclude='src/index.ts' --test-coverage-lines=80 --test-timeout=30000 'test/*.test.ts'
-      - run: bun audit || true
+      # Fails on any high/critical advisory except the dated, documented acceptances in
+      # scripts/audit.ts (no silent `|| true`).
+      - run: node scripts/audit.ts
   e2e:
     runs-on: ubuntu-latest
     steps:

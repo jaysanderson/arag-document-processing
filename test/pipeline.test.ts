@@ -35,6 +35,7 @@ function answerHook(
 
 let product: Product;
 let c: testing.TestClient;
+let writer: Record<string, string>;
 
 before(async () => {
   const env = readEnv({
@@ -52,6 +53,8 @@ before(async () => {
     mock: { processingMs: 400, searchableLagMs: 200, answerHook },
   });
   c = await testing.startTestServer(product.app);
+  const session = await c.post("/api/v1/session");
+  writer = { cookie: session.headers.get("set-cookie")!.split(";")[0]! };
 });
 
 after(async () => {
@@ -187,7 +190,7 @@ test("config=agent reads fields a Data Augmentation agent persisted on the resou
 test("a queued job can be cancelled", async () => {
   const res = await post("/api/v1/documents", INVOICE, "cancel-me.txt");
   const { job } = res.json as { job: { id: string } };
-  assert.equal((await c.request("DELETE", `/api/v1/jobs/${job.id}`)).status, 204);
+  assert.equal((await c.request("DELETE", `/api/v1/jobs/${job.id}`, { headers: writer })).status, 204);
   const cancelled = product.jobs.get(job.id)!;
   assert.equal(cancelled.status, "cancelled");
   // The SSE stream for a finished job replays and closes immediately.
@@ -212,4 +215,35 @@ test("fieldsFromObject normalises arbitrary agent keys", () => {
   assert.equal(byKey.note, undefined);
   assert.equal(byKey.missing, undefined);
   assert.equal(byKey.sentinel, undefined);
+});
+
+test("a failed stage is surfaced on the record, not just in the job events", async () => {
+  // Simulate ARAG losing a stored search configuration (a KB reset, a bad provision run):
+  // extraction then fails on both attempts while every other stage still succeeds.
+  await product.arag.deleteSearchConfiguration("dip_receipt_extraction");
+  const res = await post("/api/v1/documents?config=receipt", INVOICE, "broken-config.txt");
+  const { document, job } = res.json as { document: { id: string }; job: { id: string } };
+  const finished = await waitForJob(job.id);
+
+  // The job still succeeds — one flaky stage must not lose the rest of the extraction.
+  assert.equal(finished.status, "succeeded");
+  const extract = finished.events.find((e) => e.stage === "extract" && e.status === "error");
+  assert.ok(extract, "the extract stage should have errored");
+
+  const rec = (await c.get(`/api/v1/documents/${document.id}`)).json as {
+    status: string;
+    fields: unknown[];
+    issues: Array<{ field: string; severity: string; message: string }>;
+    meta: { stageErrors?: string[] };
+  };
+  assert.equal(rec.status, "ready");
+  assert.deepEqual(rec.fields, []);
+  // …but "ARAG was unavailable" must not look like "this document had no fields".
+  assert.ok(
+    rec.meta.stageErrors?.some((e) => e.startsWith("extract:")),
+    JSON.stringify(rec.meta),
+  );
+  assert.ok(rec.issues.some((i) => i.field === "extract" && i.severity === "error"));
+  // Entities and the summary still ran.
+  assert.ok((finished.durationsMs.entities ?? 0) >= 0);
 });

@@ -4,6 +4,7 @@ import { openapi } from "../openapi.ts";
 import type { ConfigsService } from "../services/configs.ts";
 import type { CustomConfigInput } from "../services/schemas.ts";
 import { DOC_TYPES, SCHEMAS, schemaToFields } from "../services/schemas.ts";
+import { requireWriter } from "./guards.ts";
 
 export function registerConfigRoutes(app: App, deps: { configs: ConfigsService }): void {
   app.get("/api/v1/extraction-configs", () => ({ items: deps.configs.list() }), {
@@ -37,6 +38,7 @@ export function registerConfigRoutes(app: App, deps: { configs: ConfigsService }
   app.delete(
     "/api/v1/extraction-configs/:id",
     async (ctx) => {
+      requireWriter(ctx);
       const outcome = await deps.configs.delete(ctx.params.id!);
       if (outcome === "not-found") throw notFound("Extraction config");
       if (outcome === "builtin") throw conflict("Built-in extraction configurations cannot be deleted");

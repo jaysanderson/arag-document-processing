@@ -121,6 +121,14 @@ const Document = {
         forced: { type: "boolean" },
         searchConfiguration: { type: "string" },
         extractStrategy: { type: "string" },
+        stageErrors: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            'Stages that failed during the run ("<stage>: <message>"). Present only when a stage ' +
+            "failed: the pipeline degrades gracefully, so a `ready` record can still be missing the " +
+            "output of a stage that errored. The same failures also appear in `issues`.",
+        },
       },
       additionalProperties: true,
     },
@@ -370,6 +378,8 @@ export const openapi = buildOpenApi({
         operationId: "deleteDocument",
         tags: ["documents"],
         summary: "Delete a document and its ARAG resource",
+        description:
+          "Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.",
         responses: { 204: { description: "Deleted" }, ...standardResponses },
         security: apiSecurity,
       },
@@ -450,6 +460,8 @@ export const openapi = buildOpenApi({
         operationId: "cancelJob",
         tags: ["jobs"],
         summary: "Cancel a running job",
+        description:
+          "Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.",
         responses: { 204: { description: "Cancelled" }, ...standardResponses },
         security: apiSecurity,
       },
@@ -523,6 +535,8 @@ export const openapi = buildOpenApi({
         operationId: "deleteExtractionConfig",
         tags: ["extraction-configs"],
         summary: "Delete a custom extraction configuration (built-ins are not deletable)",
+        description:
+          "Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.",
         responses: {
           204: { description: "Deleted" },
           409: {

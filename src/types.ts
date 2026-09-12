@@ -75,6 +75,12 @@ export interface RecordMeta {
   searchConfiguration?: string;
   /** ARAG extract strategy applied at ingestion (images/PDFs only). */
   extractStrategy?: string;
+  /**
+   * Stages that failed during the run, as `"<stage>: <message>"`. Present only when at
+   * least one stage failed: the pipeline degrades gracefully, so a `ready` record can
+   * still be missing the output of a stage that errored.
+   */
+  stageErrors?: string[];
 }
 
 /** The canonical, format-agnostic record produced by a full pipeline run. */

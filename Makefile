@@ -2,7 +2,7 @@
 BUN ?= bun
 NODE ?= node
 PORT ?= 8080
-.PHONY: help install dev start test coverage e2e lint format typecheck check docs showcase smoke docker fly-validate mock sync-platform
+.PHONY: help install dev start test coverage e2e lint format typecheck audit check docs showcase smoke docker fly-validate mock sync-platform
 
 help:
 	@echo "make install       bun install (dev tooling, exact pins)"
@@ -13,7 +13,8 @@ help:
 	@echo "make e2e           Playwright (demo + admin) against a mock-backed server"
 	@echo "make lint          Biome check"
 	@echo "make typecheck     tsc --noEmit"
-	@echo "make check         lint + typecheck + coverage"
+	@echo "make audit         dependency advisories (fails on anything not explicitly accepted)"
+	@echo "make check         lint + typecheck + coverage + audit"
 	@echo "make docs          regenerate docs/developer/api-reference.md from openapi.json"
 	@echo "make showcase      record the showcase walkthrough (video + screenshots)"
 	@echo "make smoke         OPT-IN live end-to-end run against the real KB (needs .env)"
@@ -54,7 +55,10 @@ format:
 typecheck:
 	$(BUN)x tsc --noEmit -p tsconfig.json
 
-check: lint typecheck coverage
+audit:
+	$(NODE) scripts/audit.ts
+
+check: lint typecheck coverage audit
 
 docs:
 	$(NODE) scripts/gen-api-reference.ts docs/developer/api-reference.md
