@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const port = Number(process.env.PW_PORT ?? 8181);
+const port = Number(process.env.PW_PORT ?? 8381); // product-specific default so sibling products on one machine never share a web server
 const showcase = Boolean(process.env.SHOWCASE);
 
 export default defineConfig({
