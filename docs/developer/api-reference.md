@@ -116,7 +116,7 @@ Auth: ApiKey or Bearer
 
 ### `DELETE /api/v1/documents/{id}`
 
-**Delete a document and its ARAG resource**
+**Delete a document and its ARAG resource** — Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.
 
 Parameters:
 
@@ -238,7 +238,7 @@ Auth: ApiKey or Bearer
 
 ### `DELETE /api/v1/jobs/{id}`
 
-**Cancel a running job**
+**Cancel a running job** — Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.
 
 Parameters:
 
@@ -345,7 +345,7 @@ Auth: ApiKey or Bearer
 
 ### `DELETE /api/v1/extraction-configs/{id}`
 
-**Delete a custom extraction configuration (built-ins are not deletable)**
+**Delete a custom extraction configuration (built-ins are not deletable)** — Requires a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie from `POST /api/v1/session`.
 
 Parameters:
 

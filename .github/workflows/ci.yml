@@ -20,6 +20,7 @@ jobs:
       # Fails on any high/critical advisory except the dated, documented acceptances in
       # scripts/audit.ts (no silent `|| true`).
       - run: node scripts/audit.ts
+      - run: node scripts/link-check.ts
   e2e:
     runs-on: ubuntu-latest
     steps:
