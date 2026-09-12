@@ -3,181 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Document Processing · admin</title>
+  <title>Document Processing · operations</title>
   <link rel="icon" href="/ui/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/ui/arag-ui.css" />
-  <link rel="stylesheet" href="/app.css" />
+  <link rel="stylesheet" href="/ui-ext.css" />
   <script type="module" src="/ui/arag-ui.js"></script>
   <script type="module" src="/admin/admin.js"></script>
 </head>
 <body class="arag">
-  <arag-shell product="Document Processing" tagline="admin" nav="Demo=/,Admin=/admin/" docs-href="/api/v1/docs">
-
-    <div id="login" class="arag-card pad" style="max-width:460px" hidden>
-      <h2>Admin sign-in</h2>
-      <p class="muted small">
-        Enter the <code>ADMIN_TOKEN</code> configured for this deployment. It is exchanged for an
-        HttpOnly cookie and never stored in the page.
-      </p>
-      <!-- A real form: a lone password input does not submit on Enter in every browser
-           (Chromium even warns "Password field is not contained in a form"), and the
-           owner hit exactly that. `submit` covers Enter and the button alike. -->
-      <form id="loginForm" autocomplete="off">
-        <div class="arag-row">
-          <label class="sr-only" for="token">Admin token</label>
-          <input id="token" name="token" class="arag-input" type="password"
-                 placeholder="admin token" autocomplete="current-password" />
-          <button id="signin" class="arag-btn" type="submit">Sign in</button>
-        </div>
-      </form>
-      <p id="loginError" class="arag-alert error" hidden></p>
+  <!-- The operator product: the same shell as the app, a different navigation, and a
+       sign-in boundary that looks like the door to a different product. -->
+  <div id="app"></div>
+  <noscript>
+    <div class="arag-alert warn" style="margin:24px">
+      The operations panel needs JavaScript. The same endpoints are documented at
+      <a href="/api/v1/docs">/api/v1/docs</a> and usable with the admin token directly.
     </div>
-
-    <div id="panel" hidden>
-      <div class="arag-tabs" role="tablist">
-        <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
-        <button role="tab" data-tab="configs">Extraction configs</button>
-        <button role="tab" data-tab="jobs">Jobs</button>
-        <button role="tab" data-tab="logs">Logs</button>
-        <button role="tab" data-tab="config">Configuration</button>
-        <button role="tab" data-tab="retention">Retention</button>
-      </div>
-
-      <!-- overview -->
-      <section data-panel="overview" class="arag-grid cols-2" style="margin-top:16px">
-        <arag-health src="/api/v1/admin/health"></arag-health>
-        <div class="arag-stack">
-          <div class="arag-card pad">
-            <div class="arag-row" style="justify-content:space-between">
-              <h3 style="margin:0">Pipeline settings</h3>
-              <button class="arag-btn ghost sm" id="testKb">Test KB connection</button>
-            </div>
-            <dl class="arag-kv" style="margin-top:10px" id="pipelineSettings">
-              <dt>Extract strategy</dt><dd id="extractStrategy">—</dd>
-              <dt>Generative model</dt><dd id="model">—</dd>
-              <dt>Documents</dt><dd id="docCounts">—</dd>
-            </dl>
-          </div>
-          <div class="arag-card pad">
-            <div class="arag-row" style="justify-content:space-between">
-              <h3 style="margin:0">Usage</h3>
-              <button class="arag-btn ghost sm" id="reloadUsage">Reload</button>
-            </div>
-            <div class="arag-grid cols-3 usage-kpis" id="usageKpis" style="margin-top:10px"></div>
-            <details style="margin-top:12px">
-              <summary class="muted small">Raw JSON</summary>
-              <arag-json id="usage" src="/api/v1/admin/usage"></arag-json>
-            </details>
-          </div>
-        </div>
-      </section>
-
-      <!-- extraction configs -->
-      <section data-panel="configs" hidden style="margin-top:16px">
-        <div class="arag-card">
-          <div class="head">
-            <h3>Extraction configs &amp; ARAG search configurations</h3>
-            <div class="arag-row">
-              <button class="arag-btn ghost sm" id="reloadConfigs">Reload</button>
-              <button class="arag-btn sm" id="provision">Re-provision all</button>
-            </div>
-          </div>
-          <div class="body">
-            <p class="muted small">
-              Each extraction config is backed by a stored ARAG search configuration
-              (<code>kind: ask</code>) that pins the model, the <code>full_resource</code> RAG
-              strategy, the grounding prompt and the <code>answer_json_schema</code>.
-              Re-provisioning is idempotent — safe after a KB reset or a model change.
-            </p>
-            <table class="arag-table" id="cfgTable">
-              <thead><tr><th>Name</th><th>Kind</th><th>ARAG search configuration</th><th>Fields</th><th>Provisioned</th></tr></thead>
-              <tbody></tbody>
-            </table>
-            <div id="provisionResult" style="margin-top:12px"></div>
-            <details style="margin-top:12px" id="storedConfigs">
-              <summary class="muted small">
-                Inspect the stored ARAG search configurations (model, RAG strategy, prompt, schema)
-              </summary>
-              <arag-json id="storedConfigsJson" src="/api/v1/admin/search-configurations"></arag-json>
-            </details>
-          </div>
-        </div>
-      </section>
-
-      <!-- jobs -->
-      <section data-panel="jobs" hidden style="margin-top:16px" class="arag-grid split">
-        <div class="arag-card">
-          <div class="head"><h3>Recent jobs</h3><button id="reloadJobs" class="arag-btn ghost sm">Reload</button></div>
-          <div class="body">
-            <table class="arag-table" id="jobs">
-              <thead><tr><th>Kind</th><th>Status</th><th>Stage</th><th>Created</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="arag-card">
-          <div class="head"><h3>Job detail</h3><button id="cancelJob" class="arag-btn ghost sm" hidden>Cancel</button></div>
-          <div class="body">
-            <arag-job-timeline id="jobDetail"></arag-job-timeline>
-            <arag-json id="jobJson" style="margin-top:12px"></arag-json>
-          </div>
-        </div>
-      </section>
-
-      <!-- logs -->
-      <section data-panel="logs" hidden style="margin-top:16px">
-        <div class="arag-card">
-          <div class="head">
-            <h3>Logs</h3>
-            <div class="arag-row">
-              <select id="level" class="arag-select" style="width:auto">
-                <option value="">all levels</option>
-                <option>debug</option><option>info</option><option>warn</option><option>error</option>
-              </select>
-              <input id="contains" class="arag-input" placeholder="filter…" style="width:220px" />
-            </div>
-          </div>
-          <div class="body">
-            <arag-log id="log" src="/api/v1/admin/logs" limit="200" refresh="5000"></arag-log>
-          </div>
-        </div>
-      </section>
-
-      <!-- configuration -->
-      <section data-panel="config" hidden style="margin-top:16px">
-        <div class="arag-card pad" style="margin-bottom:16px">
-          <h3>Branding (white-label)</h3>
-          <p class="muted small">
-            Set with <code>BRAND_*</code> environment variables and applied to both UIs at
-            boot; logos and other assets go in <code>DATA_DIR/branding/</code> and are served
-            from <code>/branding/</code>. Full reference:
-            <code>docs/developer/white-label.md</code>.
-          </p>
-          <dl class="arag-kv" id="brandingKv" style="margin-top:10px"></dl>
-        </div>
-        <div class="arag-card pad">
-          <h3>Effective configuration (secrets redacted)</h3>
-          <arag-json id="configJson" src="/api/v1/admin/config"></arag-json>
-        </div>
-      </section>
-
-      <!-- retention -->
-      <section data-panel="retention" hidden style="margin-top:16px">
-        <div class="arag-card pad" style="max-width:620px">
-          <h3>Data retention</h3>
-          <p class="muted small">
-            Deletes documents older than N days from the local store <em>and</em> their
-            resources from the Knowledge Box. Use <code>0</code> to clear everything.
-          </p>
-          <div class="arag-row">
-            <label class="arag-label" for="purgeDays">Older than (days)</label>
-            <input id="purgeDays" class="arag-input" type="number" min="0" value="30" style="width:120px" />
-            <button class="arag-btn danger" id="purge">Purge</button>
-          </div>
-          <div id="purgeResult" style="margin-top:12px"></div>
-        </div>
-      </section>
-    </div>
-  </arag-shell>
+  </noscript>
 </body>
 </html>

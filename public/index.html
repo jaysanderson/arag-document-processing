@@ -3,209 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Document Processing · demo</title>
+  <title>Document Processing</title>
   <link rel="icon" href="/ui/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/ui/arag-ui.css" />
-  <link rel="stylesheet" href="/app.css" />
+  <link rel="stylesheet" href="/ui-ext.css" />
   <script type="module" src="/ui/arag-ui.js"></script>
   <script type="module" src="/app.js"></script>
 </head>
 <body class="arag">
-  <arag-shell
-    product="Document Processing"
-    tagline="demo"
-    nav="Demo=/,Admin=/admin/"
-    admin-href="/admin/"
-    docs-href="/api/v1/docs">
-
-    <div class="arag-grid split">
-      <!-- ── left: input + live pipeline ─────────────────────────────── -->
-      <section class="arag-stack">
-        <div class="arag-card">
-          <div class="head">
-            <h2>1 · Drop a document</h2>
-            <span class="arag-chip info" id="strategyChip" hidden>visual extraction</span>
-          </div>
-          <div class="body arag-stack">
-            <div class="arag-dropzone" id="dropzone" tabindex="0" role="button"
-                 aria-label="Drop a document here or press Enter to browse">
-              <input type="file" id="fileInput" hidden
-                     accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.txt,.md,.csv,.docx" />
-              <div class="icon">⤓</div>
-              <div><strong>Drop a document here</strong></div>
-              <div class="muted small">PDF · image · DOCX · TXT · CSV · Markdown — or click to browse</div>
-            </div>
-
-            <div class="samples">
-              <span class="samples-label">Text samples</span>
-              <button class="arag-btn ghost sm" data-sample="invoice">Invoice</button>
-              <button class="arag-btn ghost sm" data-sample="purchase-order">Purchase order</button>
-              <button class="arag-btn ghost sm" data-sample="contract">Contract</button>
-              <button class="arag-btn ghost sm" data-sample="resume">Résumé</button>
-              <button class="arag-btn ghost sm" data-sample="receipt">Receipt</button>
-              <button class="arag-btn ghost sm" data-sample="bank-statement">Bank statement</button>
-            </div>
-            <div class="samples">
-              <span class="samples-label">Image samples</span>
-              <button class="arag-btn ghost sm" data-image="invoice">🖼 Invoice</button>
-              <button class="arag-btn ghost sm" data-image="purchase-order">🖼 Purchase order</button>
-              <button class="arag-btn ghost sm" data-image="preauth-form">🖼 Pre-auth form</button>
-              <button class="arag-btn ghost sm" data-image="remittance-statement">🖼 Remittance</button>
-            </div>
-
-            <p class="arag-help" id="mockNote" hidden>
-              Running against the <strong>mock Knowledge Box</strong>: extraction comes from
-              deterministic fixtures keyed by filename, so the fields will not match the pixels of
-              an image sample. Point <code>ARAG_KB_ID</code>/<code>ARAG_API_KEY</code> at a real
-              Knowledge Box to see genuine visual extraction.
-            </p>
-
-            <div class="arag-row config-bar">
-              <label class="arag-label" for="configSelect">Extraction config</label>
-              <select id="configSelect" class="arag-select"></select>
-              <button class="arag-btn ghost sm" id="manageConfigs" type="button">Manage…</button>
-            </div>
-            <p class="arag-help" id="configHelp">
-              Auto-detect classifies the document first. Choosing a config forces exactly those fields.
-            </p>
-          </div>
-        </div>
-
-        <div class="arag-card">
-          <div class="head">
-            <h2>2 · Live pipeline</h2>
-            <span class="muted small" id="fileLabel">no document</span>
-          </div>
-          <div class="body">
-            <arag-job-timeline id="timeline"></arag-job-timeline>
-            <p class="muted small" id="pipelineHint">
-              process → classify → extract → entities → summary → validate → standardize
-            </p>
-          </div>
-        </div>
-
-        <div class="arag-card">
-          <div class="head"><h2>Source document</h2></div>
-          <div class="body">
-            <div class="doc-preview" id="preview"><span class="subtle">No document loaded.</span></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ── right: canonical record ─────────────────────────────────── -->
-      <section class="arag-stack">
-        <div class="arag-card">
-          <div class="head">
-            <h2>3 · Canonical record</h2>
-            <div class="arag-row" id="exports" hidden>
-              <button class="arag-btn sm" data-fmt="json">JSON</button>
-              <button class="arag-btn sm" data-fmt="xml">XML</button>
-              <button class="arag-btn sm" data-fmt="csv">CSV</button>
-            </div>
-          </div>
-          <div class="body">
-            <div class="arag-empty" id="resultEmpty">
-              Extracted, augmented and standardised document data appears here — usually in
-              under a minute.
-            </div>
-
-            <div id="resultBody" hidden class="arag-stack">
-              <div class="arag-row">
-                <span class="arag-chip info" id="docTypeBadge">document</span>
-                <span class="arag-chip" id="groundingBadge" hidden
-                      title="Share of extracted fields backed by a quote found verbatim in the document"></span>
-                <span class="muted small" id="docConf"></span>
-                <span class="spacer"></span>
-                <span class="muted small" id="timings"></span>
-              </div>
-
-              <p id="summary" class="summary"></p>
-              <div class="arag-row" id="tags"></div>
-              <div id="issues"></div>
-
-              <h3>Extracted fields</h3>
-              <table class="arag-table" id="fieldsTable">
-                <thead><tr><th>Field</th><th>Value</th><th class="conf-col">Confidence</th><th class="ev-col">Evidence</th></tr></thead>
-                <tbody></tbody>
-              </table>
-
-              <h3>Entities</h3>
-              <div class="entities" id="entities"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="arag-card">
-          <div class="head"><h2>4 · Ask this document</h2></div>
-          <div class="body arag-stack">
-            <div class="arag-row">
-              <input id="askInput" class="arag-input" placeholder="e.g. What is the total due and when?"
-                     disabled />
-              <button id="askBtn" class="arag-btn" disabled>Ask</button>
-            </div>
-            <div id="answer" class="arag-chat"></div>
-          </div>
-        </div>
-
-        <div class="arag-card">
-          <div class="head">
-            <h2>Recent documents</h2>
-            <button class="arag-btn ghost sm" id="refreshDocs">Refresh</button>
-          </div>
-          <div class="body">
-            <table class="arag-table" id="docs">
-              <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Fields</th><th></th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+  <!-- The whole app is rendered by app.js: the shell, the sidebar and every screen.
+       Nothing here is a placeholder to be replaced by a build step - there is no build. -->
+  <div id="app"></div>
+  <noscript>
+    <div class="arag-alert warn" style="margin:24px">
+      This workspace needs JavaScript. The same capabilities are available without it through
+      the documented API at <a href="/api/v1/docs">/api/v1/docs</a>.
     </div>
-
-    <!-- ── prompt gallery ────────────────────────────────────────────── -->
-    <section class="arag-card gallery">
-      <div class="head">
-        <h2>Generate your own test documents</h2>
-      </div>
-      <div class="body">
-        <p class="muted">
-          Paste a prompt into an image model — GPT-5.2 (image), Google Gemini “Nano Banana”, Grok —
-          download the result, then drop it into the dropzone above. Each prompt produces a
-          realistic, single-page, OCR-legible document with fictional data.
-        </p>
-        <div class="prompt-grid" id="promptGrid"></div>
-      </div>
-    </section>
-  </arag-shell>
-
-  <!-- ── extraction config manager ───────────────────────────────────── -->
-  <div class="arag-modal-backdrop" id="configModal" hidden>
-    <div class="arag-modal">
-      <div class="head">
-        <h2>Extraction configs</h2>
-        <button class="arag-btn ghost sm" id="closeConfigs" type="button" aria-label="Close">✕</button>
-      </div>
-      <div class="body">
-        <div id="cfgList"></div>
-        <hr class="arag-divider" />
-        <h3>Create a custom config</h3>
-        <p class="muted small">
-          Define the fields you want extracted. Saving provisions a stored ARAG search
-          configuration so the model is forced to return exactly these fields, grounded in
-          the document.
-        </p>
-        <div class="arag-field">
-          <label for="cfgName">Config name</label>
-          <input id="cfgName" class="arag-input" placeholder="e.g. Insurance Card" />
-        </div>
-        <div id="cfgFields" class="arag-stack"></div>
-        <div class="arag-row">
-          <button class="arag-btn ghost sm" id="addField" type="button">+ Add field</button>
-          <span class="spacer"></span>
-          <button class="arag-btn" id="saveConfig" type="button">Save config</button>
-        </div>
-      </div>
-    </div>
-  </div>
+  </noscript>
 </body>
 </html>

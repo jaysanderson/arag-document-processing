@@ -1,0 +1,1195 @@
+/*
+ * ui-ext.css — components this product needs that the shared UI kit
+ * (vendor/arag-platform/ui/arag-ui.css) does not have yet. Everything here is prefixed
+ * `.dip-` and built from the kit's own custom properties: no new colours, so white-label
+ * branding (applyBranding writes the --arag-brand and --arag-accent tokens) keeps working.
+ *
+ * Fifteen of these are general-purpose (shell, page header, breadcrumb, filter bar, data
+ * table, bulk bar, pagination, drawer, confirm, empty state, stat strip, menu, skeleton,
+ * tour, sign-in) and are proposed to the Head as platform-kit candidates. The four that
+ * are genuinely this product's — .dip-field, .dip-grounding, .dip-source, .dip-fieldrow —
+ * stay local: they are the verified-evidence record, and nothing else has one.
+ *
+ * Progress green (#5ce500) appears exactly twice, both on the ink-950 brand band: inside
+ * the wordmark artwork and as the band's 2 px bottom rule. It is 1.6:1 on white, so it is
+ * never text, never a status, never a fill that carries meaning.
+ */
+
+:root {
+  --dip-sidebar-w: 232px;
+  --dip-content-max: 1208px;
+  --dip-gutter: 24px;
+  --dip-row-h: 44px;
+  --dip-drawer-w: 480px;
+  --dip-band-h: 44px;
+  --dip-progress-green: #5ce500;
+}
+
+/* ── skip link ─────────────────────────────────────────────────────────────── */
+.dip-skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 200;
+  background: var(--arag-surface-raised);
+  color: var(--arag-brand-600);
+  padding: 10px 14px;
+  border-radius: var(--arag-radius);
+  box-shadow: var(--arag-shadow);
+}
+.dip-skip:focus {
+  left: 8px;
+  top: 8px;
+}
+
+/* ── 1. app shell ──────────────────────────────────────────────────────────── */
+.dip-app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.dip-app > .arag-band {
+  border-bottom: 2px solid var(--dip-progress-green);
+  flex: 0 0 auto;
+}
+.dip-app > .arag-band .arag-container {
+  max-width: none;
+  padding: 0 16px;
+  height: var(--dip-band-h);
+}
+.dip-app > .arag-band .dip-bandmark img {
+  height: 18px;
+  width: auto;
+  display: block;
+}
+.dip-app__body {
+  display: grid;
+  grid-template-columns: var(--dip-sidebar-w) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  /* The sidebar itself is only 100vh tall (it is sticky), so the column behind it is
+     painted here — otherwise a long page shows the sidebar ending in mid-air. */
+  background: linear-gradient(
+    to right,
+    var(--arag-surface-raised) 0 calc(var(--dip-sidebar-w) - 1px),
+    var(--arag-border) calc(var(--dip-sidebar-w) - 1px) var(--dip-sidebar-w),
+    transparent var(--dip-sidebar-w)
+  );
+}
+.dip-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow: auto;
+  background: var(--arag-surface-raised);
+  border-right: 1px solid var(--arag-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dip-sidebar__foot {
+  margin-top: auto;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--arag-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--arag-text-subtle);
+}
+.dip-content {
+  min-width: 0;
+  padding: var(--dip-gutter);
+  max-width: calc(var(--dip-content-max) + (2 * var(--dip-gutter)));
+}
+
+/* ── 22. brandmark ─────────────────────────────────────────────────────────── */
+.dip-brandmark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  min-height: 64px;
+  color: var(--arag-text);
+}
+.dip-brandmark:hover {
+  text-decoration: none;
+}
+.dip-brandmark img {
+  height: 22px;
+  max-width: 168px;
+  object-fit: contain;
+  object-position: left center;
+}
+.dip-brandmark__name {
+  font-family: var(--arag-font-display);
+  font-weight: 600;
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 190px;
+}
+.dip-brandmark__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+/* ── sidebar nav ───────────────────────────────────────────────────────────── */
+.dip-sidenav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 10px;
+}
+.dip-sidenav a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: var(--arag-radius);
+  color: var(--arag-text-muted);
+  font-weight: 500;
+}
+.dip-sidenav a:hover {
+  background: var(--arag-brand-50);
+  color: var(--arag-text);
+  text-decoration: none;
+}
+.dip-sidenav a[aria-current="page"] {
+  background: var(--arag-brand-50);
+  color: var(--arag-brand-600);
+  font-weight: 600;
+}
+.dip-sidenav a[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--arag-brand-600);
+}
+.dip-sidenav svg {
+  flex: 0 0 auto;
+}
+.dip-sidenav__badge {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--arag-text-subtle);
+  background: var(--arag-brand-50);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.dip-sidenav a[aria-current="page"] .dip-sidenav__badge {
+  color: var(--arag-brand-600);
+}
+.dip-sidenav__badge[hidden] {
+  display: none !important;
+}
+.dip-sidenav__dot {
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--arag-danger-fg);
+}
+
+/* ── 2. page header ────────────────────────────────────────────────────────── */
+.dip-pagehead {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--arag-border);
+  margin-bottom: 16px;
+}
+.dip-pagehead__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.dip-pagehead h1 {
+  margin: 0;
+}
+.dip-pagehead__sub {
+  color: var(--arag-text-muted);
+  font-size: 0.85rem;
+  margin: 2px 0 0;
+}
+.dip-pagehead__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ── 3. breadcrumb ─────────────────────────────────────────────────────────── */
+.dip-breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--arag-text-muted);
+}
+.dip-breadcrumb li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dip-breadcrumb li:not(:last-child)::after {
+  content: "›";
+  color: var(--arag-text-subtle);
+}
+.dip-breadcrumb li[aria-current="page"] {
+  color: var(--arag-text);
+}
+
+/* ── 4. tabs ───────────────────────────────────────────────────────────────── */
+.dip-tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-bottom: 16px;
+}
+.dip-tabs::-webkit-scrollbar {
+  display: none;
+}
+.dip-tabs a[role="tab"] {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 8px 12px;
+  font: 500 0.86rem var(--arag-font-text);
+  color: var(--arag-text-muted);
+  white-space: nowrap;
+}
+.dip-tabs a[role="tab"]:hover {
+  color: var(--arag-text);
+  text-decoration: none;
+}
+.dip-tabs a[role="tab"][aria-selected="true"] {
+  color: var(--arag-brand-600);
+  border-bottom-color: var(--arag-brand-600);
+}
+
+/* ── 5. filter bar ─────────────────────────────────────────────────────────── */
+.dip-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.dip-filterbar .arag-select {
+  width: auto;
+  min-width: 132px;
+}
+.dip-filterbar__spacer {
+  flex: 1 1 auto;
+}
+.dip-search {
+  position: relative;
+  flex: 1 1 260px;
+  max-width: 360px;
+}
+.dip-search svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--arag-text-subtle);
+}
+.dip-search input {
+  padding-left: 32px;
+}
+.dip-filterbar__clear {
+  display: none;
+}
+.dip-filterbar.has-filters .dip-filterbar__clear {
+  display: inline-flex;
+}
+
+/* ── 6. data table ─────────────────────────────────────────────────────────── */
+.dip-tablewrap {
+  border: 1px solid var(--arag-border);
+  border-radius: var(--arag-radius-lg);
+  background: var(--arag-surface-raised);
+  overflow: hidden;
+}
+.dip-tablescroll {
+  overflow-x: auto;
+}
+.dip-datatable {
+  width: 100%;
+}
+.dip-datatable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--arag-surface-raised);
+  white-space: nowrap;
+}
+.dip-datatable th button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+.dip-datatable th .dip-sortic {
+  opacity: 0;
+  flex: 0 0 auto;
+}
+.dip-datatable th:hover .dip-sortic,
+.dip-datatable th[aria-sort]:not([aria-sort="none"]) .dip-sortic {
+  opacity: 1;
+}
+.dip-datatable th[aria-sort="ascending"] .dip-sortic {
+  transform: rotate(180deg);
+}
+.dip-datatable td {
+  min-height: var(--dip-row-h);
+  vertical-align: middle;
+}
+.dip-datatable tbody tr {
+  cursor: pointer;
+}
+.dip-datatable tbody tr[aria-selected="true"] td {
+  background: var(--arag-brand-50);
+}
+.dip-datatable__check,
+.dip-datatable__actions {
+  width: 1%;
+  white-space: nowrap;
+}
+.dip-datatable__primary {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--arag-text);
+}
+.dip-datatable__primary:hover {
+  color: var(--arag-brand-600);
+}
+.dip-datatable__sub {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--arag-text-subtle);
+  margin-top: 2px;
+}
+.dip-datatable__sub a {
+  color: var(--arag-brand-600);
+}
+
+/* ── 7. bulk bar ───────────────────────────────────────────────────────────── */
+.dip-tablefoot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-top: 1px solid var(--arag-border);
+}
+.dip-bulkbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--arag-brand-50);
+  border-radius: var(--arag-radius);
+}
+.dip-bulkbar__count {
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+/* ── 8. pagination ─────────────────────────────────────────────────────────── */
+.dip-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 0.82rem;
+  color: var(--arag-text-muted);
+}
+.dip-pagination__count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 9. drawer ─────────────────────────────────────────────────────────────── */
+.dip-drawer__scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 18, 60, 0.35);
+  z-index: 79;
+}
+.dip-drawer {
+  position: fixed;
+  inset: var(--dip-band-h) 0 0 auto;
+  width: min(var(--dip-drawer-w), calc(100vw - 32px));
+  background: var(--arag-surface-raised);
+  border-left: 1px solid var(--arag-border);
+  box-shadow: var(--arag-shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: 80;
+  transform: translateX(100%);
+  transition: transform 0.18s ease;
+}
+.dip-drawer.is-open {
+  transform: none;
+}
+.dip-drawer--wide {
+  --dip-drawer-w: 560px;
+}
+.dip-drawer__head,
+.dip-drawer__foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+}
+.dip-drawer__head {
+  border-bottom: 1px solid var(--arag-border);
+}
+.dip-drawer__head h2 {
+  margin: 0;
+  outline-offset: 4px;
+}
+.dip-drawer__foot {
+  border-top: 1px solid var(--arag-border);
+  justify-content: flex-end;
+}
+.dip-drawer__body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px;
+}
+
+/* ── 10. confirm dialog ────────────────────────────────────────────────────── */
+.dip-confirm {
+  width: min(480px, 100%);
+}
+.dip-confirm__body {
+  padding: 18px;
+  font-size: 0.9rem;
+  color: var(--arag-text-muted);
+}
+.dip-confirm__body strong {
+  color: var(--arag-text);
+}
+.dip-confirm__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 18px 18px;
+}
+.dip-confirm__list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+/* ── 11. empty state ───────────────────────────────────────────────────────── */
+.dip-emptystate {
+  border: 1px dashed var(--arag-border);
+  border-radius: var(--arag-radius-lg);
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--arag-text-muted);
+  max-width: 560px;
+  margin: 24px auto;
+}
+.dip-emptystate__icon {
+  color: var(--arag-text-subtle);
+  margin-bottom: 8px;
+}
+.dip-emptystate h2 {
+  font-size: 1.05rem;
+}
+.dip-emptystate p {
+  max-width: 68ch;
+  margin: 0 auto 12px;
+}
+.dip-emptystate__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ── 12. stat strip ────────────────────────────────────────────────────────── */
+.dip-statstrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  border: 1px solid var(--arag-border);
+  border-radius: var(--arag-radius-lg);
+  background: var(--arag-surface-raised);
+  margin-bottom: 16px;
+}
+.dip-statstrip > * {
+  border-left: 1px solid var(--arag-border);
+  color: inherit;
+}
+.dip-statstrip > *:first-child {
+  border-left: 0;
+}
+a.dip-statstrip__tile:hover {
+  background: var(--arag-brand-50);
+  text-decoration: none;
+}
+.dip-statstrip__tile {
+  display: block;
+  outline-offset: -3px;
+}
+
+/* ── 13. field row (the trust component) ───────────────────────────────────── */
+.dip-fields {
+  display: flex;
+  flex-direction: column;
+}
+.dip-field {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--arag-brand-50);
+  scroll-margin-top: 80px;
+}
+.dip-field__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--arag-text-muted);
+}
+.dip-field__value {
+  font-size: 0.95rem;
+  color: var(--arag-text);
+  margin-top: 2px;
+  word-break: break-word;
+}
+.dip-field__value ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.dip-field__empty {
+  color: var(--arag-text-subtle);
+  font-style: italic;
+}
+.dip-field__raw {
+  font-size: 0.78rem;
+  color: var(--arag-text-subtle);
+}
+.dip-field__raw::before {
+  content: "· ";
+}
+.dip-field__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.dip-field__conf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--arag-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.dip-field__conf .arag-progress {
+  width: 60px;
+  height: 4px;
+}
+.dip-field__conf .arag-progress > i {
+  background: var(--arag-text-subtle);
+}
+.dip-field__evidence {
+  margin-top: 6px;
+}
+.dip-field__evidence > summary {
+  font-size: 0.78rem;
+  color: var(--arag-brand-600);
+  cursor: pointer;
+}
+.dip-field--unverified {
+  border-left: 3px solid var(--arag-danger-fg);
+  padding-left: 10px;
+  margin-left: -13px;
+}
+.dip-field.is-highlighted {
+  background: var(--arag-brand-50);
+  transition: background 1.2s ease;
+}
+.dip-quote {
+  font-style: italic;
+  color: var(--arag-text-muted);
+  border-left: 2px solid var(--arag-border);
+  padding-left: 10px;
+  margin: 6px 0;
+  font-size: 0.85rem;
+}
+.dip-quote mark {
+  background: var(--arag-warn-bg);
+  color: inherit;
+}
+.dip-field__jump {
+  font-size: 0.78rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dip-field__issue {
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+
+/* ── 14. grounding strip ───────────────────────────────────────────────────── */
+.dip-grounding {
+  border: 1px solid var(--arag-border);
+  border-radius: var(--arag-radius-lg);
+  background: var(--arag-surface-raised);
+  padding: 16px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 20px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+.dip-grounding__score {
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 132px;
+}
+.dip-grounding__pct {
+  font-family: var(--arag-font-display);
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1;
+}
+.dip-grounding__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--arag-text-muted);
+}
+.dip-grounding__score .arag-progress {
+  width: 132px;
+}
+.dip-grounding__claim {
+  margin: 0;
+  font-size: 0.95rem;
+  max-width: 68ch;
+}
+.dip-grounding__breakdown {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--arag-text-muted);
+}
+.dip-grounding__facts {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--arag-brand-50);
+  font-size: 0.8rem;
+  color: var(--arag-text-muted);
+}
+.dip-grounding[data-band="strong"] .arag-progress > i {
+  background: var(--arag-accent-500);
+}
+.dip-grounding[data-band="partial"] .arag-progress > i {
+  background: #e0ab00;
+}
+.dip-grounding[data-band="weak"] .arag-progress > i {
+  background: var(--arag-danger-fg);
+}
+.dip-help {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--arag-brand-600);
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dip-popover {
+  position: absolute;
+  z-index: 70;
+  width: min(380px, calc(100vw - 32px));
+  background: var(--arag-surface-raised);
+  border: 1px solid var(--arag-border);
+  border-radius: var(--arag-radius);
+  box-shadow: var(--arag-shadow);
+  padding: 12px 14px;
+  font-size: 0.82rem;
+  color: var(--arag-text-muted);
+}
+
+/* ── 15. source pane ───────────────────────────────────────────────────────── */
+.dip-source {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.dip-source__rail {
+  max-height: 70vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.dip-source__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--arag-brand-50);
+  padding: 10px 8px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.dip-source__item:hover {
+  background: var(--arag-brand-50);
+}
+.dip-source__item[aria-current="true"] {
+  background: var(--arag-brand-50);
+  box-shadow: inset 3px 0 0 var(--arag-brand-600);
+}
+.dip-source__text {
+  font: 0.82rem / 1.6 var(--arag-font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--arag-border);
+  border-radius: var(--arag-radius);
+  background: var(--arag-surface-raised);
+}
+mark.dip-hit {
+  background: var(--arag-warn-bg);
+  color: inherit;
+  scroll-margin: 40vh;
+}
+mark.dip-hit.is-active {
+  background: var(--arag-brand-100);
+  outline: 2px solid var(--arag-brand-500);
+}
+.dip-preview {
+  border: 1px solid var(--arag-border);
+  border-radius: var(--arag-radius);
+  background: var(--arag-surface-raised);
+  padding: 12px;
+  max-height: 70vh;
+  overflow: auto;
+  text-align: center;
+}
+.dip-preview img {
+  max-width: 100%;
+  height: auto;
+}
+.dip-preview iframe {
+  width: 100%;
+  height: 62vh;
+  border: 0;
+}
+
+/* ── 16. stage timing row ──────────────────────────────────────────────────── */
+.dip-timeline li {
+  grid-template-columns: 20px minmax(0, 1fr) 120px 88px;
+}
+.dip-timeline__bar {
+  display: block;
+  height: 6px;
+  background: var(--arag-brand-50);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.dip-timeline__bar > i {
+  display: block;
+  height: 100%;
+  background: var(--arag-brand-200);
+}
+.dip-timeline li.error .dip-timeline__bar > i {
+  background: var(--arag-danger-fg);
+}
+.dip-stagecell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dip-stagecell .dip-timeline__bar {
+  flex: 1 1 auto;
+}
+.dip-timeline__ms {
+  min-width: 62px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--arag-text-muted);
+}
+
+/* ── 17. row-actions menu ──────────────────────────────────────────────────── */
+.dip-menu {
+  position: relative;
+  display: inline-block;
+}
+.dip-menu__trigger {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--arag-radius);
+  padding: 2px 6px;
+  cursor: pointer;
+  color: var(--arag-text-muted);
+  line-height: 1;
+}
+.dip-menu__trigger:hover {
+  background: var(--arag-brand-50);
+  color: var(--arag-text);
+}
+.dip-menu__list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 190px;
+  background: var(--arag-surface-raised);
+  border: 1px solid var(--arag-border);
+  border-radius: var(--arag-radius);
+  box-shadow: var(--arag-shadow);
+  padding: 4px;
+  z-index: 60;
+}
+.dip-menu__list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  background: none;
+  border: 0;
+  border-radius: var(--arag-radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--arag-text);
+}
+.dip-menu__list button:hover {
+  background: var(--arag-brand-50);
+}
+.dip-menu__list button.danger {
+  color: var(--arag-danger-fg);
+  border-top: 1px solid var(--arag-border);
+  border-radius: 0 0 var(--arag-radius) var(--arag-radius);
+}
+
+/* ── 18. skeleton ──────────────────────────────────────────────────────────── */
+.dip-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--arag-brand-50) 25%,
+    var(--arag-surface) 37%,
+    var(--arag-brand-50) 63%
+  );
+  background-size: 400% 100%;
+  animation: dip-shimmer 1.4s ease infinite;
+  border-radius: 4px;
+  height: 12px;
+  margin: 8px 0;
+}
+.dip-skeleton--row {
+  height: var(--dip-row-h);
+}
+@keyframes dip-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+/* ── 19. field-builder row ─────────────────────────────────────────────────── */
+.dip-fieldrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px auto auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+}
+.dip-fieldrow .dip-fieldrow__req {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--arag-text-muted);
+  white-space: nowrap;
+}
+
+/* ── 20. tour overlay ──────────────────────────────────────────────────────── */
+.dip-tour__scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 18, 60, 0.45);
+  z-index: 85;
+  /* The tour is advisory, never a cage: the real screen underneath stays clickable, so a
+     user can do the thing the step describes instead of pressing Next to be allowed to. */
+  pointer-events: none;
+}
+.dip-tour__target {
+  position: relative;
+  z-index: 86;
+  border-radius: var(--arag-radius);
+  box-shadow:
+    0 0 0 4px var(--arag-brand-500),
+    0 0 0 9999px rgba(0, 18, 60, 0.45);
+}
+.dip-tour__card {
+  position: absolute;
+  z-index: 87;
+  width: min(330px, calc(100vw - 32px));
+  background: var(--arag-surface-raised);
+  border-radius: var(--arag-radius-lg);
+  box-shadow: var(--arag-shadow);
+  padding: 14px 16px;
+}
+.dip-tour__step {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--arag-text-subtle);
+}
+.dip-tour__card p {
+  margin: 6px 0 12px;
+  font-size: 0.9rem;
+}
+.dip-tour__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── 21. sign-in ───────────────────────────────────────────────────────────── */
+.dip-signin {
+  min-height: calc(100vh - var(--dip-band-h));
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.dip-signin__card {
+  width: min(420px, 100%);
+}
+.dip-signin__card img {
+  height: 26px;
+  width: auto;
+  margin-bottom: 16px;
+}
+/* Reserve the error's space so its appearance never shifts the button under the cursor. */
+.dip-signin__error {
+  min-height: 42px;
+  margin-top: 12px;
+}
+
+/* ── shared odds and ends ──────────────────────────────────────────────────── */
+.dip-prose {
+  max-width: 68ch;
+}
+.dip-inline-icon {
+  vertical-align: -2px;
+}
+.dip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dip-entity {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--arag-border);
+  border-radius: var(--arag-radius);
+  padding: 3px 8px;
+  font-size: 0.82rem;
+}
+.dip-entity b {
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--arag-text-subtle);
+}
+.dip-split {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 24px;
+  align-items: start;
+}
+.dip-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.dip-uploadqueue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.82rem;
+}
+.dip-uploadqueue > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.dip-bar {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 60px;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.82rem;
+  padding: 3px 0;
+}
+.dip-bar__track {
+  height: 8px;
+  background: var(--arag-brand-50);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.dip-bar__track > i {
+  display: block;
+  height: 100%;
+  background: var(--arag-brand-400);
+}
+.dip-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--arag-border);
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+.dip-danger-zone {
+  border-color: var(--arag-danger-bg);
+}
+
+/* ── responsive ────────────────────────────────────────────────────────────── */
+@media (max-width: 1280px) {
+  .dip-split {
+    grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+  }
+}
+@media (max-width: 1024px) {
+  .dip-split,
+  .dip-source {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dip-source__rail {
+    max-height: 320px;
+  }
+}
+@media (max-width: 900px) {
+  .dip-app__body {
+    grid-template-columns: minmax(0, 1fr);
+    background: none;
+  }
+  .dip-sidebar {
+    position: fixed;
+    top: var(--dip-band-h);
+    left: 0;
+    bottom: 0;
+    height: auto;
+    width: var(--dip-sidebar-w);
+    z-index: 78;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+  }
+  .dip-sidebar.is-open {
+    transform: none;
+  }
+  .dip-navtoggle {
+    display: inline-flex !important;
+  }
+  .dip-content {
+    padding: 16px;
+  }
+}
+@media (min-width: 901px) {
+  .dip-navtoggle {
+    display: none !important;
+  }
+}
+@media (max-width: 600px) {
+  .dip-pagehead__actions,
+  .dip-emptystate__actions {
+    width: 100%;
+  }
+  .dip-pagehead__actions > .arag-btn {
+    flex: 1 1 auto;
+  }
+  .dip-search {
+    max-width: none;
+  }
+  .dip-fieldrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .dip-statstrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dip-statstrip > * {
+    border-left: 0;
+    border-top: 1px solid var(--arag-border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dip-skeleton,
+  .arag-steps li.active .ic,
+  .arag-status .dot {
+    animation: none !important;
+  }
+  .dip-drawer,
+  .dip-sidebar,
+  .dip-field.is-highlighted {
+    transition: none !important;
+  }
+}
