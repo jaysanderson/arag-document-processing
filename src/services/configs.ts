@@ -137,6 +137,50 @@ export class ConfigsService {
     return this.summarise(id, schema, stored.name, false, stored.createdAt, stored.updatedAt);
   }
 
+  /**
+   * Replace a custom config in place and re-provision it. The id survives, which is the
+   * whole point: `meta.config` on every document already processed with this configuration
+   * keeps resolving, where delete-and-recreate would orphan them.
+   */
+  async update(
+    id: string,
+    input: CustomConfigInput,
+  ): Promise<ExtractionConfigSummary | "builtin" | "not-found"> {
+    if ((DOC_TYPES as string[]).includes(id)) return "builtin";
+    const stored = this.col.get(id);
+    if (!stored) return "not-found";
+    const schema = buildCustomSchema(input);
+    const previous = aragConfigName(stored.schema);
+    const next = aragConfigName(schema);
+    // Renaming a config renames its ARAG search configuration; the old one would otherwise
+    // be left behind in the Knowledge Box forever.
+    if (previous !== next) {
+      await this.d.agents.deleteSearchConfiguration(previous).catch((err) => {
+        this.d.log.warn("config.update.arag.delete", { id, message: (err as Error).message });
+      });
+      this.provisionState.delete(previous);
+    }
+    const saved = this.col.put({
+      ...stored,
+      name: input.name.trim(),
+      description: schema.description,
+      schema,
+    });
+    await this.provisionOne(schema);
+    this.d.log.info("config.update", { id, name: saved.name, aragConfig: next });
+    return this.summarise(id, schema, saved.name, false, saved.createdAt, saved.updatedAt);
+  }
+
+  /** Re-provision a single config's ARAG search configuration. */
+  async provision(id: string): Promise<ProvisionResult | undefined> {
+    const schema = (DOC_TYPES as string[]).includes(id) ? SCHEMAS[id as DocType] : this.col.get(id)?.schema;
+    if (!schema) return undefined;
+    this.d.agents.resetProvisionCache();
+    const [result] = await this.d.agents.provision([schema], { force: true });
+    if (result) this.provisionState.set(result.aragConfig, result);
+    return result;
+  }
+
   /** Delete a custom config (and its ARAG search configuration). Built-ins are not deletable. */
   async delete(id: string): Promise<"deleted" | "not-found" | "builtin"> {
     if ((DOC_TYPES as string[]).includes(id)) return "builtin";

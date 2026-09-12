@@ -6,11 +6,20 @@ import type { CustomConfigInput } from "../services/schemas.ts";
 import { DOC_TYPES, SCHEMAS, schemaToFields } from "../services/schemas.ts";
 import { requireWriter } from "./guards.ts";
 
-export function registerConfigRoutes(app: App, deps: { configs: ConfigsService }): void {
-  app.get("/api/v1/extraction-configs", () => ({ items: deps.configs.list() }), {
-    auth: "api",
-    operationId: "listExtractionConfigs",
-  });
+export function registerConfigRoutes(
+  app: App,
+  deps: { configs: ConfigsService; documentCounts: () => Record<string, number> },
+): void {
+  app.get(
+    "/api/v1/extraction-configs",
+    () => {
+      // "Is anything using this?" is the question that decides whether a config can be
+      // deleted, so the count travels with the config rather than costing a second call.
+      const counts = deps.documentCounts();
+      return { items: deps.configs.list().map((c) => ({ ...c, documentCount: counts[c.id] ?? 0 })) };
+    },
+    { auth: "api", operationId: "listExtractionConfigs" },
+  );
 
   app.post(
     "/api/v1/extraction-configs",
@@ -33,9 +42,36 @@ export function registerConfigRoutes(app: App, deps: { configs: ConfigsService }
     (ctx) => {
       const cfg = deps.configs.get(ctx.params.id!);
       if (!cfg) throw notFound("Extraction config");
-      return cfg;
+      return { ...cfg, documentCount: deps.documentCounts()[cfg.id] ?? 0 };
     },
     { auth: "api", operationId: "getExtractionConfig" },
+  );
+
+  app.put(
+    "/api/v1/extraction-configs/:id",
+    async (ctx) => {
+      requireWriter(ctx);
+      const out = await deps.configs.update(ctx.params.id!, ctx.body as CustomConfigInput);
+      if (out === "not-found") throw notFound("Extraction config");
+      if (out === "builtin") throw conflict("Built-in extraction configurations cannot be edited");
+      return { ...out, documentCount: deps.documentCounts()[out.id] ?? 0 };
+    },
+    {
+      auth: "api",
+      validate: operationSchemas(openapi, "/api/v1/extraction-configs/{id}", "put"),
+      operationId: "updateExtractionConfig",
+    },
+  );
+
+  app.post(
+    "/api/v1/extraction-configs/:id/provision",
+    async (ctx) => {
+      requireWriter(ctx);
+      const result = await deps.configs.provision(ctx.params.id!);
+      if (!result) throw notFound("Extraction config");
+      return result;
+    },
+    { auth: "api", operationId: "provisionExtractionConfig" },
   );
 
   app.delete(

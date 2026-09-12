@@ -6,6 +6,7 @@
 import {
   type App,
   conflict,
+  type Job,
   type JobManager,
   type JobStatus,
   notFound,
@@ -16,16 +17,43 @@ import { requireWriter } from "./guards.ts";
 
 const TERMINAL = ["succeeded", "failed", "cancelled"];
 
+/** How long a job ran (or has been running) — what "sort by duration" means. */
+function elapsed(j: Job): number {
+  return (j.finishedAt ? Date.parse(j.finishedAt) : Date.now()) - Date.parse(j.createdAt);
+}
+
+function compareJobs(key: string, a: Job, b: Job): number {
+  if (key === "duration") return elapsed(a) - elapsed(b);
+  if (key === "status") return a.status.localeCompare(b.status) || a.createdAt.localeCompare(b.createdAt);
+  return a.createdAt.localeCompare(b.createdAt);
+}
+
 export function registerJobRoutes(app: App, deps: { jobs: JobManager }): void {
   app.get(
     "/api/v1/jobs",
-    (ctx) => ({
-      items: deps.jobs.list({
-        status: ctx.queryObj.status as JobStatus | undefined,
-        ref: ctx.queryObj.ref as string | undefined,
-        limit: Number(ctx.queryObj.limit ?? 50),
-      }),
-    }),
+    (ctx) => {
+      // `limit` stays for compatibility; `page`/`page_size` is what a jobs screen needs —
+      // without paging, a deployment that has run 200 documents shows 50 jobs and no way to
+      // reach the rest.
+      const pageSize = Number(ctx.queryObj.page_size ?? ctx.queryObj.limit ?? 50);
+      const page = Number(ctx.queryObj.page ?? 1);
+      const q = String(ctx.queryObj.q ?? "")
+        .trim()
+        .toLowerCase();
+      const all = deps.jobs
+        .list({ status: ctx.queryObj.status as JobStatus | undefined, ref: ctx.queryObj.ref as string })
+        .filter((j) => !q || `${j.id} ${j.kind} ${j.ref ?? ""}`.toLowerCase().includes(q));
+      const dir = ctx.queryObj.order === "asc" ? 1 : -1;
+      const sort = String(ctx.queryObj.sort ?? "created_at");
+      all.sort((a, b) => dir * compareJobs(sort, a, b));
+      return {
+        items: all.slice((page - 1) * pageSize, page * pageSize),
+        page,
+        page_size: pageSize,
+        total: all.length,
+        next_page: page * pageSize < all.length,
+      };
+    },
     { auth: "api", validate: operationSchemas(openapi, "/api/v1/jobs", "get"), operationId: "listJobs" },
   );
 

@@ -105,6 +105,12 @@ export interface RecordMeta {
   /** ARAG extract strategy applied at ingestion (images/PDFs only). */
   extractStrategy?: string;
   /**
+   * Name of the ARAG resource file field the original bytes were stored in (`file` for an
+   * `/upload`). Kept so `GET /documents/{id}/source` can stream the page a reviewer wants
+   * to see rather than guessing at the field name.
+   */
+  fileField?: string;
+  /**
    * Share of extracted fields that carry a quote verified against the document text
    * (0..1). `undefined` when nothing was extracted. This is the headline "can I trust
    * this record?" number.

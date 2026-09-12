@@ -170,6 +170,7 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     extractStrategy: product.extractStrategy,
     maxUploadBytes: product.maxUploadBytes,
     generativeModel: product.generativeModel,
+    publicDir: resolve(HERE, "public"),
   });
 
   const app = new App({ env, log });
@@ -220,7 +221,7 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     maxUploadBytes: product.maxUploadBytes,
   });
   registerJobRoutes(app, { jobs });
-  registerConfigRoutes(app, { configs });
+  registerConfigRoutes(app, { configs, documentCounts: () => documents.countsByConfig() });
   registerAdminRoutes(app, {
     arag,
     env,
@@ -233,6 +234,7 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     version: VERSION,
     extractStrategy: product.extractStrategy,
     generativeModel: product.generativeModel,
+    maxUploadBytes: product.maxUploadBytes,
     branding,
   });
 

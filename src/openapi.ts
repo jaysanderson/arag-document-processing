@@ -186,7 +186,23 @@ const AskResponse = {
   required: ["answer", "sources", "ms"],
   properties: {
     answer: { type: "string" },
-    sources: { type: "array", items: { type: "string" } },
+    sources: { type: "array", items: { type: "string" }, description: "Titles of the resources retrieved" },
+    citations: {
+      type: "array",
+      description:
+        "The retrieval paragraphs behind the answer, so a caller can show where it came from " +
+        "rather than only which file it came from. Empty when retrieval returned nothing.",
+      items: {
+        type: "object",
+        required: ["paragraphId", "text"],
+        properties: {
+          paragraphId: { type: "string" },
+          text: { type: "string" },
+          start: { type: "integer" },
+          end: { type: "integer" },
+        },
+      },
+    },
     ms: { type: "integer" },
   },
 };
@@ -217,6 +233,10 @@ const ExtractionConfig = {
       description: "Stored ARAG search configuration (kind: ask) backing this config",
     },
     provisioned: { type: "boolean" },
+    documentCount: {
+      type: "integer",
+      description: "Documents in this workspace extracted with this configuration",
+    },
     fields: { type: "array", items: { $ref: "#/components/schemas/ConfigField" } },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -409,6 +429,79 @@ const Settings = {
   },
 };
 
+const DocumentText = {
+  type: "object",
+  description:
+    "The document's own extracted text — the exact text every extraction stage read, and " +
+    "the text `Evidence.start`/`Evidence.end` are offsets into.",
+  required: ["text", "chars", "truncated"],
+  properties: {
+    text: { type: "string" },
+    chars: { type: "integer", description: "Length of the full extracted text, before truncation" },
+    truncated: { type: "boolean" },
+  },
+};
+
+const Facets = {
+  type: "object",
+  description:
+    "Counts across the whole collection (not the current page), for filter chips and the overview strip.",
+  required: ["status", "docType", "degraded", "needsReview", "total"],
+  properties: {
+    total: { type: "integer" },
+    status: { type: "object", additionalProperties: { type: "integer" } },
+    docType: { type: "object", additionalProperties: { type: "integer" } },
+    degraded: { type: "integer" },
+    needsReview: {
+      type: "integer",
+      description: "Records carrying a warning/error issue, or a grounding score below 0.5",
+    },
+  },
+};
+
+const SampleRequest = {
+  type: "object",
+  required: ["sampleId"],
+  properties: {
+    sampleId: { type: "string", maxLength: 80 },
+    config: { type: "string", maxLength: 80, description: "auto | agent | <extraction config id>" },
+  },
+  additionalProperties: false,
+};
+
+const SecurityPosture = {
+  type: "object",
+  description: "What is protecting this deployment. Values only — never a key or a token.",
+  required: ["apiKeys", "adminTokenSet", "rateLimit", "maxUploadBytes", "writesRequireCredential"],
+  properties: {
+    apiKeys: {
+      type: "object",
+      required: ["count", "hints"],
+      properties: {
+        count: { type: "integer" },
+        hints: {
+          type: "array",
+          items: { type: "string" },
+          description: "Last four characters of each configured key, so an operator can tell them apart",
+        },
+      },
+    },
+    adminTokenSet: { type: "boolean" },
+    sessionTtlSec: { type: "integer" },
+    cors: { type: "array", items: { type: "string" } },
+    rateLimit: {
+      type: "object",
+      properties: { rps: { type: "number" }, burst: { type: "number" } },
+    },
+    maxUploadBytes: { type: "integer" },
+    maxBodyBytes: { type: "integer" },
+    trustProxy: { type: "string" },
+    headers: { type: "object", additionalProperties: { type: "boolean" } },
+    writesRequireCredential: { type: "boolean" },
+    retention: { type: "object", properties: { defaultOlderThanDays: { type: "integer" } } },
+  },
+};
+
 const Sample = {
   type: "object",
   description: "A bundled sample document the first-run flow can process in one click.",
@@ -453,7 +546,14 @@ export const openapi = buildOpenApi({
     Evidence,
     ValidationIssue,
     Document,
-    DocumentPage: pageSchema("#/components/schemas/Document"),
+    // The platform's page shape plus `facets`: the list screen's filter counts and stat
+    // strip are answers about the whole collection, and a page cannot carry them.
+    DocumentPage: (() => {
+      const base = pageSchema("#/components/schemas/Document");
+      const props = base.properties as Record<string, unknown>;
+      props.facets = { $ref: "#/components/schemas/Facets" };
+      return base;
+    })(),
     DocumentAccepted,
     BulkDeleteRequest,
     BulkDeleteResult,
@@ -461,6 +561,10 @@ export const openapi = buildOpenApi({
     Stats,
     Settings,
     Sample,
+    SampleRequest,
+    DocumentText,
+    Facets,
+    SecurityPosture,
     AskRequest,
     AskResponse,
     ConfigField,
@@ -546,6 +650,14 @@ export const openapi = buildOpenApi({
             in: "query",
             description: "`true` returns only records carrying at least one validation issue",
             schema: { type: "boolean" },
+          },
+          {
+            name: "min_grounding",
+            in: "query",
+            description:
+              "Only records whose `meta.groundingScore` is at least this. Records with no score " +
+              "are excluded — an unmeasured record is not a well-grounded one.",
+            schema: { type: "number", minimum: 0, maximum: 1 },
           },
         ],
         responses: {
@@ -665,6 +777,67 @@ export const openapi = buildOpenApi({
         summary: "Ask a grounded question about one document",
         requestBody: jsonBody({ $ref: "#/components/schemas/AskRequest" }),
         responses: { 200: jsonResponse({ $ref: "#/components/schemas/AskResponse" }), ...standardResponses },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/{id}/text": {
+      parameters: [idParam],
+      get: {
+        operationId: "getDocumentText",
+        tags: ["documents"],
+        summary: "The document's own extracted text",
+        description:
+          "The text Progress Agentic RAG read from the file at ingestion — what every " +
+          "extraction stage saw, and what `Evidence.start`/`Evidence.end` index into. Without " +
+          "it a client can show an evidence quote but cannot show it *in the document*.",
+        parameters: [
+          {
+            name: "max_chars",
+            in: "query",
+            schema: { type: "integer", minimum: 1000, maximum: 2000000, default: 200000 },
+          },
+        ],
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/DocumentText" }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/{id}/source": {
+      parameters: [idParam],
+      get: {
+        operationId: "getDocumentSource",
+        tags: ["documents"],
+        summary: "The original uploaded file",
+        description:
+          "Streams the bytes back from the ARAG resource, `Content-Disposition: inline`, so a " +
+          "reviewer can see the page the values came from. Answers 404 when the resource no " +
+          "longer holds the file; a client should then fall back to the extracted text.",
+        responses: {
+          200: {
+            description: "The original file",
+            content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
+          },
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/sample": {
+      post: {
+        operationId: "createSampleDocument",
+        tags: ["documents"],
+        summary: "Process one of the bundled sample documents",
+        description:
+          "Reads the sample from disk server-side and runs it through the ordinary upload path, " +
+          "so the first-run flow is one call rather than a fetch followed by an upload. The " +
+          "sample ids come from `GET /api/v1/samples`.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/SampleRequest" }),
+        responses: {
+          202: jsonResponse({ $ref: "#/components/schemas/DocumentAccepted" }, "Accepted"),
+          ...standardResponses,
+        },
         security: apiSecurity,
       },
     },
@@ -801,12 +974,41 @@ export const openapi = buildOpenApi({
           },
           { name: "ref", in: "query", description: "Filter by document id", schema: { type: "string" } },
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 200, default: 50 } },
+          { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+          {
+            name: "page_size",
+            in: "query",
+            description: "Preferred over `limit`, which stays for compatibility",
+            schema: { type: "integer", minimum: 1, maximum: 200 },
+          },
+          {
+            name: "sort",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["created_at", "duration", "status"],
+              default: "created_at",
+            },
+          },
+          { name: "order", in: "query", schema: { type: "string", enum: ["asc", "desc"], default: "desc" } },
+          {
+            name: "q",
+            in: "query",
+            description: "Match the job id, its kind, or the document id it refers to",
+            schema: { type: "string", maxLength: 200 },
+          },
         ],
         responses: {
           200: jsonResponse({
             type: "object",
-            required: ["items"],
-            properties: { items: { type: "array", items: { $ref: "#/components/schemas/Job" } } },
+            required: ["items", "page", "page_size", "total"],
+            properties: {
+              items: { type: "array", items: { $ref: "#/components/schemas/Job" } },
+              page: { type: "integer" },
+              page_size: { type: "integer" },
+              total: { type: "integer" },
+              next_page: { type: "boolean" },
+            },
           }),
           ...standardResponses,
         },
@@ -908,6 +1110,26 @@ export const openapi = buildOpenApi({
         },
         security: apiSecurity,
       },
+      put: {
+        operationId: "updateExtractionConfig",
+        tags: ["extraction-configs"],
+        summary: "Replace a custom extraction configuration",
+        description:
+          "Replaces the name, description and fields, and re-provisions the stored ARAG search " +
+          "configuration. The id is kept, so `meta.config` on every document already processed " +
+          "with this configuration stays meaningful — which delete-and-recreate would break. " +
+          "Built-in configurations answer 409. Requires a writer credential.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/ExtractionConfigCreate" }),
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/ExtractionConfig" }),
+          409: {
+            description: "Built-in configuration cannot be edited",
+            content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
+          },
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
       delete: {
         operationId: "deleteExtractionConfig",
         tags: ["extraction-configs"],
@@ -920,6 +1142,23 @@ export const openapi = buildOpenApi({
             description: "Built-in configuration cannot be deleted",
             content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
           },
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/extraction-configs/{id}/provision": {
+      parameters: [idParam],
+      post: {
+        operationId: "provisionExtractionConfig",
+        tags: ["extraction-configs"],
+        summary: "Re-provision one configuration's stored ARAG search configuration",
+        description:
+          "Idempotent. `POST /api/v1/admin/provision` re-provisions all of them and needs the " +
+          "admin token; this is the granularity an operator needs to fix the one config that " +
+          "did not take. Requires a writer credential.",
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/ProvisionResult" }),
           ...standardResponses,
         },
         security: apiSecurity,
@@ -1111,6 +1350,22 @@ export const openapi = buildOpenApi({
         security: adminSecurity,
       },
     },
+    "/api/v1/admin/security": {
+      get: {
+        operationId: "adminSecurity",
+        tags: ["admin"],
+        summary: "What is protecting this deployment",
+        description:
+          "Credentials in force, rate limits, CORS, upload ceiling and retention default, in " +
+          "one shape. Key values are never returned — only how many there are and the last four " +
+          "characters of each, which is what an operator needs to tell two keys apart.",
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/SecurityPosture" }),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+    },
     "/api/v1/admin/provision": {
       post: {
         operationId: "adminProvision",
@@ -1136,9 +1391,16 @@ export const openapi = buildOpenApi({
         operationId: "adminPurge",
         tags: ["admin"],
         summary: "Delete documents older than N days from the store and the Knowledge Box",
+        description:
+          "With `dryRun: true` nothing is deleted: the response reports how many documents " +
+          "would go and the date range they span, so a confirmation dialog can state the blast " +
+          "radius instead of guessing at it.",
         requestBody: jsonBody({
           type: "object",
-          properties: { olderThanDays: { type: "number", minimum: 0, maximum: 3650, default: 30 } },
+          properties: {
+            olderThanDays: { type: "number", minimum: 0, maximum: 3650, default: 30 },
+            dryRun: { type: "boolean", default: false },
+          },
           additionalProperties: false,
         }),
         responses: {
@@ -1147,6 +1409,11 @@ export const openapi = buildOpenApi({
             required: ["deleted", "failed"],
             properties: {
               olderThanDays: { type: "number" },
+              dryRun: { type: "boolean" },
+              wouldDelete: { type: "integer" },
+              oldest: { type: ["string", "null"], format: "date-time" },
+              newest: { type: ["string", "null"], format: "date-time" },
+              ids: { type: "array", items: { type: "string" } },
               deleted: { type: "array", items: { type: "string" } },
               failed: {
                 type: "array",

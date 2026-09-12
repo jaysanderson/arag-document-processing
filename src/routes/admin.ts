@@ -30,6 +30,7 @@ export interface AdminDeps {
   version: string;
   extractStrategy: string;
   generativeModel: string;
+  maxUploadBytes: number;
   branding: Branding;
 }
 
@@ -150,6 +151,30 @@ export function registerAdminRoutes(app: App, deps: AdminDeps): void {
     { auth: "admin", operationId: "adminSearchConfigurations" },
   );
 
+  // What is protecting this deployment, in one shape. Key *values* never leave the process:
+  // the count and the last four characters are what an operator needs to tell keys apart.
+  app.get(
+    "/api/v1/admin/security",
+    () => ({
+      apiKeys: {
+        count: deps.env.apiKeys.length,
+        hints: deps.env.apiKeys.map((k) => `…${k.slice(-4)}`),
+      },
+      adminTokenSet: Boolean(deps.env.adminToken),
+      sessionTtlSec: 12 * 3600,
+      cors: deps.env.allowedOrigins,
+      rateLimit: { rps: deps.env.rateLimitRps, burst: deps.env.rateLimitBurst },
+      maxUploadBytes: deps.maxUploadBytes,
+      maxBodyBytes: deps.env.maxBodyBytes,
+      trustProxy: deps.env.trustProxy,
+      headers: { csp: true, hsts: true, nosniff: true },
+      // DP-12: deletes and config creation always need a credential, whatever API_KEYS says.
+      writesRequireCredential: true,
+      retention: { defaultOlderThanDays: 30 },
+    }),
+    { auth: "admin", operationId: "adminSecurity" },
+  );
+
   // Idempotent by design (STANDARDS §2): safe to re-run after a KB reset or a model change.
   app.post(
     "/api/v1/admin/provision",
@@ -164,10 +189,11 @@ export function registerAdminRoutes(app: App, deps: AdminDeps): void {
   app.post(
     "/api/v1/admin/purge",
     async (ctx) => {
-      const body = (ctx.body ?? {}) as { olderThanDays?: number };
+      const body = (ctx.body ?? {}) as { olderThanDays?: number; dryRun?: boolean };
       const olderThanDays = body.olderThanDays ?? 30;
-      const out = await deps.documents.purge(olderThanDays);
-      return { olderThanDays, ...out };
+      const dryRun = body.dryRun === true;
+      const out = await deps.documents.purge(olderThanDays, dryRun);
+      return { olderThanDays, dryRun, ...out };
     },
     {
       auth: "admin",

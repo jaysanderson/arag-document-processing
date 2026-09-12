@@ -35,6 +35,14 @@ export function registerDocumentRoutes(
         config: ctx.queryObj.config as string | undefined,
         degraded: ctx.queryObj.degraded as boolean | undefined,
         hasIssues: ctx.queryObj.has_issues as boolean | undefined,
+        minGrounding:
+          ctx.queryObj.min_grounding === undefined ? undefined : Number(ctx.queryObj.min_grounding),
+        // `?doc_type=invoice&doc_type=receipt` — the multi-select filter. `queryObj` keeps
+        // only the last value, so the raw params are read for the repeated form.
+        docTypes: ctx.query
+          .getAll("doc_type")
+          .flatMap((v) => v.split(","))
+          .filter(Boolean),
       }),
     {
       auth: "api",
@@ -82,6 +90,20 @@ export function registerDocumentRoutes(
       auth: "api",
       validate: operationSchemas(openapi, "/api/v1/documents/bulk-export", "post"),
       operationId: "bulkExportDocuments",
+    },
+  );
+
+  app.post(
+    "/api/v1/documents/sample",
+    async (ctx) => {
+      const { sampleId, config } = ctx.body as { sampleId: string; config?: string };
+      const out = await deps.documents.createFromSample(sampleId, config);
+      ctx.json(202, out, { Location: `/api/v1/documents/${out.document.id}` });
+    },
+    {
+      auth: "api",
+      validate: operationSchemas(openapi, "/api/v1/documents/sample", "post"),
+      operationId: "createSampleDocument",
     },
   );
 
@@ -153,6 +175,33 @@ export function registerDocumentRoutes(
       validate: operationSchemas(openapi, "/api/v1/documents/{id}/export", "get"),
       operationId: "exportDocument",
     },
+  );
+
+  app.get(
+    "/api/v1/documents/:id/text",
+    async (ctx) => await deps.documents.text(ctx.params.id!, Number(ctx.queryObj.max_chars ?? 200_000)),
+    {
+      auth: "api",
+      validate: operationSchemas(openapi, "/api/v1/documents/{id}/text", "get"),
+      operationId: "getDocumentText",
+    },
+  );
+
+  app.get(
+    "/api/v1/documents/:id/source",
+    async (ctx) => {
+      const out = await deps.documents.source(ctx.params.id!);
+      // `inline`, not `attachment`: this is for looking at the page, not saving it. The
+      // filename is already sanitised on the record.
+      ctx.res.writeHead(200, {
+        "Content-Type": out.contentType,
+        "Content-Length": out.bytes.length,
+        "Content-Disposition": `inline; filename="${out.filename}"`,
+        "Cache-Control": "private, max-age=300",
+      });
+      ctx.res.end(out.bytes);
+    },
+    { auth: "api", operationId: "getDocumentSource" },
   );
 
   app.post(

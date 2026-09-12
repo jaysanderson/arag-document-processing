@@ -703,10 +703,10 @@ test("stats report the document mix, grounding and job counts", async () => {
     jobs: Record<string, number>;
     lastProcessedAt: string | null;
   };
-  assert.ok(s.documents.total >= 1);
-  assert.ok(s.byDocType.invoice >= 1);
+  assert.ok((s.documents.total ?? 0) >= 1);
+  assert.ok((s.byDocType.invoice ?? 0) >= 1);
   assert.ok(s.fields > 0);
-  assert.ok(s.jobs.succeeded >= 1);
+  assert.ok((s.jobs.succeeded ?? 0) >= 1);
   assert.ok(typeof s.groundingScore === "number");
   assert.ok(s.lastProcessedAt && !Number.isNaN(Date.parse(s.lastProcessedAt)));
 });
@@ -745,4 +745,199 @@ test("the sample catalogue points at files that are actually served", async () =
     const file = await c.get(s.url);
     assert.equal(file.status, 200, `${s.id}: ${s.url} is not served`);
   }
+});
+
+// ─── source text, original file, samples ──────────────────────────────────────
+
+test("the document's own extracted text is retrievable, and evidence offsets index into it", async () => {
+  const { id } = await upload(INVOICE, "text-source.txt", "text/plain", "invoice");
+  const res = await c.get(`/api/v1/documents/${id}/text`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/documents/{id}/text", "get", 200, res.json), []);
+  const { text, chars, truncated } = res.json as { text: string; chars: number; truncated: boolean };
+  assert.ok(chars > 0);
+  assert.equal(truncated, false);
+  assert.match(text, /TAX INVOICE/);
+
+  // The contract that makes "jump to source" possible: an exact quote's offsets really do
+  // select that quote in this text.
+  const rec = (await c.get(`/api/v1/documents/${id}`)).json as {
+    evidence: Array<{ quote: string; verified: string; start?: number; end?: number }>;
+  };
+  const exact = rec.evidence.find((e) => e.verified === "exact" && e.start !== undefined);
+  assert.ok(exact, "expected at least one exactly-verified quote");
+  assert.equal(text.slice(exact.start!, exact.end!), exact.quote);
+
+  // max_chars truncates and says so.
+  const short = await c.get(`/api/v1/documents/${id}/text?max_chars=1000`);
+  const s = short.json as { text: string; chars: number; truncated: boolean };
+  assert.equal(s.text.length, Math.min(1000, s.chars));
+  assert.equal(s.truncated, s.chars > 1000);
+});
+
+test("the original uploaded file is streamed back for the source preview", async () => {
+  const { id } = await upload(INVOICE, "original.txt", "text/plain", "invoice");
+  const res = await c.get(`/api/v1/documents/${id}/source`);
+  assert.equal(res.status, 200);
+  // Inline, not an attachment: this is for looking at the page, not saving it.
+  assert.match(res.headers.get("content-disposition") ?? "", /^inline; filename="original.txt"$/);
+  assert.equal(res.text, INVOICE.toString("utf8"));
+  assert.equal((await c.get("/api/v1/documents/missing/source")).status, 404);
+});
+
+test("a bundled sample can be processed in one call", async () => {
+  const res = await c.post("/api/v1/documents/sample", { sampleId: "contract" });
+  assert.equal(res.status, 202, res.text);
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/documents/sample", "post", 202, res.json), []);
+  const { document, job } = res.json as { document: { id: string; filename: string }; job: { id: string } };
+  assert.equal(document.filename, "contract.txt");
+  await waitForJob(job.id);
+  const rec = (await c.get(`/api/v1/documents/${document.id}`)).json as { status: string; docType: string };
+  assert.equal(rec.status, "ready");
+  assert.equal(rec.docType, "contract");
+
+  assert.equal((await c.post("/api/v1/documents/sample", { sampleId: "not-a-sample" })).status, 400);
+});
+
+// ─── facets, jobs paging, config editing, admin security ──────────────────────
+
+test("the documents page carries collection-wide facets", async () => {
+  await upload(INVOICE, "facet.txt", "text/plain", "invoice");
+  const res = await c.get("/api/v1/documents?page_size=1");
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/documents", "get", 200, res.json), []);
+  const page = res.json as {
+    items: unknown[];
+    total: number;
+    facets: { total: number; status: Record<string, number>; docType: Record<string, number> };
+  };
+  assert.equal(page.items.length, 1);
+  // Facets describe the collection, not the page — that is the whole point of them.
+  assert.equal(page.facets.total, page.total);
+  assert.ok((page.facets.docType.invoice ?? 0) >= 1);
+  assert.ok((page.facets.status.ready ?? 0) >= 1);
+
+  // min_grounding excludes records that have no score at all.
+  const grounded = await c.get("/api/v1/documents?min_grounding=0.5&page_size=200");
+  for (const d of (grounded.json as { items: Array<{ meta: { groundingScore?: number } }> }).items) {
+    assert.ok((d.meta.groundingScore ?? 0) >= 0.5);
+  }
+  // A repeated doc_type is a multi-select.
+  const multi = await c.get("/api/v1/documents?doc_type=invoice&doc_type=contract&page_size=200");
+  const types = new Set((multi.json as { items: Array<{ docType: string }> }).items.map((d) => d.docType));
+  for (const t of types) assert.ok(["invoice", "contract"].includes(t), `unexpected ${t}`);
+});
+
+test("jobs are paged, sorted and searchable", async () => {
+  const res = await c.get("/api/v1/jobs?page=1&page_size=2");
+  assert.equal(res.status, 200);
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/jobs", "get", 200, res.json), []);
+  const page = res.json as { items: unknown[]; page: number; total: number; next_page: boolean };
+  assert.ok(page.total > 2, "the suite has run more than two jobs by now");
+  assert.equal(page.items.length, 2);
+  assert.equal(page.next_page, true);
+
+  const second = (await c.get("/api/v1/jobs?page=2&page_size=2")).json as { items: Array<{ id: string }> };
+  const first = page.items as Array<{ id: string }>;
+  assert.notEqual(first[0]!.id, second.items[0]!.id, "page 2 is not page 1");
+
+  const { id } = await upload(INVOICE, "job-search.txt", "text/plain", "invoice");
+  const found = (await c.get(`/api/v1/jobs?q=${id}`)).json as { items: Array<{ ref?: string }> };
+  assert.ok(found.items.length >= 1);
+  assert.equal(found.items[0]!.ref, id);
+});
+
+test("a custom config can be edited in place and re-provisioned individually", async () => {
+  const created = await c.post(
+    "/api/v1/extraction-configs",
+    { name: "Editable Card", fields: [{ label: "Policy Number" }] },
+    writer,
+  );
+  assert.equal(created.status, 201, created.text);
+  const id = (created.json as { id: string }).id;
+
+  // A built-in cannot be edited, only replaced by forking it.
+  assert.equal(
+    (
+      await c.request("PUT", "/api/v1/extraction-configs/invoice", {
+        json: { name: "Nope", fields: [{ label: "X" }] },
+        headers: writer,
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await c.request("PUT", `/api/v1/extraction-configs/${id}`, {
+        json: { name: "Nope", fields: [{ label: "X" }] },
+      })
+    ).status,
+    401,
+  );
+
+  const updated = await c.request("PUT", `/api/v1/extraction-configs/${id}`, {
+    json: {
+      name: "Editable Card",
+      description: "Now with two fields",
+      fields: [{ label: "Policy Number" }, { label: "Insurer" }],
+    },
+    headers: writer,
+  });
+  assert.equal(updated.status, 200, updated.text);
+  assert.deepEqual(
+    testing.checkResponse(openapi, "/api/v1/extraction-configs/{id}", "put", 200, updated.json),
+    [],
+  );
+  const cfg = updated.json as { id: string; fields: unknown[]; provisioned: boolean; documentCount: number };
+  // The id survives the edit: every document already processed with it keeps resolving.
+  assert.equal(cfg.id, id);
+  assert.equal(cfg.fields.length, 2);
+  assert.equal(cfg.provisioned, true);
+  assert.equal(cfg.documentCount, 0);
+
+  const prov = await c.request("POST", `/api/v1/extraction-configs/${id}/provision`, { headers: writer });
+  assert.equal(prov.status, 200);
+  assert.deepEqual(
+    testing.checkResponse(openapi, "/api/v1/extraction-configs/{id}/provision", "post", 200, prov.json),
+    [],
+  );
+  assert.equal((prov.json as { ok: boolean }).ok, true);
+
+  // documentCount answers "is anything using this?" before a delete.
+  const list = (await c.get("/api/v1/extraction-configs")).json as {
+    items: Array<{ id: string; documentCount: number }>;
+  };
+  const invoice = list.items.find((x) => x.id === "invoice")!;
+  assert.ok(invoice.documentCount > 0, "invoices have been processed with the built-in config");
+
+  await c.request("DELETE", `/api/v1/extraction-configs/${id}`, { headers: writer });
+});
+
+test("admin security reports the posture without leaking a key, and purge can be previewed", async () => {
+  const sec = await c.get("/api/v1/admin/security", { authorization: `Bearer ${ADMIN}` });
+  assert.equal(sec.status, 200);
+  assert.deepEqual(testing.checkResponse(openapi, "/api/v1/admin/security", "get", 200, sec.json), []);
+  const s = sec.json as { adminTokenSet: boolean; writesRequireCredential: boolean; maxUploadBytes: number };
+  assert.equal(s.adminTokenSet, true);
+  assert.equal(s.writesRequireCredential, true);
+  assert.ok(s.maxUploadBytes > 0);
+  assert.ok(!sec.text.includes(ADMIN), "the admin token itself is never returned");
+  assert.equal((await c.get("/api/v1/admin/security")).status, 401);
+
+  const before = (await c.get("/api/v1/documents?page_size=1")).json as { total: number };
+  const dry = await c.post(
+    "/api/v1/admin/purge",
+    { olderThanDays: 0, dryRun: true },
+    { authorization: `Bearer ${ADMIN}` },
+  );
+  assert.equal(dry.status, 200);
+  const d = dry.json as { dryRun: boolean; wouldDelete: number; deleted: string[]; oldest: string | null };
+  assert.equal(d.dryRun, true);
+  assert.equal(d.deleted.length, 0, "a dry run deletes nothing");
+  assert.equal(d.wouldDelete, before.total);
+  assert.ok(d.oldest);
+  // …and it really did not delete anything.
+  assert.equal(
+    ((await c.get("/api/v1/documents?page_size=1")).json as { total: number }).total,
+    before.total,
+  );
 });
