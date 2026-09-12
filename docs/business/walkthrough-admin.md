@@ -1,103 +1,133 @@
-# Walkthrough: the admin panel (`/admin/`)
+# Walkthrough: the admin app (`/admin/`)
 
-The operator's view of the product: health, configuration, jobs, logs and data retention.
-Open <http://localhost:8080/admin/>.
+The operator's view of the product — Sam's screen, in the persona table in
+[`overview.md`](overview.md): health, connection, configuration, jobs, logs, usage,
+branding and security. Open <http://localhost:8080/admin/>. This is a different product
+for a different person, not a tab inside the operator app — the sign-in boundary is
+deliberately built to look like the door to somewhere else.
 
 ## Sign-in
 
-The first thing you see is **"Admin sign-in"** — a password-style input labelled "admin
-token" and a **Sign in** button, with a note that the token is "exchanged for an HttpOnly
-cookie and never stored in the page." Enter the `ADMIN_TOKEN` configured for this
-deployment (in local dev, whatever is set in `.env`, or `dev-admin-token` if that's what
-this instance was started with) and click **Sign in** (or press Enter). A wrong token shows
-a red error banner under the form; nothing else on the page is reachable until sign-in
-succeeds.
+The sidebar is not shown before sign-in — a nav the visitor cannot use yet is noise. A
+centred card asks for the **Admin token** (a password-style input) and a **Sign in**
+button, with a note that the token is "exchanged for a cookie and never stored in the
+page." Enter the `ADMIN_TOKEN` configured for this deployment and click **Sign in** (or
+press Enter).
 
-Once signed in, six tabs appear across the top: **Overview**, **Extraction configs**,
-**Jobs**, **Logs**, **Configuration**, **Retention**.
+Two distinct failures, worth pointing out as different things: a wrong token shows *"That
+token was not accepted"* — something the visitor can fix by typing again — while a
+deployment with no `ADMIN_TOKEN` set at all shows *"Admin access is disabled for this
+deployment. Set ADMIN_TOKEN and restart to enable it"* — not a password problem, and the
+copy does not pretend it is one. Once signed in, the sidebar appears with eight sections:
+**Overview**, **Connection**, **Configs**, **Jobs**, **Logs**, **Usage**, **Branding**,
+**Security**. If the session cookie ever expires while you're using the app, any screen
+that hits a `401` drops you straight back to this sign-in card with *"Your admin session
+expired. Sign in again."*
 
-## Overview
+## Overview (`/admin/#/overview`)
 
-The default tab. On the left, a health panel (an `<arag-health>` widget reading
-`GET /api/v1/admin/health`) shows whether the service and its ARAG connection are healthy.
-On the right:
+The default screen after sign-in. A six-tile stat strip: **Service** (health status and
+version), **Knowledge Box** (round-trip time), **Documents** (total, degraded, failed),
+**Jobs** (running, queued, failed), **Grounding** (mean score), **ARAG calls** (count,
+errors, expected provisioning conflicts). Click **Refresh** to re-pull all of it on
+demand.
 
-- **"Pipeline settings"** — a small key/value list: **Extract strategy** (the configured
-  ARAG extract-strategy id, or a dash if none), **Generative model**, **Documents** (a
-  running count by status, including **degraded** — a document that finished but lost one
-  pipeline stage along the way; this count is highlighted whenever it's above zero, since
-  it's the one status worth an operator's attention). Next to the heading, a **"Test KB
-  connection"** button re-runs the health check on demand rather than waiting for the
-  panel's own refresh.
-- **"Usage"** — six KPI tiles: **Requests** (with uptime), **ARAG calls** (with average
-  latency), **ARAG errors**, **Documents** (with ready/failed counts), **Jobs succeeded**
-  (with running/queued counts), and **Jobs failed** (with cancelled count) — refreshed with
-  the **Reload** button next to the heading. A collapsed **"Raw JSON"** disclosure below the
-  tiles shows the same data as the underlying `GET /api/v1/admin/usage` response, for
-  anyone who wants the exact numbers rather than the rounded tile view.
+Underneath, a **Needs attention** table lists exactly what needs doing right now — failed
+documents, degraded documents, and any extraction config that has not been provisioned —
+each row a chip, a one-line description, a relative time, and an **Open ›** link straight
+to the thing. When there is nothing to do, it says so plainly rather than showing an empty
+table. Two more cards below that: **Configuration** (extract strategy, model, mode,
+requests served) and **Recent activity** (the last log lines, with a link to the full
+**Logs** screen).
 
-## Extraction configs
+## Connection (`/admin/#/connection`)
 
-Lists every extraction config — built-in and custom — in a table: **Name**, **Kind**
-(a "built-in" or "custom" chip), **ARAG search configuration** (the underlying stored
-config name, e.g. `dip_invoice_extraction`), **Fields** (count), and **Provisioned** (a
-"yes"/"not yet" chip). Explanatory text above the table spells out what "provisioned" means:
-each config is backed by a stored ARAG search configuration that pins the model, the
-`full_resource` grounding strategy, the prompt and the field schema.
+Proves the deployment is talking to the Knowledge Box you think it is, and shows what the
+extraction agents actually run against. A banner at the top states connected/not-responding
+and the round-trip time; click **Test connection** to re-run the check on demand. Below
+that, a key/value block: Knowledge Box id, region, endpoint, resource count, mode (mock or
+live), the generative model, and the extract strategy.
 
-Two buttons in the header: **Reload** refreshes the table, and **Re-provision all**
-re-sends every config to ARAG as a search configuration — safe to click any time (it's
-idempotent), and exactly what you'd use after resetting a Knowledge Box or switching the
-generative model. Clicking it shows a live "Provisioning…" message, then a summary banner
-("N provisioned, N failed") once done.
+The **Stored ARAG search configurations** table lists every `dip_*` configuration this
+product has provisioned — name, kind, model, RAG strategy. Click a row to open a drawer
+showing the full stored configuration as the Knowledge Box actually holds it: the prompt,
+the `answer_json_schema`, the model, the RAG strategy — fetched live, not reconstructed
+locally, so what's on screen is guaranteed to match what is really running. A line under
+the table names any search configurations in the Knowledge Box that this product did not
+create, so nothing there is mistaken for one of the eleven-plus-custom configs.
 
-Below the table, a collapsed **"Inspect the stored ARAG search configurations (model, RAG
-strategy, prompt, schema)"** disclosure — click to expand it and see the actual
-configuration objects as stored in the Knowledge Box, fetched live rather than reconstructed
-locally, so what you see here is guaranteed to match what the KB is really running.
+**Re-provision all** re-sends every extraction config to the Knowledge Box as a search
+configuration — safe to run any time, and exactly what you'd reach for after resetting a
+Knowledge Box or switching the generative model. It shows a "Provisioning…" state, then a
+summary: "N provisioned · N failed."
 
-## Jobs
+## Configs (`/admin/#/configs`)
 
-A two-panel view. On the left, **"Recent jobs"** — a table of every processing job (kind,
-status, current stage, created time) with a **Reload** button; click any row to select it.
-On the right, **"Job detail"** shows the selected job's full timeline (the same
-stage-by-stage view the demo shows live) plus the raw job JSON below it. A **Cancel** button
-appears next to the "Job detail" heading only while the selected job is still queued or
-running — clicking it stops that job in place. This is the same job list any document
-upload creates; useful for investigating a stuck or failed run without needing to know the
-job id in advance.
+The same table as the operator app's Configs screen, with the operator powers added: every
+row carries its own **Re-provision** button, and a **Re-provision all** sits above the
+table. Columns: Name, Kind (built in / custom), Fields, ARAG configuration, Documents,
+State.
 
-## Logs
+## Jobs (`/admin/#/jobs`)
 
-A live-updating table of recent log lines (an `<arag-log>` widget polling
-`GET /api/v1/admin/logs` every 5 seconds, up to 200 at a time), with two controls above it:
-a **level** dropdown (all levels, debug, info, warn, error) and a **filter…** text box that
-matches a substring anywhere in the log line. Useful for confirming what actually happened
-during a specific upload — every ARAG call is logged with its path, status and timing,
-without ever showing the API key or KB URL.
+Every job across the whole deployment, filterable by status. Click a row to open a drawer
+with the job's kind, status, start time, elapsed time, a link to its document (when it has
+one), the stage timeline, and the raw job JSON behind a disclosure. A **Cancel job** button
+appears in the drawer footer only while the job is still queued or running.
 
-## Configuration
+## Logs (`/admin/#/logs`)
 
-A single read-only panel: **"Effective configuration (secrets redacted)"**, a raw JSON view
-of every environment variable actually in effect for this running instance, plus the store
-file paths, extraction config summary, and the full route list. Secret-looking values
-(anything with "token", "key", "secret" or "password" in its name) are shown as a bullet
-count (e.g. `•••(64 chars)`) rather than their real value — enough to confirm a secret is
-set, without ever displaying it.
+A real table, not a terminal pane: Time, Level (a chip), Message, with each structured
+field summarised inline and the full record available in a drawer on click. A **level**
+dropdown and a **contains** text filter narrow the view; **Live tail** is an explicit
+toggle — the table does not refresh out from under you while you're reading it unless you
+turn tailing on. **Download** saves the currently filtered lines as an NDJSON file,
+client-side.
 
-## Retention
+## Usage (`/admin/#/usage`)
 
-A **"Data retention"** panel: an explanation that this deletes documents older than N days
-from the local store *and* their resources from the Knowledge Box, and that `0` clears
-everything. Below it, an **"Older than (days)"** number input (defaulting to 30) and a red
-**Purge** button. Clicking Purge runs the deletion immediately and shows a result summary
-(how many were deleted, and any that failed) underneath. There is no scheduled/automatic
-purge — this is the only way documents are cleaned up in bulk, and it's a deliberate,
-manual, auditable action (every purge shows up in the Logs tab and the Overview tab's
-Usage tiles).
+Six KPI tiles — Requests, ARAG calls, ARAG errors, Client errors (4xx from the Knowledge
+Box), Documents, Grounding — plus a **Documents processed, last 14 days** bar chart derived
+from the stored records themselves, and a breakdown of job counts by status. Worth
+explaining if asked: there's no chart of ARAG calls over time, because the call counters
+are cumulative since boot rather than a time series — inventing one would be a chart that
+lies.
+
+## Branding (`/admin/#/branding`)
+
+Read-only by design — branding is environment configuration, and a form that appeared to
+save but couldn't would be a lie. Each effective value (product name, tagline, logo,
+primary and accent colour, powered-by credit, footer, docs and support URLs) is shown next
+to the `BRAND_*` variable that sets it, alongside a live preview tile rendering the brand
+band, the sidebar mark, both button variants and the status chips in the current colours —
+so a partner can see whether their chosen colour collides with the status palette before
+they deploy it. The same effective values, and the same preview, are also visible without
+an admin token at Settings → Branding in the operator app.
+
+## Security (`/admin/#/security`)
+
+Three cards:
+
+- **Credentials** — how many API keys are configured (with the last few characters of each,
+  never the full value), whether the admin token is set, the session cookie's lifetime, and
+  a reminder that writes (deletes, config creation) always require a credential even when
+  `API_KEYS` is unset. A note states plainly that API keys are set with the `API_KEYS`
+  environment variable — there is no key store here to create or revoke one from.
+- **Request protection** — the rate limit (requests/second and burst), CORS policy, the
+  maximum upload and request body sizes, which security headers are on, and the trusted
+  proxy setting.
+- **Retention** — the destructive one, and it gets the full treatment. Set a number of days
+  in **Delete documents older than**, then click **Preview** before anything happens: the
+  panel reports the exact count and the oldest and newest dates affected, and nothing is
+  deleted yet. Only once a preview has run does **Purge** become clickable. Clicking it
+  opens a confirmation dialog restating the count and requiring you to type the word
+  **DELETE** before the button will submit. The result panel then reports how many
+  documents were deleted and how many failed. Every purge — preview or real — also shows up
+  in the Logs screen and the Usage tiles, so there is always an audit trail of who ran it
+  and when.
 
 ## Related
 
 - [`walkthrough-demo.md`](walkthrough-demo.md) — the end-user side of the product.
 - [`../architecture/security-model.md`](../architecture/security-model.md) — what each of these controls actually protects.
-- [`../developer/api-reference.md`](../developer/api-reference.md) — the underlying `/api/v1/admin/*` routes this panel calls.
+- [`../developer/api-reference.md`](../developer/api-reference.md) — the underlying `/api/v1/admin/*` routes this app calls.

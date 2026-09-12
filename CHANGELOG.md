@@ -4,6 +4,57 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Both surfaces are now a signed-in workspace, not a demo.** `public/` is a hash-routed
+  app with a Progress-branded shell and a left sidebar — Documents, Configs, Ask, Jobs,
+  Settings — replacing the single page of four numbered cards. `admin/` is an operator
+  product in the same shell with its own navigation (Overview, Connection, Configs, Jobs,
+  Logs, Usage, Branding, Security), replacing six tabs on one page. Designed in
+  `design/PRODUCT-EXPERIENCE.md` (D-28).
+- **The record leads with the evidence.** A document's detail page opens on a trust strip
+  that states how many of its fields carry a quote found in the document — a claim with a
+  denominator, never a bare percentage — and every field row keeps the model's confidence,
+  our verification of the quote and the deterministic validation apart. A `Source &
+  evidence` tab marks each quote inside the document's own extracted text.
+- **Documents is a working queue**: search over the extracted values (not just filenames),
+  status/type/review filters, sortable columns, selection with bulk export and delete,
+  pagination, and rows that move on their own while a pipeline runs.
+- The demo's image-generation prompt gallery moved to `docs/business/walkthrough-demo.md`,
+  where a reference belongs.
+
+### Added
+- The official Progress Agentic RAG wordmarks in `public/brand/`, used by default on both
+  surfaces. `BRAND_*` still overrides them; status, verification and grounding colours are
+  never branded.
+- `GET /api/v1/documents/{id}/text` — the document's own extracted text, which
+  `Evidence.start`/`end` index into. Without it, "show me where this value came from" could
+  not be built.
+- `GET /api/v1/documents/{id}/source` — the original uploaded file, streamed back from the
+  Knowledge Box resource for the source preview.
+- `POST /api/v1/documents/{id}/reprocess` — re-run the pipeline over the existing resource;
+  the recovery action for every failed and degraded record. Optional `?config=`.
+- `POST /api/v1/documents/bulk-delete` and `POST /api/v1/documents/bulk-export` (one JSON
+  array, one XML root or one CSV for a whole selection).
+- `POST /api/v1/documents/sample` and `GET /api/v1/samples` — the bundled sample catalogue
+  behind the first-run flow, so "try it with a sample" is one call.
+- `GET /api/v1/stats` and `GET /api/v1/settings` — workspace counters and the effective,
+  secret-free runtime settings (accepted types, upload ceiling, connection, model).
+- `GET /api/v1/documents` gained `q`, `sort`, `order`, `date_from`, `date_to`, `config`,
+  `degraded`, `has_issues`, `min_grounding` and a repeated `doc_type`, plus collection-wide
+  `facets` in the response.
+- `GET /api/v1/jobs` gained `page`, `page_size`, `sort`, `order` and `q`, and a paged
+  response.
+- `PUT /api/v1/extraction-configs/{id}` (the id survives an edit, so `meta.config` on
+  already-processed documents keeps resolving) and
+  `POST /api/v1/extraction-configs/{id}/provision`; `documentCount` on every config.
+- `POST /api/v1/admin/purge` gained `dryRun`, so the confirmation can state the exact blast
+  radius; `GET /api/v1/admin/security` reports the posture without ever returning a key.
+- `AskResponse.citations[]` — the retrieval paragraphs behind an answer.
+- `public/ui-ext.css`: 22 new `.dip-*` components. Fifteen are general-purpose and are
+  proposed to the platform kit.
+
 ## [1.0.0] - 2026-09-12
 
 First API-first release. The prototype ("Document Intelligence Studio") becomes a

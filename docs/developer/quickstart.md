@@ -25,8 +25,8 @@ Open:
 
 | Surface | URL |
 |---|---|
-| Demo | <http://localhost:8080/> |
-| Admin | <http://localhost:8080/admin/> |
+| Operator app | <http://localhost:8080/> — Documents, Configs, Ask, Jobs, Settings |
+| Admin app | <http://localhost:8080/admin/> — Overview, Connection, Configs, Jobs, Logs, Usage, Branding, Security |
 | Redoc | <http://localhost:8080/api/v1/docs> |
 | Swagger UI (try it out) | <http://localhost:8080/api/v1/swagger> |
 | OpenAPI document | <http://localhost:8080/api/v1/openapi.json> |
@@ -34,7 +34,7 @@ Open:
 ## 3. Upload a document
 
 Multipart or raw body both work; this uses a raw body with `X-Filename` (what
-`curl --data-binary` and the demo's dropzone send):
+`curl --data-binary` and the operator app's upload dropzone send):
 
 ```bash
 curl -sS -X POST 'http://localhost:8080/api/v1/documents?config=auto' \
@@ -122,7 +122,7 @@ curl -sS -X POST "http://localhost:8080/api/v1/documents/$ID/ask" \
 
 Deleting is a destructive verb, so it always requires a credential — even with `API_KEYS`
 unset (see [`architecture/security-model.md`](../architecture/security-model.md#authentication)).
-Get a session cookie first, the same way the demo UI does:
+Get a session cookie first, the same way the operator app does at page load:
 
 ```bash
 curl -sS -c /tmp/cookies.txt -X POST http://localhost:8080/api/v1/session

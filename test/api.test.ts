@@ -89,9 +89,19 @@ test("docs, health and static surfaces are served", async () => {
   // check costs a catalog + configuration call): an immediate second call is byte-identical.
   const again = await c.get("/readyz");
   assert.equal(again.text, ready.text, "/readyz should be served from the cache");
-  assert.match((await c.get("/")).text, /arag-shell/);
-  assert.match((await c.get("/admin/")).text, /Admin sign-in/);
+  // Both surfaces are shells rendered by their own module; the product's components live
+  // in ui-ext.css and the Progress wordmarks are served from /brand/.
+  assert.match((await c.get("/")).text, /id="app"/);
+  assert.match((await c.get("/")).text, /\/ui-ext\.css/);
+  assert.match((await c.get("/admin/")).text, /admin\.js/);
   assert.match((await c.get("/ui/arag-ui.css")).headers.get("content-type") ?? "", /text\/css/);
+  assert.match((await c.get("/ui-ext.css")).headers.get("content-type") ?? "", /text\/css/);
+  assert.match((await c.get("/lib/core.js")).headers.get("content-type") ?? "", /javascript/);
+  for (const logo of ["/brand/arag-logo.svg", "/brand/arag-logo-alt.svg"]) {
+    const res = await c.get(logo);
+    assert.equal(res.status, 200, logo);
+    assert.match(res.text, /#5ce500/, "the official wordmark carries Progress green");
+  }
 });
 
 // ─── pipeline ─────────────────────────────────────────────────────────────────

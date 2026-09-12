@@ -21,8 +21,10 @@ src/
     configs.ts      ConfigsService: built-in + custom extraction configs, ARAG provisioning
     formats.ts      DocumentRecord → JSON / XML / CSV
     normalize.ts    Pure parseAmount / parseDateISO / normalizeCurrency helpers
-public/            Demo app (static, vanilla JS/CSS) — consumes only /api/v1
-admin/             Admin panel (static) — consumes only /api/v1 (+ /api/v1/admin)
+public/            Operator app (static, hash-routed, vanilla JS/CSS) — consumes only /api/v1
+  lib/core.js      Shared shell, router, fetch helper and UI primitives (used by admin/ too)
+  views/           One module per screen: documents, document, configs, jobs, ask, settings, upload, welcome
+admin/             Admin app (static, hash-routed) — consumes only /api/v1 (+ /api/v1/admin)
 vendor/arag-platform/   Vendored platform (never edit in place — see below)
 test/              Unit + integration + contract (test/*.test.ts) and e2e (test/e2e/*.spec.ts)
 data/              DATA_DIR — JSON stores (gitignored)
@@ -86,7 +88,8 @@ a single file. Add `--test-name-pattern='<regex>'` to run a single `test()` insi
   TypeScript transform. Its ESM TypeScript loader hangs on Node ≥ 26 — this machine's local
   Node version — so the Makefile always sets it for you; only relevant if you invoke
   `bunx playwright test` directly.
-- The demo and admin specs share one mock-backed server and global state (jobs, documents,
+- The operator-app (`test/e2e/app.spec.ts`), admin (`admin.spec.ts`) and branding
+  (`branding.spec.ts`) specs share one mock-backed server and global state (jobs, documents,
   configs — the admin spec purges them), so `playwright.config.ts` pins `workers: 1` and
   `fullyParallel: false`. Don't try to parallelise them.
 - `reuseExistingServer: !process.env.CI` — locally, Playwright will reuse a server you
