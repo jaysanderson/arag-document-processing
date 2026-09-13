@@ -24,7 +24,8 @@ when you're stuck or want to compare notes.
 ## Why a stub and not a full skeleton project
 
 Document Processing has zero runtime dependencies, no build step, and one process that
-serves the API, the demo and the admin panel together — there is no meaningful smaller
+serves the API, the hash-routed workspace (`/`) and the admin panel (`/admin/`)
+together — there is no meaningful smaller
 "starter project" to extract without either duplicating the whole repository (which
 drifts out of sync immediately) or hiding the real file layout you need to learn. The
 stub files here are small on purpose: enough shape to orient you, nothing you wouldn't

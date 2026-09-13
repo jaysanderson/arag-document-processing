@@ -52,15 +52,27 @@ don't keep both.)
 node --test --test-reporter=spec test/formats.test.ts
 ```
 
+Before your change, this file has 9 passing tests (verified against the mock, commit
+`2c9cc30` on `mvp`) — `toJson`, `toXml`, `toCsv`, `serialize dispatches by format`,
+`csvCell neutralises …`, `toCsv escapes a malicious …`, `toXml includes verified
+evidence …`, `toCsv carries each field's quote …`, `serializeMany bundles …`. Adding the
+two `toMarkdown` tests above (and folding the dispatch check into the existing
+`"serialize dispatches by format"` test rather than adding a third) takes it to 11:
+
 ```
 ✔ toJson round-trips to the same object
 ✔ toXml escapes special characters and is well-formed-ish
 ✔ toCsv emits one row per field with a header and quotes risky cells
+✔ serialize dispatches by format
+✔ csvCell neutralises spreadsheet formula injection but leaves numbers alone
+✔ toCsv escapes a malicious extracted value and a malicious quote
+✔ toXml includes verified evidence and the grounding score
+✔ toCsv carries each field's quote and verification alongside its value
+✔ serializeMany bundles records, and stays well formed with nothing selected
 ✔ toMarkdown renders a heading, a field table, entities and issues
 ✔ toMarkdown escapes a literal pipe in a field value
-✔ serialize dispatches by format
-ℹ tests 6
-ℹ pass 6
+ℹ tests 11
+ℹ pass 11
 ℹ fail 0
 ```
 
@@ -71,18 +83,12 @@ node --test --test-reporter=spec 'test/*.test.ts'   # fail 0
 make check
 ```
 
-```
-Checked 22 files in …ms. No fixes applied.
-… tsc --noEmit — no output means no errors …
-ℹ tests 44
-ℹ pass 44
-ℹ fail 0
-all files | 80%+ lines covered
-```
-
-(Exact test/file counts will differ slightly depending on which of the earlier
-exercises you've also kept in your working tree — the point is `fail 0` and the
-coverage gate passing, not an exact number.)
+The verified baseline for this codebase (commit `2c9cc30` on `mvp`, before this
+exercise) is **241 tests, pass 241, fail 0**. Your two new tests take the full suite to
+**243** — confirm your own run reports that count and `fail 0`, rather than trusting a
+number pasted here: the exact figure moves if you've also kept earlier exercises' code
+in your working tree, or wrote a different number of tests than this solution did.
+`make check` (Biome, `tsc --noEmit`, and the 80%-line-coverage run) should exit `0`.
 
 ## Why this test, and not something looser
 

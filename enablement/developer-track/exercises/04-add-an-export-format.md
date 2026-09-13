@@ -1,6 +1,6 @@
 # Exercise 4 — Add an export format
 
-**Time budget:** 20 minutes.
+**Time budget:** 25 minutes.
 **Matches:** LAB.md Section 4. Starter: `starter/markdown-export.snippet.ts`.
 
 ## Task
@@ -31,7 +31,10 @@ stage. A safe, testable option: a `redact` stage in `src/services/pipeline.ts`, 
 after `validate` and before `standardize`, that masks anything in `record.fields`
 matching a simple PII pattern (e.g. a 13–19 digit run that looks like a card number).
 Use `ctx.stage(name, message, fn, { soft: true, progress })`, exactly like every
-existing stage.
+existing stage — and add `"redact"` to the `StageName` union and the `STAGES` array in
+`src/types.ts` first, the same single-source-of-truth pattern `DOC_TYPE_VALUES` follows
+in Exercise 2; `stage()`'s first parameter is typed `StageName`, so this won't
+type-check until you do.
 
 ## Acceptance criteria
 

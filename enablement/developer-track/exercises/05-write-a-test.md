@@ -1,6 +1,6 @@
 # Exercise 5 — Write a test against the mock ARAG and get `make check` green
 
-**Time budget:** 15 minutes.
+**Time budget:** 20 minutes.
 **Matches:** LAB.md Section 5. Depends on Exercise 4 (or the stretch pipeline-stage
 option) being done first.
 
