@@ -196,8 +196,16 @@ export interface RecordMeta {
   sourceChars?: number;
   /** Per-stage timings in ms. */
   durationsMs: Record<string, number>;
-  /** Human label of the extraction config used (e.g. "invoice" or "Insurance Card"). */
+  /**
+   * **Id** of the extraction config used — a `DocType` for a built-in (`purchase_order`)
+   * or a `cfg_…` id for a custom one. It is an id and not a label because everything that
+   * consumes it resolves it: `?config=` filtering, the per-config document counts,
+   * `ConfigsService.resolve` for the declared key-value types, reprocess, and the
+   * generator agent. Storing the label here silently broke all five for forced uploads.
+   */
   config?: string;
+  /** Human label for display (e.g. "purchase order", "Insurance Card"). */
+  configLabel?: string;
   /** True when the config was forced (auto-classification skipped). */
   forced?: boolean;
   /** ARAG stored search configuration that backed the extraction, when one was used. */

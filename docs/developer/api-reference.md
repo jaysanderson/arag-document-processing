@@ -1016,7 +1016,7 @@ Auth: AdminToken
 
 ### `GET /api/v1/admin/audit`
 
-**Page the audited-change log** — Who changed what, and when — every settings edit, API-key creation and revocation, extraction-config create/edit/delete/provision, purge and document delete, newest first. Secret values are redacted to `***` before the entry is written. Paging is by a stable sequence number: follow `nextCursor` with `direction=older` to read back through history and `prevCursor` with `direction=newer` to return, with no duplicates or gaps however many entries arrive in between.
+**Page the audited-change log** — Who changed what, and when — every settings edit, API-key creation and revocation, extraction-config create/edit/delete/provision, field corrections, purge and document delete, newest first. Secret values are redacted to `***` before the entry is written. Paging is by a stable sequence number: follow `nextCursor` with `direction=older` to read back through history and `prevCursor` with `direction=newer` to return, with no duplicates or gaps however many entries arrive in between.
 
 Parameters:
 
@@ -1773,7 +1773,7 @@ One audited change: who, what, when, and what it changed from and to. Secret val
 | `seq` | integer | yes | Monotonic ordering key; the page cursor encodes it |
 | `ts` | string | yes |  |
 | `actor` | object | yes |  |
-| `action` | string | yes | Dotted verb: `settings.update`, `settings.reset`, `apikey.create`, `apikey.revoke`, `config.create`, `config.update`, `config.delete`, `config.provision`, `document.delete`, `documents.purge`, `branding.logo` |
+| `action` | string | yes | Dotted verb: `settings.update`, `settings.reset`, `apikey.create`, `apikey.revoke`, `config.create`, `config.update`, `config.delete`, `config.provision`, `document.field.correct`, `document.delete`, `documents.purge`, `branding.logo` |
 | `target` | string | yes | Setting key, key id, config id, document id, or `*` for a sweep |
 | `before` | object |  |  |
 | `after` | object |  |  |

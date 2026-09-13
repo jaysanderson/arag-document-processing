@@ -173,12 +173,15 @@ test("config=agent reads fields a Data Augmentation agent persisted on the resou
   assert.equal(finished.status, "succeeded");
 
   const rec = (await c.get(`/api/v1/documents/${document.id}`)).json as {
-    meta: { schema: string; config: string; forced: boolean };
+    meta: { schema: string; config: string; configLabel: string; forced: boolean };
     fields: Array<{ key: string; label: string; value: unknown; raw?: string }>;
   };
   assert.equal(rec.meta.schema, "da_agent");
   assert.equal(rec.meta.forced, true);
-  assert.match(rec.meta.config, /DA agent/);
+  // `meta.config` is a resolvable config id on every path, including this one; the human
+  // wording lives in `configLabel`.
+  assert.equal(rec.meta.config, "generic");
+  assert.match(rec.meta.configLabel, /DA agent/);
   const byKey = Object.fromEntries(rec.fields.map((f) => [f.key, f]));
   assert.equal(byKey.policy_number!.label, "Policy Number");
   assert.equal(byKey.premium_due!.value, 1240.5); // amount heuristics normalise it

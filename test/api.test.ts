@@ -181,11 +181,30 @@ test("a forced extraction config skips classification", async () => {
   assert.equal(classify?.status, "skip");
   const rec = (await c.get(`/api/v1/documents/${id}`)).json as {
     docType: string;
-    meta: { forced: boolean; config: string };
+    meta: { forced: boolean; config: string; configLabel: string };
   };
   assert.equal(rec.docType, "purchase_order");
   assert.equal(rec.meta.forced, true);
-  assert.equal(rec.meta.config, "purchase order");
+  // The **id**, not the label. Everything downstream resolves this, so storing
+  // "purchase order" here made `?config=purchase_order` return nothing for forced
+  // uploads, zeroed every per-config document count, and left the record's key-value
+  // view unable to look up the declared types.
+  assert.equal(rec.meta.config, "purchase_order");
+  assert.equal(rec.meta.configLabel, "purchase order");
+
+  // The filter and the counts are the two things that were silently wrong.
+  const byConfig = (await c.get("/api/v1/documents?config=purchase_order")).json as {
+    items: Array<{ id: string }>;
+  };
+  assert.ok(
+    byConfig.items.some((d) => d.id === id),
+    "a forced upload must come back when filtering by the config it was forced to",
+  );
+  const stats = (await c.get("/api/v1/extraction-configs")).json as {
+    items: Array<{ id: string; documentCount: number }>;
+  };
+  const po = stats.items.find((cfg) => cfg.id === "purchase_order");
+  assert.ok((po?.documentCount ?? 0) > 0, "the config's own document count must see it too");
 });
 
 test("listing is paged and filterable", async () => {
@@ -354,8 +373,16 @@ test("extraction configs: built-ins listed, custom created + provisioned + delet
 
   // The custom config is usable as the upload `config` parameter.
   const { id: docId } = await upload(INVOICE, "custom-cfg.txt", "text/plain", cfg.id);
-  const rec = (await c.get(`/api/v1/documents/${docId}`)).json as { meta: { config: string } };
-  assert.equal(rec.meta.config, "Insurance Card");
+  const rec = (await c.get(`/api/v1/documents/${docId}`)).json as {
+    meta: { config: string; configLabel: string };
+  };
+  // Same rule for a custom config: the `cfg_…` id is stored, the name is the label.
+  assert.equal(rec.meta.config, cfg.id);
+  assert.equal(rec.meta.configLabel, "Insurance Card");
+  const mine = (await c.get(`/api/v1/documents?config=${cfg.id}`)).json as {
+    items: Array<{ id: string }>;
+  };
+  assert.ok(mine.items.some((d) => d.id === docId));
 
   assert.equal(
     (await c.request("DELETE", "/api/v1/extraction-configs/invoice", { headers: writer })).status,

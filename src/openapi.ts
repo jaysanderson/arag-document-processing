@@ -144,7 +144,18 @@ const Document = {
         model: { type: "string" },
         sourceChars: { type: "integer" },
         durationsMs: { type: "object", additionalProperties: { type: "number" } },
-        config: { type: "string" },
+        config: {
+          type: "string",
+          description:
+            "**Id** of the extraction configuration used — a document type for a built-in " +
+            "(`purchase_order`) or a `cfg_…` id for a custom one. It is the same value " +
+            "`GET /api/v1/documents?config=` filters on and the per-config document counts " +
+            "are keyed by, so it resolves; `configLabel` carries the human wording.",
+        },
+        configLabel: {
+          type: "string",
+          description: 'Human label for display — "purchase order", "Insurance Card".',
+        },
         forced: { type: "boolean" },
         searchConfiguration: { type: "string" },
         extractStrategy: { type: "string" },
@@ -812,7 +823,9 @@ const AuditEntry = {
     action: {
       type: "string",
       description:
-        "Dotted verb: `settings.update`, `settings.reset`, `apikey.create`, `apikey.revoke`, `config.create`, `config.update`, `config.delete`, `config.provision`, `document.delete`, `documents.purge`, `branding.logo`",
+        "Dotted verb: `settings.update`, `settings.reset`, `apikey.create`, `apikey.revoke`, " +
+        "`config.create`, `config.update`, `config.delete`, `config.provision`, " +
+        "`document.field.correct`, `document.delete`, `documents.purge`, `branding.logo`",
     },
     target: {
       type: "string",
@@ -2649,7 +2662,8 @@ export const openapi = buildOpenApi({
         summary: "Page the audited-change log",
         description:
           "Who changed what, and when — every settings edit, API-key creation and revocation, " +
-          "extraction-config create/edit/delete/provision, purge and document delete, newest " +
+          "extraction-config create/edit/delete/provision, field corrections, purge and " +
+          "document delete, newest " +
           "first. Secret values are redacted to `***` before the entry is written. Paging is by a " +
           "stable sequence number: follow `nextCursor` with `direction=older` to read back through " +
           "history and `prevCursor` with `direction=newer` to return, with no duplicates or gaps " +

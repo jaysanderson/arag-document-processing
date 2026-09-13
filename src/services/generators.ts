@@ -406,14 +406,15 @@ export class GeneratorsService {
   }
 
   /**
-   * Which config a record was extracted with. `meta.config` holds the config's *label* for
-   * a custom config and the doc type for a built-in one, so fall back to the doc type —
-   * which is exactly what a built-in config's id is.
+   * Which config a record was extracted with. `meta.config` is the config id (a `DocType`
+   * for a built-in, `cfg_…` for a custom one). Records written before that was true may
+   * still hold a label, so a name match is kept as a fallback; the doc type is the last
+   * resort and is exactly what a built-in config's id is.
    */
   private configIdFor(record: DocumentRecord): string {
-    const label = record.meta.config;
-    if (label) {
-      const match = this.d.configs.list().find((c) => c.id === label || c.name === label);
+    const stored = record.meta.config;
+    if (stored) {
+      const match = this.d.configs.list().find((c) => c.id === stored || c.name === stored);
       if (match) return match.id;
     }
     return record.docType;

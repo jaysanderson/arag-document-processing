@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { openapi } from "../src/openapi.ts";
 import { createProduct, type Product } from "../src/server.ts";
+import { redactDeep } from "../src/services/audit.ts";
 import { Logger, readEnv, testing } from "../vendor/arag-platform/src/index.ts";
 
 const ADMIN = "audit-admin-token";
@@ -299,4 +300,68 @@ test("the runtime log pages with the same cursor contract", async () => {
   // Filters still apply on top of the cursor.
   const errorsOnly = await c.get("/api/v1/admin/logs?level=error&limit=5", admin);
   assert.ok((errorsOnly.json as { items: Array<{ level: string }> }).items.every((r) => r.level === "error"));
+});
+
+test("the redactor hides credentials without hiding the thing being audited", async () => {
+  // The bug this pins: the pattern was an unanchored /key/, so a `config.create` entry had
+  // every extraction-config field's own `key` and `provisioning.keyValueSchema` replaced
+  // with "***". An audit log that redacts the thing it is auditing looks complete and is
+  // not, which is worse than not having one.
+  const entry = redactDeep({
+    action: "config.create",
+    after: {
+      id: "cfg_abc",
+      name: "Insurance Card",
+      fields: [
+        { key: "policy_number", label: "Policy Number", kvType: "text" },
+        { key: "insurer", label: "Insurer" },
+      ],
+      provisioning: {
+        state: "provisioned",
+        searchConfiguration: "dip_custom_insurance_card",
+        keyValueSchema: "dip_custom_insurance_card",
+      },
+    },
+  }) as {
+    after: {
+      fields: Array<{ key: string }>;
+      provisioning: { keyValueSchema: string; searchConfiguration: string };
+    };
+  };
+  assert.equal(entry.after.fields[0]!.key, "policy_number");
+  assert.equal(entry.after.fields[1]!.key, "insurer");
+  assert.equal(entry.after.provisioning.keyValueSchema, "dip_custom_insurance_card");
+  assert.equal(entry.after.provisioning.searchConfiguration, "dip_custom_insurance_card");
+
+  // Still redacted: anything whose name ends in a credential word, however it is cased.
+  const secrets = redactDeep({
+    apiKey: "live",
+    api_key: "live",
+    adminToken: "live",
+    clientSecret: "live",
+    password: "live",
+    authorization: "Bearer live",
+    cookie: "arag_admin=live",
+  }) as Record<string, string>;
+  for (const [k, v] of Object.entries(secrets)) assert.equal(v, "***", `${k} must be redacted`);
+
+  // Still NOT redacted: identifiers, counts and toggles that merely contain the word.
+  const safe = redactDeep({
+    key: "policy_number",
+    keyValueSchema: "dip_invoice_extraction",
+    kvSchemaId: "dip_invoice_extraction",
+    keyId: "k_1",
+    apiKeys: { count: 2 },
+    requireApiKey: true,
+    monkey: "not a credential",
+  }) as Record<string, unknown>;
+  assert.deepEqual(safe, {
+    key: "policy_number",
+    keyValueSchema: "dip_invoice_extraction",
+    kvSchemaId: "dip_invoice_extraction",
+    keyId: "k_1",
+    apiKeys: { count: 2 },
+    requireApiKey: true,
+    monkey: "not a credential",
+  });
 });

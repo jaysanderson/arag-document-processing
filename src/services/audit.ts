@@ -71,8 +71,18 @@ const ANONYMOUS: Actor = { type: "anonymous", name: "anonymous" };
 const ctxStore = new AsyncLocalStorage<{ actor: Actor; requestId: string }>();
 
 /** Secret-looking keys are never written to the audit log in the clear. */
-const SECRET_KEY = /(token|key|secret|password|authorization|cookie)/i;
-/** …except these, which are identifiers rather than credentials. */
+/**
+ * Property names that carry a credential.
+ *
+ * Anchored at the **end** of the name, so it matches what a secret is actually called —
+ * `apiKey`, `api_key`, `adminToken`, `clientSecret`, `password`, `authorization`, `cookie` —
+ * rather than anything merely containing one of those words. The previous pattern was an
+ * unanchored `/key/`, which redacted every extraction-config field's own `key` and the
+ * `provisioning.keyValueSchema` on a `config.create` entry: an audit log that hides the
+ * thing being audited is worse than no audit log, because it looks complete.
+ */
+const SECRET_KEY = /(^|[a-z0-9_.-])(api[_.-]?key|secret|password|passwd|token|authorization|cookie)s?$/i;
+/** …except these, which are counts, toggles and identifiers rather than credentials. */
 const NOT_SECRET = /^(kbId|keyId|apiKeys|requireApiKey|keys)$/;
 
 /** Deep-copy a value with secret-looking fields replaced by `"***"`. */

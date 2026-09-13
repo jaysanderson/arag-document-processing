@@ -312,7 +312,8 @@ export async function runPipeline(
     );
     if (persisted && Object.keys(persisted).length) {
       record.docType = "generic";
-      record.meta.config = "ARAG DA agent (persisted)";
+      record.meta.config = "generic";
+      record.meta.configLabel = "ARAG DA agent (persisted)";
       record.meta.forced = true;
       record.meta.schema = "da_agent";
       const fields = fieldsFromObject(persisted);
@@ -340,7 +341,11 @@ export async function runPipeline(
     });
     schema = forced.schema;
     record.docType = forced.schema.docType;
-    record.meta.config = forced.label;
+    // The **id**, not the label: `?config=` filtering, the per-config counts, the record's
+    // key-value view and the generator agent all resolve this, and `resolve()` hands back
+    // both. Storing `forced.label` made `?config=purchase_order` read `"purchase order"`.
+    record.meta.config = forced.configId;
+    record.meta.configLabel = forced.label;
     record.meta.forced = true;
   } else {
     const cls = await stage(
@@ -355,6 +360,7 @@ export async function runPipeline(
     }
     schema = schemaFor(record.docType);
     record.meta.config = record.docType;
+    record.meta.configLabel = record.docType.replace(/_/g, " ");
     record.meta.forced = false;
   }
   if (!agentHandled) {

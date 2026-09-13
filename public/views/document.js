@@ -301,7 +301,7 @@ function groundingStrip(doc) {
     </div>
     <div class="dip-grounding__facts">
       ${statusChip(doc)}
-      <span>${esc(label(doc.meta?.forced ? doc.meta.config : doc.docType))}${
+      <span>${esc(doc.meta?.forced ? (doc.meta.configLabel ?? label(doc.meta.config)) : label(doc.docType))}${
         doc.meta?.forced
           ? ' <span class="subtle" title="Auto-classification was skipped — this config was chosen on upload.">· config forced</span>'
           : doc.docTypeConfidence
