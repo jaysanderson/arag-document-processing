@@ -22,7 +22,7 @@ export async function renderWelcome(main, { stale }) {
   const mock = ready?.arag?.mock === true;
 
   main.innerHTML = `
-    <div class="dip-prose" style="max-width:760px">
+    <div class="arag-prose" style="max-width:760px">
       <h1>Read every document the first time</h1>
       <p class="muted" style="font-size:1rem">
         Paperwork arrives as pictures of data — invoices, claim forms, statements, permits,
@@ -39,7 +39,7 @@ export async function renderWelcome(main, { stale }) {
           <div><button class="arag-btn lg" type="button" id="startSample">${icon("play")} Start the guided sample</button></div>
           <details>
             <summary class="muted small">Other samples</summary>
-            <div class="dip-chips" style="margin-top:8px">
+            <div class="arag-chips" style="margin-top:8px">
               ${samples
                 .map(
                   (s) =>
@@ -61,7 +61,7 @@ export async function renderWelcome(main, { stale }) {
 
     ${
       mock
-        ? `<div class="arag-alert warn dip-prose" style="margin-top:24px;max-width:860px" role="note">
+        ? `<div class="arag-alert warn arag-prose" style="margin-top:24px;max-width:860px" role="note">
              <strong>This deployment is running the mock Knowledge Box.</strong> Extraction comes from
              deterministic fixtures keyed by filename, not from a model reading the page. Set
              <span class="mono">ARAG_KB_ID</span> and <span class="mono">ARAG_API_KEY</span> for live

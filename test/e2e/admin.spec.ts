@@ -24,7 +24,7 @@ test("admin: the sign-in is a door, and a wrong token says so plainly", async ({
   await page.fill("#token", TOKEN);
   await page.press("#token", "Enter");
   await expect(page.locator(".arag-railnav")).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".arag-railnav a")).toHaveCount(8);
+  await expect(page.locator(".arag-railnav a")).toHaveCount(9);
   // Signed in, the wordmark is in the band only; the sidebar head is the operator identity.
   await expect(page.locator(".arag-rail .ident img")).toBeHidden();
   await expect(page.locator(".arag-rail .ident .name")).toHaveText("Operations");
@@ -84,11 +84,38 @@ test("admin: jobs, logs, usage and branding", async ({ page }) => {
   await page.keyboard.press("Escape");
 
   await page.click('[data-nav="Logs"]');
-  await expect(page.locator("tr[data-line]").first()).toBeVisible({ timeout: 20_000 });
-  await page.click("tr[data-line] >> nth=0");
+  await expect(page.locator("#logPane .line").first()).toBeVisible({ timeout: 20_000 });
+  await page.click("#logPane .line >> nth=0");
   await expect(page.locator(".arag-drawer")).toContainText("level");
   await page.keyboard.press("Escape");
-  await page.selectOption("#level", "warn");
+  // Cursor paging, not a tail: the range line is real and Newer is off at the head.
+  await expect(page.locator(".arag-pagination .range")).toContainText("lines");
+  await expect(page.locator("#logNewer")).toBeDisabled();
+  await expect(page.locator("#logOlder")).toHaveAttribute("aria-label", "Show older log lines");
+
+  // The contract the two buttons ride on, at a page size small enough to guarantee paging:
+  // Older then Newer returns to exactly the window it came from, not to a re-query that
+  // could land somewhere else because records arrived at the head meanwhile.
+  const head = await (await page.request.get("/api/v1/admin/logs?limit=5")).json();
+  expect(head.items.length).toBe(5);
+  const older = await (
+    await page.request.get(
+      `/api/v1/admin/logs?limit=5&cursor=${encodeURIComponent(head.prevCursor)}&direction=older`,
+    )
+  ).json();
+  expect(older.items.map((l: { ts: string }) => l.ts)).not.toEqual(
+    head.items.map((l: { ts: string }) => l.ts),
+  );
+  const backAgain = await (
+    await page.request.get(
+      `/api/v1/admin/logs?limit=5&cursor=${encodeURIComponent(older.nextCursor)}&direction=newer`,
+    )
+  ).json();
+  expect(backAgain.items.map((l: { ts: string }) => l.ts)).toEqual(
+    head.items.map((l: { ts: string }) => l.ts),
+  );
+
+  await page.click('#logLevel button[data-value="warn"]');
   await expect(page).toHaveURL(/level=warn/);
 
   await page.click('[data-nav="Usage"]');
@@ -110,20 +137,21 @@ test("admin: security states the posture and purge is previewed before it is con
   await expect(page.locator(".arag-railnav")).toBeVisible({ timeout: 20_000 });
   await page.click('[data-nav="Security"]');
 
-  await expect(page.locator("body")).toContainText("Always require a credential");
+  await expect(page.locator("body")).toContainText("Always require a credential", { timeout: 20_000 });
   await expect(page.locator("body")).toContainText("API_KEYS");
-  // The token is never echoed back to the panel that asked for it.
+  // The token is never echoed back to the panel that asked for it, and the admin-token row is
+  // a write-only secret rather than a value.
   await expect(page.locator("body")).not.toContainText(TOKEN);
-  await expect(page.locator("#purge")).toBeDisabled();
+  await expect(page.locator('[data-key="security.adminToken"]')).toContainText("never shown");
+  // Delete does not exist until a preview has stated the blast radius.
+  await expect(page.locator("#purgeGo")).toHaveCount(0);
 
-  // Preview first: the dialog has to be able to state the blast radius.
-  await page.fill("#days", "0");
-  await page.click("#preview");
+  await page.fill("#purgeDays", "0");
+  await page.click("#purgePreview");
   await expect(page.locator("#purgeResult")).toContainText("would be deleted", { timeout: 20_000 });
-  await expect(page.locator("#purgeResult")).toContainText("Nothing has been deleted yet");
-  await expect(page.locator("#purge")).toBeEnabled();
+  await expect(page.locator("#purgeResult")).toContainText("Nothing has been deleted");
 
-  await page.click("#purge");
+  await page.click("#purgeGo");
   await expect(page.locator(".arag-confirm")).toBeVisible();
   // The confirm button stays disabled until the word is typed.
   await expect(page.locator(".arag-confirm [data-ok]")).toBeDisabled();
@@ -131,6 +159,25 @@ test("admin: security states the posture and purge is previewed before it is con
   await expect(page.locator(".arag-confirm [data-ok]")).toBeEnabled();
   await page.click(".arag-confirm [data-ok]");
   await expect(page.locator("#purgeResult")).toContainText("Deleted", { timeout: 30_000 });
+});
+
+test("admin: the audit log names who changed what", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto("/admin/");
+  await page.fill("#token", TOKEN);
+  await page.press("#token", "Enter");
+  await expect(page.locator(".arag-railnav")).toBeVisible({ timeout: 20_000 });
+  await page.click('[data-nav="Audit"]');
+  await expect(page.locator("h1")).toContainText("Audit", { timeout: 20_000 });
+  // The purge above is a change, so the log is not empty and names the actor that made it.
+  await expect(page.locator("#auditTable tbody tr").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("#auditTable")).toContainText("admin token");
+  await page.click("#auditTable tbody tr >> nth=0");
+  await expect(page.locator(".arag-drawer")).toContainText("requestId");
+  await page.keyboard.press("Escape");
+  // Cursor paging, not a tail: the directional buttons are real, and at the head there is
+  // nothing newer to show.
+  await expect(page.locator("#auditNewer")).toBeDisabled();
 });
 
 test("admin: API docs are served (Redoc + Swagger + raw spec)", async ({ page }) => {

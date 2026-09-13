@@ -121,15 +121,30 @@ const APP_SCREENS: [string, string][] = [
   ["#/documents", "Documents"],
   ["#/configs", "Configs"],
   ["#/ask", "Ask"],
+  ["#/ask?scope=corpus", "Ask"],
   ["#/jobs", "Jobs"],
   ["#/api", "API"],
   ["#/settings/connection", "Connection"],
-  ["#/settings/extraction", "Extraction"],
   ["#/settings/branding", "Branding"],
+  ["#/settings/limits", "Limits"],
+  ["#/settings/security", "Security"],
+  ["#/settings/retention", "Retention"],
+  ["#/settings/operations", "Operations"],
+  ["#/settings/keys", "API keys"],
   ["#/settings/api", "API"],
 ];
 
-const ADMIN_SCREENS = ["Overview", "Connection", "Configs", "Jobs", "Logs", "Usage", "Branding", "Security"];
+const ADMIN_SCREENS = [
+  "Overview",
+  "Connection",
+  "Configs",
+  "Jobs",
+  "Logs",
+  "Audit",
+  "Usage",
+  "Branding",
+  "Security",
+];
 
 test("the wordmark appears exactly once on every screen of the app", async ({ page }) => {
   // An empty deployment sends Documents to Welcome, so give the queue something to show.
@@ -148,6 +163,34 @@ test("the wordmark appears exactly once on every screen of the app", async ({ pa
     }
     await expect(page.locator(".arag-appband .wordmark img")).toBeVisible();
     expect(await page.locator('img[src*="arag-logo"]').count(), hash).toBe(1);
+  }
+});
+
+/**
+ * The record's own tabs, which the sitemap sweep above cannot reach without an id. The
+ * Compare tab and the key-value view are new surfaces in this pass and are included for the
+ * same reason the Settings preview was: a screen nobody sweeps is a screen that can grow a
+ * second wordmark.
+ */
+test("the wordmark appears exactly once on every tab of a record", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const up = await request.post("/api/v1/documents?config=invoice", {
+    headers: { "Content-Type": "text/plain", "X-Filename": "brand-tabs-e2e.txt" },
+    data: "TAX INVOICE\nInvoice Number: INV-BRAND-2\nTOTAL DUE: $10.00 AUD\n",
+  });
+  const id = (await up.json()).document.id as string;
+  await expect
+    .poll(async () => (await (await request.get(`/api/v1/documents/${id}`)).json()).status, {
+      timeout: 60_000,
+    })
+    .toBe("ready");
+
+  for (const tab of ["", "/source", "/pipeline", "/ask", "/json", "/json?view=kv", "/compare"]) {
+    await page.goto(`/#/documents/${id}${tab}`);
+    await expect(page.locator(".arag-tabs")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("#tabPanel")).not.toBeEmpty({ timeout: 20_000 });
+    await expect(page.locator(".arag-appband .wordmark img")).toBeVisible();
+    expect(await page.locator('img[src*="arag-logo"]').count(), tab).toBe(1);
   }
 });
 

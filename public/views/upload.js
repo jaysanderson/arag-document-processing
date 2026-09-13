@@ -37,7 +37,7 @@ export async function openUploadDrawer({ onClose, onUploaded, preselect = "auto"
         <div class="arag-dropzone" id="dropzone" tabindex="0" role="button"
              aria-label="Drop files here, or press Enter to browse">
           <input type="file" id="fileInput" hidden multiple accept="${esc(accepted.join(","))}" />
-          <div>${icon("upload", { size: 24 })}</div>
+          <div class="icon">${icon("upload", { size: 24 })}</div>
           <div><strong>Drop files here</strong></div>
           <div class="muted small">or browse</div>
         </div>

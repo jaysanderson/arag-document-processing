@@ -21,18 +21,34 @@ import {
   navigate,
   skeletonRows,
   toast,
+  wireTable,
 } from "../lib/core.js";
+
+/**
+ * The Knowledge Box's own ceiling, shown before a partner runs into it: 20 key-value schemas
+ * of 50 fields each. Every provisioned config takes one, and a generator agent takes a second
+ * one of its own — which is why the number here can be larger than the config count.
+ */
+const KV_SCHEMA_BUDGET = 20;
+const KV_FIELD_BUDGET = 50;
+
+const kvBudget = (items) => {
+  const used = new Set(
+    items.filter((c) => c.provisioning?.keyValueSchema?.state === "provisioned").map((c) => c.kvSchemaId),
+  ).size;
+  return `${used} of ${KV_SCHEMA_BUDGET} Knowledge Box schemas`;
+};
 
 export async function renderConfigs(main, { query, stale }) {
   main.innerHTML = `
-    <header class="dip-pagehead">
-      <div class="dip-pagehead__row">
+    <header class="arag-pagehead">
+      <div class="row">
         <h1>Configs</h1>
-        <div class="dip-pagehead__actions">
+        <div class="actions">
           <a class="arag-btn" href="${buildHash("/configs/new")}">${icon("plus")} New config</a>
         </div>
       </div>
-      <p class="dip-pagehead__sub">Each config is provisioned as a stored ARAG search configuration, so the model, the grounding strategy and the JSON schema live in the Knowledge Box rather than in client code.</p>
+      <p class="sub">Each config is provisioned as a stored ARAG search configuration, so the model, the grounding strategy and the JSON schema live in the Knowledge Box rather than in client code.</p>
     </header>
     <div id="list">${skeletonRows(5)}</div>`;
 
@@ -55,8 +71,8 @@ export async function renderConfigs(main, { query, stale }) {
   const builtin = shown.filter((c) => c.builtin);
 
   $("#list", main).innerHTML = `
-    <div class="dip-filterbar${q || kind ? " has-filters" : ""}">
-      <div class="dip-search">${icon("search")}
+    <div class="arag-filterbar">
+      <div class="arag-search">${icon("search")}
         <label class="sr-only" for="cq">Search configs</label>
         <input class="arag-input" id="cq" type="search" value="${esc(query.q ?? "")}" placeholder="Search configs" />
       </div>
@@ -66,11 +82,12 @@ export async function renderConfigs(main, { query, stale }) {
         <option value="custom"${kind === "custom" ? " selected" : ""}>Custom</option>
         <option value="builtin"${kind === "builtin" ? " selected" : ""}>Built in</option>
       </select>
-      <span class="dip-filterbar__spacer"></span>
-      <span class="muted small">${items.length} configs</span>
-      <button class="arag-btn ghost sm dip-filterbar__clear" type="button" id="clearCfg">Clear all filters</button>
+      <span class="spacer"></span>
+      <span class="count">${items.length} configs</span>
+      <span class="count" title="A Knowledge Box holds at most 20 key-value schemas of 50 fields each. Every config that is provisioned takes one.">${kvBudget(items)}</span>
+      ${q || kind ? '<button class="arag-btn ghost sm" type="button" id="clearCfg">Clear all filters</button>' : ""}
     </div>
-    ${shown.length ? "" : emptyState({ iconName: "search", title: "No configs match", actions: '<button class="arag-btn secondary" type="button" id="clearCfg2">Clear all filters</button>' })}
+    ${shown.length ? "" : emptyState({ icon: "search", title: "No configs match", actions: '<button class="arag-btn secondary" type="button" id="clearCfg2">Clear all filters</button>' })}
     ${custom.length ? section("Custom", custom) : ""}
     ${builtin.length ? section("Built in", builtin) : ""}`;
 
@@ -86,13 +103,11 @@ export async function renderConfigs(main, { query, stale }) {
   for (const id of ["clearCfg", "clearCfg2"]) {
     $(`#${id}`, main)?.addEventListener("click", () => navigate("/configs", {}));
   }
+  // Row activation (and the "click anywhere but a control" rule) comes from the kit.
+  for (const table of $$(".arag-datatable", main)) wireTable(table);
   for (const tr of $$("tr[data-cfg]", main)) {
     const cfg = items.find((c) => c.id === tr.dataset.cfg);
-    tr.addEventListener("click", (e) => {
-      if (e.target.closest(".dip-datatable__actions, a")) return;
-      navigate(`/configs/${cfg.id}`);
-    });
-    $(".dip-datatable__actions", tr).appendChild(
+    $(".rowactions", tr).appendChild(
       menuButton(
         () => [
           { label: "Open", onSelect: () => navigate(`/configs/${cfg.id}`) },
@@ -114,20 +129,20 @@ export async function renderConfigs(main, { query, stale }) {
 
 function section(title, rows) {
   return `<h2 style="margin-top:20px">${esc(title)} (${rows.length})</h2>
-    <div class="dip-tablewrap"><div class="dip-tablescroll">
-    <table class="arag-table dip-datatable">
-      <thead><tr><th>Name</th><th>Fields</th><th>ARAG configuration</th><th>Documents</th><th>State</th><th class="dip-datatable__actions"><span class="sr-only">Actions</span></th></tr></thead>
+    <div class="arag-datatable"><div class="scroll">
+    <table class="arag-table">
+      <thead><tr><th>Name</th><th>Fields</th><th>ARAG configuration</th><th>Documents</th><th>State</th><th class="rowactions"><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>
         ${rows
           .map(
-            (c) => `<tr data-cfg="${esc(c.id)}">
-            <td><a class="dip-datatable__primary" href="${buildHash(`/configs/${c.id}`)}">${esc(c.name)}</a>
-                <span class="dip-datatable__sub">${esc(c.description)}</span></td>
+            (c) => `<tr data-cfg="${esc(c.id)}" data-href="${buildHash(`/configs/${c.id}`)}">
+            <td><a class="cell-title" href="${buildHash(`/configs/${c.id}`)}">${esc(c.name)}</a>
+                <span class="cell-sub">${esc(c.description)}</span></td>
             <td class="num">${c.fields.length}</td>
             <td class="mono small">${esc(c.aragConfig)}</td>
             <td class="num">${c.documentCount ?? 0}</td>
             <td>${c.provisioned ? '<span class="arag-chip ok">Ready</span>' : '<span class="arag-chip warn">Not provisioned</span>'}</td>
-            <td class="dip-datatable__actions"></td>
+            <td class="rowactions"></td>
           </tr>`,
           )
           .join("")}
@@ -182,35 +197,39 @@ export async function renderConfigDetail(main, { params, stale }) {
   if (stale()) return;
 
   main.innerHTML = `
-    <header class="dip-pagehead">
-      <nav class="dip-breadcrumb" aria-label="Breadcrumb">
+    <header class="arag-pagehead">
+      <nav class="arag-breadcrumb" aria-label="Breadcrumb">
         <ol><li><a href="${buildHash("/configs")}">Configs</a></li><li aria-current="page">${esc(cfg.name)}</li></ol>
       </nav>
-      <div class="dip-pagehead__row">
+      <div class="row">
         <h1>${esc(cfg.name)}</h1>
-        <div class="dip-pagehead__actions">
+        <div class="actions">
           <a class="arag-btn secondary" href="${buildHash("/documents/upload", { config: cfg.id })}">Use for an upload</a>
           ${cfg.builtin ? "" : `<a class="arag-btn" href="${buildHash(`/configs/${cfg.id}/edit`)}">Edit</a>`}
         </div>
       </div>
-      <p class="dip-pagehead__sub">${esc(cfg.description)}</p>
+      <p class="sub">${esc(cfg.description)}</p>
     </header>
-    <div class="dip-split">
+    <div class="arag-split">
       <section>
         <h2>Fields (${cfg.fields.length})</h2>
-        <div class="dip-tablewrap"><div class="dip-tablescroll">
+        <div class="arag-datatable"><div class="scroll">
         <table class="arag-table">
-          <thead><tr><th>Label</th><th>Key</th><th>Type</th><th>Required</th></tr></thead>
+          <thead><tr><th>Label</th><th>Key</th><th>Type</th><th>Knowledge Box type</th><th>Required</th></tr></thead>
           <tbody>${cfg.fields
             .map(
-              (f) => `<tr><td>${esc(f.label)}</td><td class="mono small">${esc(f.key)}</td>
-                <td>${esc(f.type)}</td><td>${f.required ? "Yes" : "—"}</td></tr>`,
+              (f) => `<tr><td><span class="cell-title">${esc(f.label)}</span>
+                  ${f.description ? `<span class="cell-sub">${esc(f.description)}</span>` : ""}</td>
+                <td class="mono small">${esc(f.key)}</td>
+                <td>${esc(f.type)}</td>
+                <td class="mono small">${esc(cfg.kvFields?.[f.key] ? (f.kvType ?? "text") : "—")}</td>
+                <td>${f.required ? "Yes" : "—"}</td></tr>`,
             )
             .join("")}</tbody>
         </table></div></div>
       </section>
       <aside class="arag-stack">
-        <div class="arag-card">
+        <div class="arag-card" id="provCard">
           <div class="head"><h3>Provisioning</h3></div>
           <div class="body">
             <dl class="arag-kv">
@@ -226,6 +245,8 @@ export async function renderConfigDetail(main, { params, stale }) {
             </div>
           </div>
         </div>
+        <div class="arag-card" id="kvCard">${kvSchemaCard(cfg)}</div>
+        <div class="arag-card" id="genCard">${skeletonRows(2)}</div>
         ${
           cfg.builtin
             ? `<div class="arag-card pad"><p class="muted small">Built-in configs cannot be edited or deleted. To change what is extracted for this type, create a custom config with the fields you want and force it on upload.</p></div>`
@@ -237,6 +258,10 @@ export async function renderConfigDetail(main, { params, stale }) {
         }
       </aside>
     </div>`;
+
+  await renderGeneratorCard($("#genCard", main), cfg, () =>
+    renderConfigDetail(main, { params, stale: () => false }),
+  );
 
   $("#reprov", main).addEventListener("click", async () => {
     const r = await api(`/api/v1/extraction-configs/${cfg.id}/provision`, { method: "POST" });
@@ -253,6 +278,112 @@ export async function renderConfigDetail(main, { params, stale }) {
     await api(`/api/v1/extraction-configs/${cfg.id}`, { method: "DELETE" });
     toast("Config deleted");
     navigate("/configs");
+  });
+}
+
+/**
+ * What this config provisions *in the Knowledge Box* — the typed key-value schema the
+ * extracted record is written to, so the structured values live there rather than only in
+ * this product's store. A failed provision is stated here, where it can be retried, rather
+ * than swallowed into a boolean.
+ */
+function kvSchemaCard(cfg) {
+  const p = cfg.provisioning ?? {};
+  const sc = p.searchConfiguration ?? {};
+  const kvs = p.keyValueSchema ?? {};
+  const chip = (state) =>
+    state === "provisioned"
+      ? '<span class="arag-chip ok">Provisioned</span>'
+      : state === "failed"
+        ? '<span class="arag-chip danger">Failed</span>'
+        : '<span class="arag-chip warn">Not provisioned</span>';
+  const fields = kvs.fields ?? Object.keys(cfg.kvFields ?? {}).length;
+  return `
+    <div class="head"><h3>Knowledge Box schema</h3>${chip(kvs.state)}</div>
+    <div class="body">
+      <dl class="arag-kv">
+        <dt>Key-value schema</dt><dd class="mono">${esc(cfg.kvSchemaId ?? "—")}</dd>
+        <dt>Fields</dt><dd>${fields} of ${KV_FIELD_BUDGET} allowed in one schema</dd>
+        <dt>Search configuration</dt><dd class="mono">${esc(sc.name ?? cfg.aragConfig)} ${chip(sc.state)}</dd>
+        <dt>Provisioned</dt><dd>${kvs.at ? esc(new Date(kvs.at).toLocaleString()) : "—"}</dd>
+      </dl>
+      ${
+        kvs.error || sc.error
+          ? `<div class="arag-alert error" style="margin-top:12px">${esc(kvs.error ?? sc.error)}
+               <div class="small" style="margin-top:6px">Re-provision to try again. Until it succeeds,
+                 records processed with this config are written to this product's store only.</div></div>`
+          : `<p class="muted small" style="margin-top:12px">After extraction the verified record is written
+               to this schema on the resource, so the values are searchable and filterable through the
+               Knowledge Box itself. Field types are mapped from the config's own schema and the
+               descriptions are carried over to guide the extraction.</p>`
+      }
+    </div>`;
+}
+
+/**
+ * The alternative extraction path: a Data Augmentation generator agent that writes the same
+ * fields into its own key-value schema. It is offered here, where the schema it needs is
+ * defined — and the card states the asymmetry plainly, because the agent's values are not
+ * grounded to the same standard as the pipeline's.
+ */
+async function renderGeneratorCard(host, cfg, refresh) {
+  const out = await api(`/api/v1/extraction-configs/${cfg.id}/generator`).catch(() => null);
+  const agent = out?.agent ?? null;
+  host.innerHTML = `
+    <div class="head"><h3>Generator agent</h3>${
+      agent
+        ? `<span class="arag-chip ${agent.state === "running" ? "info" : "neutral"}">${esc(label(agent.state))}</span>`
+        : '<span class="arag-chip neutral">Not provisioned</span>'
+    }</div>
+    <div class="body">
+      <p class="muted small">Progress Agentic RAG can populate a key-value schema itself, with a Data
+        Augmentation generator agent whose field descriptions guide the extraction. It is a second path
+        to the same values — and a way to compare this product's pipeline against the Knowledge Box's own.</p>
+      <p class="muted small"><strong>It returns no quote.</strong> The agent writes values and nothing to
+        verify them against, so its column on the comparison carries no verification badge and never
+        counts towards a grounding score.</p>
+      ${
+        agent
+          ? `<dl class="arag-kv">
+               <dt>Agent</dt><dd class="mono small">${esc(agent.name)}</dd>
+               <dt>Its own schema</dt><dd class="mono small">${esc(agent.kvSchemaId)}</dd>
+               <dt>Started</dt><dd>${esc(new Date(agent.startedAt).toLocaleString())}</dd>
+             </dl>
+             <div class="arag-row" style="margin-top:12px">
+               <button class="arag-btn ghost sm" type="button" id="genStop">Stop</button>
+               <button class="arag-btn danger sm" type="button" id="genDelete">Delete the agent</button>
+             </div>`
+          : `<div class="arag-row" style="margin-top:12px">
+               <button class="arag-btn secondary sm" type="button" id="genProvision">Provision a generator agent</button>
+             </div>`
+      }
+    </div>`;
+  $("#genProvision", host)?.addEventListener("click", async () => {
+    try {
+      await api(`/api/v1/extraction-configs/${cfg.id}/generator`, { method: "POST", json: {} });
+      toast("Generator agent provisioned");
+      await refresh();
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  });
+  $("#genStop", host)?.addEventListener("click", async () => {
+    await api(`/api/v1/extraction-configs/${cfg.id}/generator/stop`, { method: "POST", json: {} }).catch(
+      (err) => toast(err.message, "error"),
+    );
+    await refresh();
+  });
+  $("#genDelete", host)?.addEventListener("click", async () => {
+    const ok = await confirmDialog({
+      title: "Delete the generator agent?",
+      body: "<p>The agent and its own key-value schema are removed from the Knowledge Box. Values it has already written stay on the resources until they are overwritten.</p>",
+      confirmLabel: "Delete the agent",
+    });
+    if (!ok) return;
+    await api(`/api/v1/extraction-configs/${cfg.id}/generator`, { method: "DELETE" }).catch((err) =>
+      toast(err.message, "error"),
+    );
+    await refresh();
   });
 }
 
@@ -288,20 +419,20 @@ export async function renderConfigBuilder(main, { params, stale }) {
   }
 
   main.innerHTML = `
-    <header class="dip-pagehead">
-      <nav class="dip-breadcrumb" aria-label="Breadcrumb">
+    <header class="arag-pagehead">
+      <nav class="arag-breadcrumb" aria-label="Breadcrumb">
         <ol><li><a href="${buildHash("/configs")}">Configs</a></li><li aria-current="page">${editing ? esc(cfg.name) : "New config"}</li></ol>
       </nav>
-      <div class="dip-pagehead__row">
+      <div class="row">
         <h1>${editing ? "Edit extraction config" : "New extraction config"}</h1>
-        <div class="dip-pagehead__actions">
+        <div class="actions">
           <a class="arag-btn ghost" href="${buildHash(editing ? `/configs/${cfg.id}` : "/configs")}">Cancel</a>
           <button class="arag-btn" type="button" id="saveCfg">Save config</button>
         </div>
       </div>
     </header>
     <div id="formError"></div>
-    <div class="dip-split">
+    <div class="arag-split">
       <section class="arag-stack">
         <div class="arag-field">
           <label for="cfgName">Name</label>

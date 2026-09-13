@@ -5,20 +5,24 @@
  * browser. Hash routing rather than path routing because the platform's static file
  * server has no SPA fallback: `/documents/abc` would answer a 404 problem document rather
  * than the app.
+ *
+ * The chrome is the platform kit's `<arag-app-shell>` (v0.2.0) — band, rail, connection
+ * pill, live region — mounted through `mountShell()` in lib/core.js, which carries the two
+ * hash-routing adapters the kit's path-routing rail needs.
  */
 import {
   $,
   api,
-  applyShellBranding,
+  applyBranding,
   buildHash,
   createRouter,
-  esc,
+  mountShell,
   navigate,
   parseHash,
-  renderShell,
-  setActiveNav,
-  setNavBadge,
+  tour,
 } from "./lib/core.js";
+import { startSession } from "./lib/session.js";
+import { renderApi } from "./views/api.js";
 import { renderAsk } from "./views/ask.js";
 import { renderConfigBuilder, renderConfigDetail, renderConfigs } from "./views/configs.js";
 import { renderDocument } from "./views/document.js";
@@ -32,23 +36,23 @@ const NAV = [
   { key: "configs", label: "Configs", href: buildHash("/configs"), icon: "layers" },
   { key: "ask", label: "Ask", href: buildHash("/ask"), icon: "quote" },
   { key: "jobs", label: "Jobs", href: buildHash("/jobs"), icon: "clock" },
+  { key: "api", label: "API", href: buildHash("/api"), icon: "book" },
   { key: "settings", label: "Settings", href: buildHash("/settings/connection"), icon: "settings" },
 ];
 
-const main = renderShell(document.getElementById("app"), {
+const { main, setActiveNav, setNavBadge } = mountShell(document.getElementById("app"), {
   productName: "Document Processing",
   tagline: "Documents in, validated records out",
   nav: NAV,
-  bandLinks: [
-    { label: "API docs", href: "/api/v1/docs", dataAttr: " data-docs-link" },
-    { label: "Admin", href: "/admin/" },
-  ],
+  bandLink: { label: "Admin", href: "/admin/" },
 });
 
-// A session cookie is only needed when API_KEYS is configured; failing is the open case.
-api("/api/v1/session", { method: "POST" }).catch(() => undefined);
+// The session cookie is what lets this page make the writes DP-12 protects — a delete, a
+// config, a field correction — without a key pasted into the browser. `startSession` records
+// whether it succeeded so the screens that offer a write can say why one is refused.
+startSession();
 api("/api/v1/branding")
-  .then(applyShellBranding)
+  .then(applyBranding)
   .catch(() => undefined);
 
 /** Live nav badges: what needs review, and what is still moving. */
@@ -67,8 +71,10 @@ async function refreshBadges() {
 }
 
 const withNav = (key, fn) => async (ctx) => {
-  setActiveNav(key);
   await fn(main, ctx);
+  // The rail is told which item is current after the render, not before: a pushState or
+  // hash router changes the URL without telling the shell anything (DP-32).
+  setActiveNav(key);
   refreshBadges();
   maybeTour(ctx);
 };
@@ -83,6 +89,7 @@ const router = createRouter(
     ["/documents/:id/pipeline", withNav("documents", (m, c) => renderDocument(m, c, "pipeline"))],
     ["/documents/:id/ask", withNav("documents", (m, c) => renderDocument(m, c, "ask"))],
     ["/documents/:id/json", withNav("documents", (m, c) => renderDocument(m, c, "json"))],
+    ["/documents/:id/compare", withNav("documents", (m, c) => renderDocument(m, c, "compare"))],
     ["/configs", withNav("configs", renderConfigs)],
     ["/configs/new", withNav("configs", (m, c) => renderConfigBuilder(m, { ...c, params: {} }))],
     ["/configs/:id", withNav("configs", renderConfigDetail)],
@@ -90,6 +97,7 @@ const router = createRouter(
     ["/ask", withNav("ask", renderAsk)],
     ["/jobs", withNav("jobs", renderJobs)],
     ["/jobs/:id", withNav("jobs", renderJobDetail)],
+    ["/api", withNav("api", renderApi)],
     ["/settings", withNav("settings", (m, c) => renderSettings(m, { ...c, params: { tab: "connection" } }))],
     ["/settings/:tab", withNav("settings", renderSettings)],
   ],
@@ -98,87 +106,77 @@ const router = createRouter(
 
 // ── the guided path ──────────────────────────────────────────────────────────
 /**
- * A spotlight over the real screens, never a mock of them. At most four steps, each
- * describing something visible; `Esc` and `Skip tour` end it and it never restarts on its
- * own. The step lives in the hash so the showcase recording can link straight to it.
+ * A spotlight over the real screens, never a mock of them — the kit's `tour()`, which adds
+ * the Escape handling and the advisory (click-through) scrim. At most four steps, each
+ * describing something visible, and it never restarts on its own. `?tour=1&step=N` in the
+ * hash still opens the tour at a given step, so the showcase recording can link to one.
  */
 const TOUR = [
   {
-    sel: "#strip",
-    text: "This is the queue. Everything you process lands here, with the numbers that decide what to look at first.",
+    target: "#strip",
+    title: "The queue",
+    body: "This is the queue. Everything you process lands here, with the numbers that decide what to look at first.",
   },
   {
-    sel: "#docsTable",
-    text: "Each row carries the document's own identity — the invoice number and the supplier — not just the filename a scanner gave it. Open the row when it says Ready.",
+    target: "#docsTable",
+    title: "Rows carry the document's own identity",
+    body: "Each row carries the document's own identity — the invoice number and the supplier — not just the filename a scanner gave it. Open the row when it says Ready.",
   },
   {
-    sel: "[data-nav='configs']",
-    text: "Configs are what the model is forced to return. Eleven types are built in; a new one is a list of field names.",
+    target: '[data-nav="Configs"]',
+    title: "Configs are the contract",
+    body: "Configs are what the model is forced to return. Eleven types are built in; a new one is a list of field names.",
   },
 ];
 
-function maybeTour(ctx) {
-  clearTour();
-  if (ctx.query.tour !== "1") return;
-  const step = Math.max(0, Math.min(TOUR.length - 1, Number(ctx.query.step ?? 1) - 1));
-  const item = TOUR[step];
-  const target = document.querySelector(item.sel);
-  if (!target) return;
-  const scrim = document.createElement("div");
-  scrim.className = "dip-tour__scrim";
-  scrim.dataset.tour = "1";
-  document.body.appendChild(scrim);
-  target.classList.add("dip-tour__target");
-  target.dataset.tourTarget = "1";
-  const card = document.createElement("div");
-  card.className = "dip-tour__card";
-  card.dataset.tour = "1";
-  card.innerHTML = `
-    <div class="dip-tour__step">Step ${step + 1} of ${TOUR.length}</div>
-    <p>${esc(item.text)}</p>
-    <div class="dip-tour__actions">
-      ${step > 0 ? '<button class="arag-btn ghost sm" type="button" data-tour-back>Back</button>' : ""}
-      ${step < TOUR.length - 1 ? '<button class="arag-btn sm" type="button" data-tour-next>Next</button>' : '<button class="arag-btn sm" type="button" data-tour-end>Done</button>'}
-      <span style="flex:1"></span>
-      <button class="arag-btn ghost sm" type="button" data-tour-end>Skip tour</button>
-    </div>`;
-  document.body.appendChild(card);
-  // Below the target, right-aligned to it, and never off-screen — the card must not sit
-  // on top of the thing its sentence is pointing at.
-  const r = target.getBoundingClientRect();
-  card.style.top = `${window.scrollY + Math.min(r.bottom + 10, window.innerHeight - 170)}px`;
-  card.style.left = `${Math.max(12, Math.min(window.scrollX + r.right - 340, window.innerWidth - 350))}px`;
+let activeTour = null;
+/** True while we are tearing the tour down ourselves, so `onDone` stays out of the way. */
+let tourClosing = false;
 
-  const go = (n) => {
-    const { path, query } = parseHash();
-    navigate(path, {
-      ...query,
-      tour: n === null ? undefined : "1",
-      step: n === null ? undefined : String(n + 1),
-    });
-  };
-  card.querySelector("[data-tour-next]")?.addEventListener("click", () => go(step + 1));
-  card.querySelector("[data-tour-back]")?.addEventListener("click", () => go(step - 1));
-  for (const b of card.querySelectorAll("[data-tour-end]")) b.addEventListener("click", () => go(null));
+function endTour() {
+  if (!activeTour) return;
+  tourClosing = true;
+  activeTour.stop();
+  tourClosing = false;
+  activeTour = null;
 }
 
-function clearTour() {
-  for (const el of document.querySelectorAll("[data-tour]")) el.remove();
-  for (const el of document.querySelectorAll("[data-tour-target]")) {
-    el.classList.remove("dip-tour__target");
-    delete el.dataset.tourTarget;
-  }
+function maybeTour(ctx) {
+  endTour();
+  if (ctx.query.tour !== "1") return;
+  if (!document.querySelector(TOUR[0].target)) return;
+  activeTour = tour(TOUR, {
+    onDone: () => {
+      activeTour = null;
+      if (tourClosing) return;
+      // Skip/Done/Escape all land here: drop the tour out of the hash so a reload of the
+      // same link does not reopen it.
+      const { path, query } = parseHash();
+      navigate(path, { ...query, tour: undefined, step: undefined }, { replace: true });
+    },
+  });
+  // The kit's tour owns its step index, so a deep link is honoured by advancing it — the
+  // card re-renders synchronously, and `step` is clamped below the last step so this can
+  // never trip "Done".
+  const step = Math.max(0, Math.min(TOUR.length - 1, Number(ctx.query.step ?? 1) - 1));
+  for (let i = 0; i < step; i++) document.querySelector(".arag-tour-card [data-next]")?.click();
 }
 
 // ── keyboard shortcuts (documented in Settings → API, none required) ─────────
 let chord = false;
 document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "");
-  if (e.key === "Escape") clearTour();
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (chord) {
     chord = false;
-    const to = { d: "/documents", c: "/configs", a: "/ask", j: "/jobs", s: "/settings/connection" }[e.key];
+    const to = {
+      d: "/documents",
+      c: "/configs",
+      a: "/ask",
+      j: "/jobs",
+      i: "/api",
+      s: "/settings/connection",
+    }[e.key];
     if (to) {
       e.preventDefault();
       navigate(to);
@@ -190,7 +188,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "/") {
-    const box = $("#q") ?? $(".dip-search input");
+    const box = $("#q") ?? $(".arag-search input");
     if (box) {
       e.preventDefault();
       box.focus();

@@ -8,7 +8,6 @@
 import {
   $,
   $$,
-  announce,
   api,
   buildHash,
   confirmDialog,
@@ -26,9 +25,11 @@ import {
   navigate,
   onLeave,
   pct,
+  popover,
   skeletonRows,
   statusChip,
   toast,
+  wireTable,
 } from "../lib/core.js";
 import { openUploadDrawer } from "./upload.js";
 
@@ -50,10 +51,14 @@ let liveTimer = null;
 function stopLive() {
   clearInterval(liveTimer);
   liveTimer = null;
+  document.querySelector(".arag-popover")?.remove();
 }
 
 function filtersFrom(query) {
   return {
+    // Repeatable and ANDed, up to ten: `<schemaId>:<field>:<op>:<value>`. These are answered
+    // by the Knowledge Box, not by this product's store, which is the whole point of them.
+    kv: [].concat(query.kv ?? []).filter(Boolean),
     q: query.q ?? "",
     status: query.status ?? "",
     doc_type: query.doc_type ?? "",
@@ -68,7 +73,8 @@ function filtersFrom(query) {
 }
 
 const activeFilterCount = (f) =>
-  ["q", "status", "doc_type", "config", "has_issues", "degraded", "date_from"].filter((k) => f[k]).length;
+  ["q", "status", "doc_type", "config", "has_issues", "degraded", "date_from"].filter((k) => f[k]).length +
+  f.kv.length;
 
 function toParams(f) {
   const [sort, order] = f.sort.split(":");
@@ -81,6 +87,7 @@ function toParams(f) {
   for (const k of ["q", "status", "doc_type", "config", "has_issues", "degraded", "date_from"]) {
     if (f[k]) p.set(k, f[k]);
   }
+  for (const one of f.kv) p.append("kv", one);
   return p;
 }
 
@@ -88,27 +95,38 @@ export async function renderDocuments(main, { query, stale, keepEmpty = false })
   const f = filtersFrom(query);
   stopLive();
   main.innerHTML = `
-    <header class="dip-pagehead">
-      <div class="dip-pagehead__row">
+    <header class="arag-pagehead">
+      <div class="row">
         <h1>Documents</h1>
-        <div class="dip-pagehead__actions">
+        <div class="actions">
           <button class="arag-btn" id="uploadBtn" type="button">${icon("upload")} Upload document</button>
         </div>
       </div>
     </header>
     <div id="strip"></div>
     <div id="filters"></div>
+    <div id="kvfilters"></div>
     <div id="list">${skeletonRows(6)}</div>`;
 
   $("#uploadBtn", main).addEventListener("click", () => navigate("/documents/upload", query));
 
   let page;
+  let configs = [];
   try {
-    page = await api(`/api/v1/documents?${toParams(f)}`);
+    [page, configs] = await Promise.all([
+      api(`/api/v1/documents?${toParams(f)}`),
+      api("/api/v1/extraction-configs")
+        .then((r) => r.items)
+        .catch(() => []),
+    ]);
   } catch (err) {
     if (stale()) return;
+    // A malformed Knowledge Box filter answers 400 with a message naming the field and what
+    // it does accept; showing that beats a generic failure over a list the reader can fix.
     $("#list", main).innerHTML = errorState(err, {
-      retry: '<button class="arag-btn secondary sm" id="retry" type="button">Try again</button>',
+      retry: f.kv.length
+        ? `<a class="arag-btn secondary sm" href="${buildHash("/documents", { ...query, kv: undefined })}">Clear the Knowledge Box filters</a>`
+        : '<button class="arag-btn secondary sm" id="retry" type="button">Try again</button>',
     });
     $("#retry", main)?.addEventListener("click", () => renderDocuments(main, { query, stale: () => false }));
     return;
@@ -126,6 +144,7 @@ export async function renderDocuments(main, { query, stale, keepEmpty = false })
 
   renderStrip($("#strip", main), page.facets);
   renderFilters($("#filters", main), f, page.facets, query);
+  renderKvFilters($("#kvfilters", main), f, page.filters, configs, query);
   renderList(main, page, f, query);
 
   // While anything is queued or processing, refresh quietly. The list is a queue: it has
@@ -148,12 +167,12 @@ export async function renderDocuments(main, { query, stale, keepEmpty = false })
 }
 
 function tile(href, labelText, value, sub) {
-  const inner = `<div class="arag-kpi"><div class="label">${esc(labelText)}</div>
+  // The kit's stat strip styles its direct children, so `.label`/`.value`/`.sub` sit on the
+  // tile itself rather than inside a nested `.arag-kpi` (which would double the padding).
+  const inner = `<div class="label">${esc(labelText)}</div>
       <div class="value">${esc(String(value))}</div>
-      <div class="sub">${esc(sub)}</div></div>`;
-  return href
-    ? `<a class="dip-statstrip__tile" href="${esc(href)}">${inner}</a>`
-    : `<div class="dip-statstrip__tile">${inner}</div>`;
+      <div class="sub">${esc(sub)}</div>`;
+  return href ? `<a href="${esc(href)}">${inner}</a>` : `<div>${inner}</div>`;
 }
 
 function renderStrip(host, facets = {}) {
@@ -164,12 +183,188 @@ function renderStrip(host, facets = {}) {
     status: facets.status ?? {},
   };
   const processing = (f.status.pending ?? 0) + (f.status.processing ?? 0);
-  host.innerHTML = `<div class="dip-statstrip">
+  host.innerHTML = `<div class="arag-statstrip">
     ${tile(buildHash("/documents"), "Documents", f.total, "in this workspace")}
     ${tile(buildHash("/documents", { has_issues: "true", sort: "grounding:asc" }), "Need review", f.needsReview, "issues or weak grounding")}
     ${tile(buildHash("/documents", { status: "processing" }), "In flight", processing, "queued or processing")}
     ${tile(buildHash("/documents", { degraded: "true" }), "Degraded", f.degraded, "finished with a failed stage")}
   </div>`;
+}
+
+/**
+ * Knowledge Box filters — the part of this screen that is not answered by this product.
+ *
+ * A `kv=` filter is evaluated by the Knowledge Box against the typed values the extraction
+ * wrote onto the resource; every other filter on this bar is answered from the local store.
+ * The two are labelled differently because the distinction is the capability: one of them
+ * searches structured data that lives in the customer's own Knowledge Box.
+ *
+ * There are no counts beside a kv value. The platform cannot produce facets for key-value
+ * fields, and a count invented locally would be a count of the page rather than of the
+ * corpus.
+ */
+const KV_OPS = [
+  ["eq", "is"],
+  ["gte", "is at least"],
+  ["lte", "is at most"],
+  ["contains", "contains"],
+];
+
+const opsFor = (field) => {
+  if (!field) return KV_OPS;
+  if (field.type === "array") return KV_OPS.filter(([o]) => o === "contains" || o === "eq");
+  if (
+    field.type === "number" ||
+    field.kvType === "date" ||
+    field.kvType === "integer" ||
+    field.kvType === "float"
+  )
+    return KV_OPS.filter(([o]) => o !== "contains");
+  return KV_OPS.filter(([o]) => o === "eq");
+};
+
+const opLabel = (op) => KV_OPS.find(([o]) => o === op)?.[1] ?? op;
+
+/** The `kv=` parameter this applied filter came from, so a chip can remove exactly it. */
+const kvSpec = (a) => `${a.schemaId}:${a.key}:${a.op}:${a.value}`;
+
+function renderKvFilters(host, f, filters, configs, query) {
+  const kb = filters?.knowledgeBox ?? { applied: [], requested: [], matchedResources: 0 };
+  const schemas = configs.filter((c) => c.kvSchemaId && Object.keys(c.kvFields ?? {}).length);
+  // Render the chips from `applied`, never from `requested`: a chip for a filter the
+  // Knowledge Box never applied would claim a narrowing that did not happen.
+  const applied = kb.applied ?? [];
+  const dropped = (kb.requested ?? []).filter(
+    (r) =>
+      !applied.some(
+        (a) => a.schemaId === r.schemaId && a.key === r.key && a.op === r.op && a.value === r.value,
+      ),
+  );
+  const localNames = filters?.local ?? [];
+
+  host.innerHTML = `
+    <div class="arag-filterchips" style="margin-bottom:12px">
+      ${applied
+        .map(
+          (a) => `<span class="arag-filterchip">
+            <strong>Knowledge Box:</strong> ${esc(a.key)} ${esc(opLabel(a.op))} ${esc(String(a.value))}
+            <button type="button" data-kv-remove="${esc(kvSpec(a))}"
+              aria-label="Remove the Knowledge Box filter on ${esc(a.key)}">${icon("x", { size: 12 })}</button>
+          </span>`,
+        )
+        .join("")}
+      ${localNames
+        .map((n) => `<span class="arag-filterchip"><strong>This workspace:</strong> ${esc(label(n))}</span>`)
+        .join("")}
+      ${
+        schemas.length
+          ? `<button class="arag-btn ghost sm" type="button" id="addKv"${f.kv.length >= 10 ? " disabled" : ""}>${icon(
+              "plus",
+              { size: 13 },
+            )} Knowledge Box filter</button>`
+          : ""
+      }
+      ${
+        applied.length
+          ? `<span class="muted small">${kb.matchedResources} resource${
+              kb.matchedResources === 1 ? "" : "s"
+            } matched in the Knowledge Box</span>`
+          : ""
+      }
+    </div>
+    ${
+      kb.error
+        ? `<div class="arag-alert warn" style="margin-bottom:12px">
+             <strong>The Knowledge Box could not answer that filter.</strong> ${esc(kb.error)}
+             The list below is this workspace's own store, unfiltered by the Knowledge Box — so it is
+             wider than what you asked for, not narrower.
+           </div>`
+        : ""
+    }
+    ${
+      dropped.length
+        ? `<div class="arag-alert warn" style="margin-bottom:12px">
+             ${dropped.length} requested Knowledge Box filter${dropped.length === 1 ? " was" : "s were"} not
+             applied: ${dropped.map((d) => `<span class="mono">${esc(`${d.key} ${d.op} ${d.value}`)}</span>`).join(", ")}.
+           </div>`
+        : ""
+    }`;
+
+  // Removed by value, not by position: a requested filter the Knowledge Box declined is not
+  // in `applied`, so the two lists can differ in length and an index would take the wrong one.
+  for (const b of $$("[data-kv-remove]", host)) {
+    b.addEventListener("click", () => {
+      const next = f.kv.filter((one) => one !== b.dataset.kvRemove);
+      navigate("/documents", { ...query, kv: next, page: undefined });
+    });
+  }
+
+  $("#addKv", host)?.addEventListener("click", (e) => {
+    const pop = popover(
+      e.currentTarget,
+      `<form id="kvForm" class="arag-stack" style="min-width:18rem">
+        <div class="arag-field">
+          <label for="kvSchema">Extraction config</label>
+          <select class="arag-select" id="kvSchema">
+            ${schemas.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="arag-field">
+          <label for="kvField">Field</label>
+          <select class="arag-select" id="kvField"></select>
+        </div>
+        <div class="arag-field">
+          <label for="kvOp">Matches</label>
+          <select class="arag-select" id="kvOp"></select>
+        </div>
+        <div class="arag-field">
+          <label for="kvValue">Value</label>
+          <input class="arag-input" id="kvValue" />
+        </div>
+        <p class="arag-help">This filter is evaluated by the Knowledge Box against the typed value written
+          onto the resource, not by this product's store.</p>
+        <button class="arag-btn sm" type="submit">Add the filter</button>
+      </form>`,
+    );
+    if (!pop) return;
+    const schemaSel = $("#kvSchema", pop);
+    const fieldSel = $("#kvField", pop);
+    const opSel = $("#kvOp", pop);
+    const cfgOf = () => schemas.find((c) => c.id === schemaSel.value);
+    const fieldOf = () => (cfgOf()?.fields ?? []).find((x) => x.key === fieldSel.value);
+    const paintFields = () => {
+      const cfg = cfgOf();
+      const keys = Object.keys(cfg?.kvFields ?? {});
+      fieldSel.innerHTML = (cfg?.fields ?? [])
+        .filter((x) => keys.includes(x.key))
+        .map((x) => `<option value="${esc(x.key)}">${esc(x.label)}</option>`)
+        .join("");
+      paintOps();
+    };
+    const paintOps = () => {
+      opSel.innerHTML = opsFor(fieldOf())
+        .map(([o, t]) => `<option value="${esc(o)}">${esc(t)}</option>`)
+        .join("");
+    };
+    schemaSel.addEventListener("change", paintFields);
+    fieldSel.addEventListener("change", paintOps);
+    paintFields();
+    $("#kvForm", pop).addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const cfg = cfgOf();
+      const value = $("#kvValue", pop).value.trim();
+      if (!cfg || !fieldSel.value || !value) return;
+      const kvKey = cfg.kvFields[fieldSel.value] ?? fieldSel.value;
+      // The popover is anchored to a button this navigation is about to replace, so it closes
+      // itself rather than floating over the list it just filtered.
+      pop.remove();
+      navigate("/documents", {
+        ...query,
+        kv: [...f.kv, `${cfg.kvSchemaId}:${kvKey}:${opSel.value}:${value}`],
+        page: undefined,
+      });
+    });
+  });
 }
 
 function option(value, text, current) {
@@ -179,8 +374,8 @@ function option(value, text, current) {
 function renderFilters(host, f, facets = {}, query) {
   const types = Object.entries(facets.docType ?? {}).sort((a, b) => b[1] - a[1]);
   host.innerHTML = `
-    <div class="dip-filterbar${activeFilterCount(f) ? " has-filters" : ""}">
-      <div class="dip-search">
+    <div class="arag-filterbar">
+      <div class="arag-search">
         ${icon("search")}
         <label class="sr-only" for="q">Search documents</label>
         <input class="arag-input" id="q" type="search" value="${esc(f.q)}"
@@ -208,8 +403,12 @@ function renderFilters(host, f, facets = {}, query) {
       </select>
       <label class="sr-only" for="fSort">Sort</label>
       <select class="arag-select" id="fSort">${SORTS.map(([v, t]) => option(v, t, f.sort)).join("")}</select>
-      <span class="dip-filterbar__spacer"></span>
-      <button class="arag-btn ghost sm dip-filterbar__clear" type="button" id="clearFilters">Clear all filters</button>
+      <span class="spacer"></span>
+      ${
+        activeFilterCount(f)
+          ? '<button class="arag-btn ghost sm" type="button" id="clearFilters">Clear all filters</button>'
+          : ""
+      }
     </div>`;
 
   const apply = (patch) => {
@@ -231,7 +430,7 @@ function renderFilters(host, f, facets = {}, query) {
     }),
   );
   $("#fSort", host).addEventListener("change", (e) => apply({ sort: e.target.value }));
-  $("#clearFilters", host).addEventListener("click", () => {
+  $("#clearFilters", host)?.addEventListener("click", () => {
     selected.clear();
     navigate("/documents", {});
   });
@@ -277,14 +476,14 @@ function renderList(main, page, f, query) {
     host.innerHTML =
       activeFilterCount(f) === 0
         ? emptyState({
-            iconName: "document",
+            icon: "document",
             title: "No documents yet",
             body: "Drop in a document and get back a checked, structured record — with the sentence from the page behind every value.",
             actions: `<a class="arag-btn" href="${buildHash("/documents/upload")}">Upload document</a>
               <a class="arag-btn secondary" href="${buildHash("/welcome")}">Start the guided sample</a>`,
           })
         : emptyState({
-            iconName: "search",
+            icon: "search",
             title: "No documents match these filters",
             body: "Try a wider date range, or a different status.",
             actions:
@@ -296,127 +495,95 @@ function renderList(main, page, f, query) {
   const [sortKey, sortOrder] = f.sort.split(":");
   const from = (page.page - 1) * page.page_size + 1;
   const to = Math.min(page.page * page.page_size, page.total);
-  const pageIds = page.items.map((d) => d.id);
-  const allOnPage = pageIds.every((id) => selected.has(id));
-  const someOnPage = !allOnPage && pageIds.some((id) => selected.has(id));
 
+  // The kit's data-table markup contract (docs/ui-kit.md): `.arag-datatable` is the frame,
+  // `.scroll` the horizontal scroller, `th[data-sort] > button` the sort control with
+  // `aria-sort` on the th, `[data-check-all]`/`[data-check]` the selection, `[data-bulkbar]`
+  // with `[data-bulk-count]`, `tr[data-href]` the row target and `[data-page]` the pager.
   host.innerHTML = `
-    <div class="dip-tablewrap">
-      <div class="dip-tablescroll">
-      <table class="arag-table dip-datatable" id="docsTable">
+    <div class="arag-datatable" id="docsTable">
+      <div class="scroll">
+      <table class="arag-table">
         <caption class="sr-only">Documents, ${esc(SORTS.find(([v]) => v === f.sort)?.[1] ?? "")}</caption>
         <thead><tr>
-          <th class="dip-datatable__check"><input type="checkbox" id="selectAll" aria-label="Select all documents on this page"${allOnPage ? " checked" : ""}${someOnPage ? ' data-partial="1"' : ""} /></th>
+          <th class="check"><input type="checkbox" data-check-all aria-label="Select all documents on this page" /></th>
           ${COLUMNS.map(([key, text]) => {
             if (!key) return `<th>${esc(text)}</th>`;
             const sorted = key === sortKey ? (sortOrder === "asc" ? "ascending" : "descending") : "none";
-            return `<th aria-sort="${sorted}"><button type="button" data-sort="${key}">${esc(text)}${icon("chevron-down", { cls: "dip-sortic", size: 14 })}</button></th>`;
+            return `<th data-sort="${key}" aria-sort="${sorted}"><button type="button">${esc(text)}${icon("chevron-down", { cls: "sortic", size: 14 })}</button></th>`;
           }).join("")}
-          <th class="dip-datatable__actions"><span class="sr-only">Actions</span></th>
+          <th class="rowactions"><span class="sr-only">Actions</span></th>
         </tr></thead>
         <tbody>
           ${page.items
             .map((d) => {
               const grounding = d.meta?.groundingScore;
-              return `<tr data-id="${esc(d.id)}" aria-selected="${selected.has(d.id)}">
-              <td class="dip-datatable__check"><input type="checkbox" data-check="${esc(d.id)}" aria-label="Select ${esc(d.filename)}"${selected.has(d.id) ? " checked" : ""} /></td>
+              const href = buildHash(`/documents/${d.id}`);
+              return `<tr data-id="${esc(d.id)}" data-href="${href}" aria-selected="${selected.has(d.id)}">
+              <td class="check"><input type="checkbox" data-check="${esc(d.id)}" aria-label="Select ${esc(d.filename)}"${selected.has(d.id) ? " checked" : ""} /></td>
               <td>
-                <a class="dip-datatable__primary" href="${buildHash(`/documents/${d.id}`)}">${esc(d.filename)}</a>
-                <span class="dip-datatable__sub">${subline(d)}</span>
+                <a class="cell-title" href="${href}">${esc(d.filename)}</a>
+                <span class="cell-sub">${subline(d)}</span>
               </td>
               <td>${esc(label(d.docType))}</td>
               <td>${statusChip(d)}</td>
               <td class="num">${d.fields?.length ? d.fields.length : '<span class="subtle">—</span>'}</td>
               <td class="num">${typeof grounding === "number" ? esc(pct(grounding)) : '<span class="subtle">—</span>'}</td>
               <td>${issueChip(d)}</td>
-              <td class="dip-datatable__actions"></td>
+              <td class="rowactions"></td>
             </tr>`;
             })
             .join("")}
         </tbody>
       </table>
       </div>
-      <div class="dip-tablefoot">
-        <div class="dip-bulkbar" id="bulkbar"${selected.size ? "" : " hidden"}>
-          <span class="dip-bulkbar__count" aria-live="polite">${selected.size} selected</span>
-          <button class="arag-btn sm" type="button" data-bulk="csv">Export CSV</button>
-          <button class="arag-btn ghost sm" type="button" data-bulk="json">Export JSON</button>
-          <button class="arag-btn ghost sm" type="button" data-bulk="xml">Export XML</button>
-          <button class="arag-btn danger sm" type="button" data-bulk="delete">Delete</button>
-          <button class="arag-btn ghost sm" type="button" id="clearSelection">Clear selection</button>
-        </div>
-        <nav class="dip-pagination" aria-label="Pagination">
-          <span class="dip-pagination__count">${from}–${to} of ${page.total}</span>
-          <button class="arag-btn ghost sm" type="button" id="prevPage"${page.page <= 1 ? " disabled" : ""}>Previous</button>
-          <button class="arag-btn ghost sm" type="button" id="nextPage"${page.next_page ? "" : " disabled"}>Next</button>
-          <label class="sr-only" for="pageSize">Documents per page</label>
-          <select class="arag-select" id="pageSize" style="width:auto">
-            ${PAGE_SIZES.map((n) => option(String(n), `${n} per page`, f.page_size)).join("")}
-          </select>
-        </nav>
+      <div class="arag-bulkbar" data-bulkbar${selected.size ? "" : " hidden"}>
+        <span class="count" data-bulk-count aria-live="polite">${selected.size} selected</span>
+        <button type="button" data-bulk="csv">Export CSV</button>
+        <button type="button" data-bulk="json">Export JSON</button>
+        <button type="button" data-bulk="xml">Export XML</button>
+        <button type="button" class="danger" data-bulk="delete">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="clearSelection">Clear selection</button>
       </div>
+      <nav class="arag-pagination" aria-label="Pagination">
+        <span class="range">${from}–${to} of ${page.total}</span>
+        <span class="spacer"></span>
+        <label class="sr-only" for="pageSize">Documents per page</label>
+        <select class="arag-select" id="pageSize" style="width:auto">
+          ${PAGE_SIZES.map((n) => option(String(n), `${n} per page`, f.page_size)).join("")}
+        </select>
+        <button type="button" data-page="prev"${page.page <= 1 ? " disabled" : ""}>Previous</button>
+        <button type="button" data-page="next"${page.next_page ? "" : " disabled"}>Next</button>
+      </nav>
     </div>`;
 
-  // sorting
-  for (const b of $$("[data-sort]", host)) {
-    b.addEventListener("click", () => {
-      const key = b.dataset.sort;
-      const order = key === sortKey && sortOrder === "desc" ? "asc" : key === sortKey ? "desc" : "desc";
-      navigate("/documents", { ...query, sort: `${key}:${order}`, page: undefined });
-    });
-  }
-
-  // selection
-  // A partial page selection is neither checked nor unchecked, and must not look like
-  // "nothing is selected" to someone about to press the header checkbox.
-  const syncSelectAll = () => {
-    const box = $("#selectAll", host);
-    const on = pageIds.filter((id) => selected.has(id)).length;
-    box.checked = on === pageIds.length;
-    box.indeterminate = on > 0 && on < pageIds.length;
-  };
-  const refreshBulk = () => {
-    syncSelectAll();
-    const bar = $("#bulkbar", host);
-    bar.hidden = selected.size === 0;
-    $(".dip-bulkbar__count", bar).textContent = `${selected.size} selected`;
-    announce(`${selected.size} document${selected.size === 1 ? "" : "s"} selected`);
-  };
-  $("#selectAll", host).addEventListener("change", (e) => {
-    for (const id of pageIds) {
-      if (e.target.checked) selected.add(id);
-      else selected.delete(id);
-    }
-    for (const cb of $$("[data-check]", host)) cb.checked = selected.has(cb.dataset.check);
-    for (const tr of $$("tr[data-id]", host))
-      tr.setAttribute("aria-selected", String(selected.has(tr.dataset.id)));
-    refreshBulk();
+  // Sorting, selection (with a real indeterminate select-all and a polite count), row
+  // activation and paging all come from the kit — delegated, so they survive a re-render.
+  wireTable($("#docsTable", host), {
+    selected,
+    onSort: ({ key, dir }) =>
+      navigate("/documents", {
+        ...query,
+        sort: dir === "none" ? undefined : `${key}:${dir === "ascending" ? "asc" : "desc"}`,
+        page: undefined,
+      }),
+    onPage: (to_) =>
+      navigate("/documents", {
+        ...query,
+        page: String(to_ === "prev" ? page.page - 1 : to_ === "next" ? page.page + 1 : Number(to_)),
+      }),
   });
-  for (const cb of $$("[data-check]", host)) {
-    cb.addEventListener("click", (e) => e.stopPropagation());
-    cb.addEventListener("change", () => {
-      if (cb.checked) selected.add(cb.dataset.check);
-      else selected.delete(cb.dataset.check);
-      cb.closest("tr").setAttribute("aria-selected", String(cb.checked));
-      refreshBulk();
-    });
-  }
-  syncSelectAll();
+
   $("#clearSelection", host)?.addEventListener("click", () => {
     selected.clear();
     for (const cb of $$("[data-check]", host)) cb.checked = false;
-    for (const tr of $$("tr[data-id]", host)) tr.setAttribute("aria-selected", "false");
-    refreshBulk();
+    wireTable($("#docsTable", host), { selected }).refresh();
   });
 
-  // row click (the anchor stays for keyboard and middle-click)
   for (const tr of $$("tr[data-id]", host)) {
-    tr.addEventListener("click", (e) => {
-      if (e.target.closest(".dip-datatable__check, .dip-datatable__actions, a")) return;
-      navigate(`/documents/${tr.dataset.id}`);
-    });
     const doc = page.items.find((d) => d.id === tr.dataset.id);
-    $(".dip-datatable__actions", tr).appendChild(rowMenu(doc, main, query));
+    $(".rowactions", tr).appendChild(rowMenu(doc, main, query));
   }
 
   // bulk actions
@@ -424,12 +591,6 @@ function renderList(main, page, f, query) {
     b.addEventListener("click", () => runBulk(b.dataset.bulk, page, main, query));
   }
 
-  $("#prevPage", host).addEventListener("click", () =>
-    navigate("/documents", { ...query, page: String(page.page - 1) }),
-  );
-  $("#nextPage", host).addEventListener("click", () =>
-    navigate("/documents", { ...query, page: String(page.page + 1) }),
-  );
   $("#pageSize", host).addEventListener("change", (e) =>
     navigate("/documents", { ...query, page_size: e.target.value, page: undefined }),
   );
@@ -498,7 +659,7 @@ async function runBulk(kind, page, main, query) {
     const ok = await confirmDialog({
       title: `Delete ${ids.length} document${ids.length === 1 ? "" : "s"}`,
       body: `<p>This also deletes ${ids.length === 1 ? "the resource" : "their resources"} from the Knowledge Box. This cannot be undone.</p>
-        <ul class="dip-confirm__list">${names
+        <ul class="">${names
           .slice(0, 5)
           .map((n) => `<li>${esc(n)}</li>`)
           .join("")}</ul>

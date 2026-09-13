@@ -53,7 +53,7 @@ test("the record shows verified evidence, and the source tab locates every quote
   await expect(page.locator(".dip-grounding")).toBeVisible({ timeout: 20_000 });
 
   // Grounding is a claim with a denominator, never a bare percentage.
-  await expect(page.locator(".dip-grounding__claim")).toContainText("of 12 fields carry a quote");
+  await expect(page.locator(".dip-grounding__claim")).toContainText("of 12 fields carry a verified quote");
   await expect(page.locator(".dip-grounding__breakdown")).toContainText("exact");
   await expect(page.locator(".dip-grounding")).toHaveAttribute("data-band", "strong");
 
@@ -165,7 +165,10 @@ test("configs list the built-ins and the field builder creates a custom config",
 
   await expect(page).toHaveURL(/#\/configs\/cfg_/, { timeout: 20_000 });
   await expect(page.locator("h1")).toContainText("E2E Insurance Card");
-  await expect(page.locator(".arag-chip.ok")).toContainText("Ready");
+  await expect(page.locator("#provCard")).toContainText("Ready");
+  // The config also provisions a typed key-value schema in the Knowledge Box itself.
+  await expect(page.locator("#kvCard")).toContainText("Provisioned", { timeout: 20_000 });
+  await expect(page.locator("#kvCard")).toContainText("of 50 allowed in one schema");
 
   // Editing keeps the id, so meta.config on processed documents keeps resolving.
   const id = new URL(page.url()).hash.split("/").pop();
@@ -182,14 +185,22 @@ test("configs list the built-ins and the field builder creates a custom config",
 
 test("settings answer what this deployment is connected to, without an admin token", async ({ page }) => {
   await page.goto("/#/settings/connection");
-  await expect(page.locator("#panel")).toContainText("Knowledge Box");
+  await expect(page.locator("#panel")).toContainText("Knowledge Box", { timeout: 20_000 });
   await expect(page.locator(".arag-alert.warn")).toContainText("mock Knowledge Box");
-  await page.click('a[role="tab"]:has-text("Extraction")');
+  // A signed-out viewer reads the real effective values and is told exactly what unlocks
+  // editing — the values are not hidden behind the token, only the form is.
+  await expect(page.locator("#panel")).toContainText("ARAG_KB_ID");
+  await expect(page.locator("#panel")).toContainText("Editing these settings needs the operator token.");
+  await page.click('a[role="tab"]:has-text("Limits")');
   await expect(page.locator("#panel")).toContainText("PDF");
   await page.click('a[role="tab"]:has-text("Branding")');
   await expect(page.locator("#panel")).toContainText("BRAND_PRODUCT_NAME");
   await expect(page.locator("#panel")).toContainText("never branded");
-  await page.click('a[role="tab"]:has-text("API")');
+  // The API keys list is the one group a viewer cannot read at all.
+  await page.click('a[role="tab"]:text-is("API keys")');
+  await expect(page.locator("#panel")).toContainText("The key list needs the operator token.");
+  await expect(page.locator("table")).toHaveCount(0);
+  await page.click('a[role="tab"]:text-is("API")');
   await expect(page.locator("#panel")).toContainText("openapi.json");
 });
 
@@ -208,9 +219,9 @@ test("jobs are listed and a finished job explains itself in a drawer", async ({ 
 
 test("ask is reachable on its own and scoped to one document", async ({ page }) => {
   test.setTimeout(60_000);
-  await page.goto("/#/ask");
+  await page.goto("/#/ask?scope=document");
   await expect(page.locator("#docPick option")).not.toHaveCount(0, { timeout: 20_000 });
-  await expect(page.locator(".arag-pagehead .sub")).toContainText("no cross-document search");
+  await expect(page.locator("#askScope button[aria-selected='true']")).toHaveText("One document");
   await page.click(".dip-suggestions button >> nth=0");
   await expect(page.locator(".arag-bubble.assistant").last()).not.toContainText("Thinking", {
     timeout: 30_000,

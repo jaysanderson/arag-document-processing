@@ -8,10 +8,10 @@
 import {
   $,
   $$,
+  announce,
   api,
-  applyShellBranding,
+  applyBranding,
   buildHash,
-  confirmDialog,
   createRouter,
   emptyState,
   errorState,
@@ -22,22 +22,26 @@ import {
   icon,
   jobChip,
   label,
+  mountShell,
   navigate,
+  onLeave,
   openDrawer,
   pct,
-  renderShell,
-  setActiveNav,
   shortId,
   skeletonRows,
   toast,
+  wireSegmented,
+  wireTable,
 } from "/lib/core.js";
+import { brandPreviewHead, loadSettings, mountGroup, mountPurge } from "/lib/settings-form.js";
 
 const NAV = [
   { key: "overview", label: "Overview", href: buildHash("/overview"), icon: "chart" },
   { key: "connection", label: "Connection", href: buildHash("/connection"), icon: "plug" },
   { key: "configs", label: "Configs", href: buildHash("/configs"), icon: "layers" },
   { key: "jobs", label: "Jobs", href: buildHash("/jobs"), icon: "clock" },
-  { key: "logs", label: "Logs", href: buildHash("/logs"), icon: "document" },
+  { key: "logs", label: "Logs", href: buildHash("/logs"), icon: "logs" },
+  { key: "audit", label: "Audit", href: buildHash("/audit"), icon: "shield" },
   { key: "usage", label: "Usage", href: buildHash("/usage"), icon: "chart" },
   { key: "branding", label: "Branding", href: buildHash("/branding"), icon: "settings" },
   { key: "security", label: "Security", href: buildHash("/security"), icon: "key" },
@@ -45,6 +49,7 @@ const NAV = [
 
 const root = document.getElementById("app");
 let main = null;
+let setActiveNav = () => {};
 
 api("/api/v1/branding")
   .then((b) => {
@@ -58,34 +63,29 @@ api("/api/v1/branding")
  * fix by typing again; `ADMIN_TOKEN` unset is not, and must not be dressed up as one.
  */
 function renderSignIn(message = "") {
-  const logo = window.__branding?.logoUrl || "/brand/arag-logo.svg";
+  const logo = window.__branding?.logoUrl || "/ui/brand/arag-logo.svg";
+  // `.arag-signin.standalone` is the kit's bandless form: full-bleed ink, no band above it,
+  // and the card carries the only wordmark on the page (DP-43 — the door has no rail behind
+  // it, so this is the one screen where the card keeps the mark).
   root.innerHTML = `
-    <div class="dip-app">
-      <div class="arag-band"><div class="arag-container">
-        <span class="brand dip-bandmark"><img src="/brand/arag-logo-alt.svg" alt="Progress Agentic RAG" /></span>
-        <span class="band-actions">
-          <a class="arag-btn ghost sm" style="color:#fff;border-color:rgba(255,255,255,.3)" href="/api/v1/docs">API docs</a>
-          <a class="arag-btn ghost sm" style="color:#fff;border-color:rgba(255,255,255,.3)" href="/">Open app</a>
-        </span>
-      </div></div>
-      <div class="dip-signin">
-        <div class="arag-card pad dip-signin__card">
-          <img src="${esc(logo)}" alt="" />
-          <h1 style="font-size:1.2rem">${esc(window.__branding?.productName ?? "Document Processing")} — operations</h1>
-          <form id="loginForm" autocomplete="off">
-            <div class="arag-field">
-              <label for="token">Admin token</label>
-              <input id="token" name="token" class="arag-input" type="password" autocomplete="current-password" />
-            </div>
-            <div class="dip-signin__error">${message ? `<div class="arag-alert error" role="alert">${esc(message)}</div>` : ""}</div>
-            <button id="signin" class="arag-btn" type="submit">Sign in</button>
-          </form>
-          <p class="arag-help" style="margin-top:12px">
-            The token is the <span class="mono">ADMIN_TOKEN</span> set for this deployment. It is
-            exchanged for a cookie and never stored in the page.
-          </p>
-          <p style="margin-top:12px"><a href="/">Open the app ›</a></p>
-        </div>
+    <div class="arag-signin standalone">
+      <div class="card">
+        <img class="wordmark" src="${esc(logo)}"
+             alt="${esc(window.__branding?.logoUrl ? (window.__branding.productName ?? "") : "Progress Agentic RAG")}" />
+        <h1>${esc(window.__branding?.productName ?? "Document Processing")} — operations</h1>
+        <form id="loginForm" autocomplete="off">
+          <div class="arag-field">
+            <label for="token">Admin token</label>
+            <input id="token" name="token" class="arag-input" type="password" autocomplete="current-password" />
+          </div>
+          <div class="error-slot">${message ? `<div class="arag-alert error" role="alert">${esc(message)}</div>` : ""}</div>
+          <button id="signin" class="arag-btn" type="submit">Sign in</button>
+        </form>
+        <p class="arag-help" style="margin-top:12px">
+          The token is the <span class="mono">ADMIN_TOKEN</span> set for this deployment. It is
+          exchanged for a cookie and never stored in the page.
+        </p>
+        <p style="margin-top:12px"><a href="/api/v1/docs">API docs ›</a> · <a href="/">Open the app ›</a></p>
       </div>
     </div>`;
   $("#token", root).focus();
@@ -105,21 +105,19 @@ function renderSignIn(message = "") {
 }
 
 // ── shell ────────────────────────────────────────────────────────────────────
-function mountShell() {
-  main = renderShell(root, {
+function mount() {
+  const shell = mountShell(root, {
     productName: "Operations",
     tagline: "Document Processing",
     nav: NAV,
-    ariaLabel: "Operations",
-    bandLinks: [
-      { label: "API docs", href: "/api/v1/docs", dataAttr: " data-docs-link" },
-      { label: "Open app", href: "/" },
-    ],
+    bandLink: { label: "Open app", href: "/" },
   });
+  main = shell.main;
+  setActiveNav = shell.setActiveNav;
   // The admin head reads "Operations" over whatever the product is called, so a partner
   // sees their own product name under the operator label rather than the platform tagline.
   if (window.__branding) {
-    applyShellBranding({
+    applyBranding({
       ...window.__branding,
       productName: "Operations",
       tagline: window.__branding.productName,
@@ -139,14 +137,15 @@ const guard = (fn) => async (ctx) => {
 
 const withNav = (key, fn) =>
   guard(async (ctx) => {
-    setActiveNav(key);
     await fn(ctx);
+    // After the render, not before: a hash router changes the URL without telling the rail.
+    setActiveNav(key);
   });
 
 // ── overview ─────────────────────────────────────────────────────────────────
 async function overview() {
-  main.innerHTML = `<header class="dip-pagehead"><div class="dip-pagehead__row"><h1>Overview</h1>
-      <div class="dip-pagehead__actions"><button class="arag-btn ghost" type="button" id="refresh">${icon("refresh")} Refresh</button></div>
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Overview</h1>
+      <div class="actions"><button class="arag-btn ghost" type="button" id="refresh">${icon("refresh")} Refresh</button></div>
     </div></header><div id="body">${skeletonRows(4)}</div>`;
   const [health, usage, logs, configs, degraded, failed] = await Promise.all([
     api("/api/v1/admin/health"),
@@ -179,7 +178,7 @@ async function overview() {
   ];
 
   $("#body", main).innerHTML = `
-    <div class="dip-statstrip">
+    <div class="arag-statstrip">
       ${kpi("Service", health.ok ? "Healthy" : "Degraded", `v${health.version} · up ${Math.round(health.uptimeSec / 60)} min`)}
       ${kpi("Knowledge Box", health.arag.ok ? `${Math.round(health.arag.ms)} ms` : "Offline", shortId(health.arag.kbId))}
       ${kpi("Documents", health.documents.total, `${health.documents.degraded} degraded · ${health.documents.failed} failed`)}
@@ -231,16 +230,18 @@ async function overview() {
   $("#refresh", main).addEventListener("click", () => overview());
 }
 
+// The kit's stat strip styles its own direct children, so the tile carries `.label`/`.value`/
+// `.sub` itself rather than nesting an `.arag-kpi` (which would double the padding).
 const kpi = (labelText, value, sub) =>
-  `<div class="arag-kpi"><div class="label">${esc(labelText)}</div><div class="value">${esc(String(value))}</div><div class="sub">${esc(sub)}</div></div>`;
+  `<div><div class="label">${esc(labelText)}</div><div class="value">${esc(String(value))}</div><div class="sub">${esc(sub)}</div></div>`;
 
 const levelChip = (level) =>
   `<span class="arag-chip ${{ error: "danger", warn: "warn", info: "neutral", debug: "outline" }[level] ?? "neutral"}">${esc(level)}</span>`;
 
 // ── connection ───────────────────────────────────────────────────────────────
 async function connection() {
-  main.innerHTML = `<header class="dip-pagehead"><div class="dip-pagehead__row"><h1>Connection</h1>
-      <div class="dip-pagehead__actions">
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Connection</h1>
+      <div class="actions">
         <button class="arag-btn ghost" type="button" id="test">Test connection</button>
         <button class="arag-btn secondary" type="button" id="provAll">Re-provision all</button>
       </div></div></header><div id="body">${skeletonRows(4)}</div>`;
@@ -251,6 +252,7 @@ async function connection() {
   ]);
   const env = config.env ?? {};
   $("#body", main).innerHTML = `
+    <div id="connSettings" style="margin-bottom:16px"></div>
     <div class="arag-alert ${health.arag.ok ? "ok" : "error"}" style="margin-bottom:16px">
       ${health.arag.ok ? `Connected · ${Math.round(health.arag.ms)} ms · last tested ${esc(fmtAbsolute(new Date().toISOString()))}` : `Not responding — ${esc(health.arag.error ?? "unknown error")}`}
     </div>
@@ -264,16 +266,16 @@ async function connection() {
       <dt>Extract strategy</dt><dd>${health.extractStrategy ? `<span class="mono">${esc(health.extractStrategy)}</span>` : "none"}</dd>
     </dl></div></div>
     <h2>Stored ARAG search configurations (${stored.items.length})</h2>
-    <p class="muted small dip-prose">What the extraction agents actually run against — the model, the RAG strategy, the grounding prompt and the JSON schema — without opening the ARAG dashboard.</p>
-    <div class="dip-tablewrap"><div class="dip-tablescroll">
-    <table class="arag-table dip-datatable">
+    <p class="muted small arag-prose">What the extraction agents actually run against — the model, the RAG strategy, the grounding prompt and the JSON schema — without opening the ARAG dashboard.</p>
+    <div class="arag-datatable" id="storedTable"><div class="scroll">
+    <table class="arag-table">
       <thead><tr><th>Name</th><th>Kind</th><th>Model</th><th>Strategy</th></tr></thead>
       <tbody>${stored.items
         .map((s) => {
           const c = s.config ?? {};
           const strategies = (c.rag_strategies ?? []).map((r) => r.name).join(", ");
-          return `<tr data-cfg="${esc(s.name)}">
-            <td class="mono"><span class="dip-datatable__primary">${esc(s.name)}</span></td>
+          return `<tr data-cfg="${esc(s.name)}" data-id="${esc(s.name)}">
+            <td class="mono"><span class="cell-title">${esc(s.name)}</span></td>
             <td>${esc(s.kind)}</td><td class="small">${esc(c.generative_model ?? "KB default")}</td>
             <td class="small">${esc(strategies || "—")}</td></tr>`;
         })
@@ -282,17 +284,20 @@ async function connection() {
     ${stored.other?.length ? `<p class="muted small" style="margin-top:12px">Not created by this product (${stored.other.length}): ${esc(stored.other.join(", "))}</p>` : ""}
     <div id="provResult" style="margin-top:12px"></div>`;
 
-  for (const tr of $$("tr[data-cfg]", main)) {
-    tr.addEventListener("click", () => {
-      const item = stored.items.find((s) => s.name === tr.dataset.cfg);
+  await mountSettings($("#connSettings", main), "connection", connection);
+
+  // Row activation comes from the kit: delegated, so it survives the table being re-rendered.
+  wireTable($("#storedTable", main), {
+    onOpen: (name) => {
+      const item = stored.items.find((s) => s.name === name);
       const d = openDrawer({
         wide: true,
         title: `<span class="mono">${esc(item.name)}</span>`,
         body: '<arag-json id="cfgJson"></arag-json>',
       });
       $("#cfgJson", d.host).data = item.config;
-    });
-  }
+    },
+  });
   $("#test", main).addEventListener("click", async () => {
     const h = await api("/api/v1/admin/health");
     toast(
@@ -310,24 +315,24 @@ async function connection() {
 
 // ── configs ──────────────────────────────────────────────────────────────────
 async function configs() {
-  main.innerHTML = `<header class="dip-pagehead"><div class="dip-pagehead__row"><h1>Configs</h1>
-    <div class="dip-pagehead__actions"><button class="arag-btn secondary" type="button" id="provAll">Re-provision all</button></div>
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Configs</h1>
+    <div class="actions"><button class="arag-btn secondary" type="button" id="provAll">Re-provision all</button></div>
   </div></header><div id="body">${skeletonRows(5)}</div>`;
   const { items } = await api("/api/v1/extraction-configs");
   $("#body", main).innerHTML = `
-    <div class="dip-tablewrap"><div class="dip-tablescroll">
-    <table class="arag-table dip-datatable">
-      <thead><tr><th>Name</th><th>Kind</th><th>Fields</th><th>ARAG configuration</th><th>Documents</th><th>State</th><th class="dip-datatable__actions"><span class="sr-only">Actions</span></th></tr></thead>
+    <div class="arag-datatable"><div class="scroll">
+    <table class="arag-table">
+      <thead><tr><th>Name</th><th>Kind</th><th>Fields</th><th>ARAG configuration</th><th>Documents</th><th>State</th><th class="rowactions"><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${items
         .map(
           (c) => `<tr data-id="${esc(c.id)}">
-          <td><span class="dip-datatable__primary">${esc(c.name)}</span><span class="dip-datatable__sub">${esc(c.description)}</span></td>
+          <td><span class="cell-title">${esc(c.name)}</span><span class="cell-sub">${esc(c.description)}</span></td>
           <td>${c.builtin ? "Built in" : "Custom"}</td>
           <td class="num">${c.fields.length}</td>
           <td class="mono small">${esc(c.aragConfig)}</td>
           <td class="num">${c.documentCount ?? 0}</td>
           <td>${c.provisioned ? '<span class="arag-chip ok">Ready</span>' : '<span class="arag-chip warn">Not provisioned</span>'}</td>
-          <td class="dip-datatable__actions"><button class="arag-btn ghost sm" type="button" data-prov="${esc(c.id)}">Re-provision</button></td>
+          <td class="rowactions"><button class="arag-btn ghost sm" type="button" data-prov="${esc(c.id)}">Re-provision</button></td>
         </tr>`,
         )
         .join("")}</tbody>
@@ -354,10 +359,10 @@ async function configs() {
 // ── jobs ─────────────────────────────────────────────────────────────────────
 async function jobs(ctx) {
   const status = ctx.query.status ?? "";
-  main.innerHTML = `<header class="dip-pagehead"><div class="dip-pagehead__row"><h1>Jobs</h1>
-    <div class="dip-pagehead__actions"><button class="arag-btn ghost" type="button" id="reload">${icon("refresh")} Reload</button></div>
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Jobs</h1>
+    <div class="actions"><button class="arag-btn ghost" type="button" id="reload">${icon("refresh")} Reload</button></div>
   </div></header>
-  <div class="dip-filterbar">
+  <div class="arag-filterbar">
     <label class="sr-only" for="jstatus">Status</label>
     <select class="arag-select" id="jstatus">
       ${["", "queued", "running", "succeeded", "failed", "cancelled"]
@@ -371,26 +376,26 @@ async function jobs(ctx) {
   <div id="body">${skeletonRows(5)}</div>`;
   const res = await api(`/api/v1/jobs?page_size=50${status ? `&status=${status}` : ""}`);
   $("#body", main).innerHTML = res.items.length
-    ? `<div class="dip-tablewrap"><div class="dip-tablescroll">
-      <table class="arag-table dip-datatable">
+    ? `<div class="arag-datatable" id="adminJobsTable"><div class="scroll">
+      <table class="arag-table">
         <thead><tr><th>Job</th><th>Kind</th><th>Status</th><th>Stage</th><th>Started</th></tr></thead>
         <tbody>${res.items
           .map(
-            (j) => `<tr data-job="${esc(j.id)}">
+            (j) => `<tr data-job="${esc(j.id)}" data-id="${esc(j.id)}">
             <td class="mono small">${esc(j.id)}</td><td>${esc(j.kind)}</td><td>${jobChip(j.status)}</td>
             <td>${esc(j.stage ?? "—")}</td><td title="${esc(fmtAbsolute(j.createdAt))}">${esc(fmtRelative(j.createdAt))}</td></tr>`,
           )
           .join("")}</tbody>
       </table></div>
-      <div class="dip-tablefoot"><span class="muted small">${res.items.length} of ${res.total}</span></div></div>`
-    : emptyState({ iconName: "clock", title: "No jobs match these filters" });
+      <nav class="arag-pagination"><span class="range">${res.items.length} of ${res.total}</span></nav></div>`
+    : emptyState({ icon: "clock", title: "No jobs match these filters" });
   $("#reload", main).addEventListener("click", () => jobs(ctx));
   $("#jstatus", main).addEventListener("change", (e) =>
     navigate("/jobs", { status: e.target.value || undefined }),
   );
-  for (const tr of $$("tr[data-job]", main)) {
-    tr.addEventListener("click", async () => {
-      const job = await api(`/api/v1/jobs/${tr.dataset.job}`);
+  wireTable($("#adminJobsTable", main), {
+    onOpen: async (id) => {
+      const job = await api(`/api/v1/jobs/${id}`);
       const live = job.status === "queued" || job.status === "running";
       const d = openDrawer({
         wide: true,
@@ -422,105 +427,163 @@ async function jobs(ctx) {
           );
         }
       });
-    });
-  }
+    },
+  });
 }
 
 // ── logs ─────────────────────────────────────────────────────────────────────
-let tailTimer = null;
+/**
+ * The runtime log, paged on a stable sequence rather than tailed.
+ *
+ * A log has no stable page 2 — new records arrive at the head and shift everything — so the
+ * control is two directional buttons and a range statement, never `1 2 3 ›`. The client keeps
+ * a stack of the cursors it has used, so `Newer` returns to exactly the window it came from
+ * rather than re-querying into a window that has since moved.
+ */
+let followTimer = null;
+
 async function logs(ctx) {
-  clearInterval(tailTimer);
+  clearInterval(followTimer);
   const level = ctx.query.level ?? "";
   const contains = ctx.query.contains ?? "";
-  main.innerHTML = `<header class="dip-pagehead"><div class="dip-pagehead__row"><h1>Logs</h1>
-      <div class="dip-pagehead__actions">
-        <label class="arag-switch"><input type="checkbox" id="tail" /> Live tail</label>
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Logs</h1>
+      <div class="actions">
+        <label class="arag-switch"><input type="checkbox" id="follow" /> <span>Follow</span></label>
         <button class="arag-btn ghost" type="button" id="download">${icon("download")} Download</button>
       </div></div></header>
-    <div class="dip-filterbar${level || contains ? " has-filters" : ""}">
-      <label class="sr-only" for="level">Level</label>
-      <select class="arag-select" id="level">
-        ${["", "debug", "info", "warn", "error"].map((l) => `<option value="${l}"${l === level ? " selected" : ""}>${l ? l : "All levels"}</option>`).join("")}
-      </select>
-      <div class="dip-search">${icon("search")}
+    <div class="arag-filterbar">
+      <div class="arag-segmented" id="logLevel" aria-label="Level">
+        ${[
+          ["", "All"],
+          ["info", "Info"],
+          ["warn", "Warn"],
+          ["error", "Error"],
+        ]
+          .map(
+            ([v, t]) =>
+              `<button type="button" data-value="${v}" aria-selected="${v === level}">${t}</button>`,
+          )
+          .join("")}
+      </div>
+      <div class="arag-search">${icon("search")}
         <label class="sr-only" for="contains">Contains</label>
         <input class="arag-input" id="contains" type="search" value="${esc(contains)}" placeholder="contains…" />
       </div>
-      <span class="dip-filterbar__spacer"></span>
+      <span class="spacer"></span>
       <span class="muted small" id="count"></span>
-      <button class="arag-btn ghost sm dip-filterbar__clear" type="button" id="clear">Clear filters</button>
+      ${level || contains ? '<button class="arag-btn ghost sm" type="button" id="clear">Clear filters</button>' : ""}
     </div>
-    <div id="body">${skeletonRows(6)}</div>`;
+    <div id="followNote"></div>
+    <div id="body">${skeletonRows(8)}</div>`;
 
   let rows = [];
-  const load = async () => {
-    const p = new URLSearchParams({ limit: "200" });
-    if (level) p.set("level", level);
-    if (contains) p.set("contains", contains);
-    rows = (await api(`/api/v1/admin/logs?${p}`)).items;
-    $("#count", main).textContent = `${rows.length} lines`;
+  let atHead = true;
+
+  const load = async (cursor, direction) => {
+    const qs = new URLSearchParams({ limit: "200" });
+    if (level) qs.set("level", level);
+    if (contains) qs.set("contains", contains);
+    if (cursor) {
+      qs.set("cursor", cursor);
+      qs.set("direction", direction);
+    }
+    const page = await api(`/api/v1/admin/logs?${qs}`);
+    rows = page.items;
+    atHead = !cursor || !page.hasMore;
+    $("#count", main).textContent = `${page.total} line${page.total === 1 ? "" : "s"} kept`;
     $("#body", main).innerHTML = rows.length
-      ? `<div class="dip-tablewrap"><div class="dip-tablescroll"><table class="arag-table dip-datatable">
-          <thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead>
-          <tbody>${rows
-            .slice()
-            .reverse()
-            .map(
-              (
-                l,
-                i,
-              ) => `<tr data-line="${i}"><td class="mono small" style="width:1%;white-space:nowrap">${esc(String(l.ts).slice(11, 23))}</td>
-              <td style="width:1%">${levelChip(l.level)}</td>
-              <td class="small">${esc(l.msg)} <span class="subtle">${esc(summarise(l))}</span></td></tr>`,
-            )
-            .join("")}</tbody></table></div></div>`
+      ? `<div class="arag-datatable"><div class="arag-log dip-logpane" role="log" aria-live="off" tabindex="0" id="logPane">
+            ${rows.map(logLine).join("")}
+          </div>
+          <nav class="arag-pagination">
+            <button type="button" id="logNewer"${page.hasMore ? "" : " disabled"} aria-label="Show newer log lines">‹ Newer</button>
+            <span class="range">${rows.length} lines · ${esc(String(rows[0].ts).slice(11, 19))} to ${esc(
+              String(rows[rows.length - 1].ts).slice(11, 19),
+            )}</span>
+            <button type="button" id="logOlder"${page.hasPrev ? "" : " disabled"} aria-label="Show older log lines">Older ›</button>
+            ${page.hasPrev ? "" : '<span class="muted">The oldest record this deployment keeps.</span>'}
+          </nav></div>`
       : emptyState({
-          iconName: "search",
-          title: "No log lines match",
-          actions: '<button class="arag-btn secondary" type="button" id="clear2">Clear filters</button>',
+          icon: "search",
+          title: level || contains ? "No log lines match these filters" : "No log records yet",
+          body:
+            level || contains
+              ? "Widen the level or clear the search."
+              : "Records appear as the service handles requests and runs jobs.",
+          actions:
+            level || contains
+              ? '<button class="arag-btn secondary" type="button" id="clear2">Clear filters</button>'
+              : "",
         });
     $("#clear2", main)?.addEventListener("click", () => navigate("/logs", {}));
-    const reversed = rows.slice().reverse();
-    for (const tr of $$("tr[data-line]", main)) {
-      tr.addEventListener("click", () => {
+    for (const el of $$("#logPane .line", main)) {
+      el.addEventListener("click", () => {
         const d = openDrawer({ title: "Log record", body: '<arag-json id="lj"></arag-json>' });
-        $("#lj", d.host).data = reversed[Number(tr.dataset.line)];
+        $("#lj", d.host).data = rows[Number(el.dataset.line)];
+      });
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          el.click();
+        }
       });
     }
+    // Reading back through an incident and having lines prepended under the cursor is the
+    // failure this pauses; the reason is stated rather than the button quietly doing nothing.
+    $("#followNote", main).innerHTML = atHead
+      ? ""
+      : `<div class="arag-alert" style="margin-bottom:12px">Following is paused while you are looking at
+           older lines. <button class="arag-btn ghost sm" type="button" id="toHead">Jump to the latest</button></div>`;
+    $("#toHead", main)?.addEventListener("click", () => load());
+    // The cursors the server just returned bound this exact window, so paging back lands on
+    // the window it came from rather than re-querying into one that has since moved.
+    $("#logOlder", main)?.addEventListener("click", async () => {
+      await load(page.prevCursor, "older");
+      $("#logPane", main)?.focus();
+      announce(`${rows.length} lines, older.`);
+    });
+    $("#logNewer", main)?.addEventListener("click", async () => {
+      await load(page.nextCursor, "newer");
+      $("#logPane", main)?.focus();
+      announce(`${rows.length} lines, newer.`);
+    });
   };
   await load();
 
-  $("#level", main).addEventListener("change", (e) =>
-    navigate("/logs", { ...ctx.query, level: e.target.value || undefined }),
-  );
+  wireSegmented($("#logLevel", main), (value) => {
+    if (value === level) return;
+    navigate("/logs", { ...ctx.query, level: value || undefined });
+  });
   let deb;
   $("#contains", main).addEventListener("input", (e) => {
     clearTimeout(deb);
     const v = e.target.value;
     deb = setTimeout(() => navigate("/logs", { ...ctx.query, contains: v || undefined }), 300);
   });
-  $("#clear", main).addEventListener("click", () => navigate("/logs", {}));
-  // A toggle, not an unconditional poll: a log pane that refreshes while it is being read
-  // is unreadable.
-  $("#tail", main).addEventListener("change", (e) => {
-    clearInterval(tailTimer);
-    if (e.target.checked)
-      tailTimer = setInterval(
-        () => (document.getElementById("body") ? load() : clearInterval(tailTimer)),
-        4000,
-      );
+  $("#clear", main)?.addEventListener("click", () => navigate("/logs", {}));
+  $("#follow", main).addEventListener("change", (e) => {
+    clearInterval(followTimer);
+    if (!e.target.checked) return;
+    if (!atHead) load();
+    followTimer = setInterval(() => {
+      if (!document.getElementById("body")) return clearInterval(followTimer);
+      if (!atHead) return;
+      load();
+    }, 3000);
   });
-  $("#download", main).addEventListener("click", () => {
-    const ndjson = rows.map((r) => JSON.stringify(r)).join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([ndjson], { type: "application/x-ndjson" }));
-    a.download = `logs-${new Date().toISOString().slice(0, 19)}.ndjson`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  });
+  onLeave(() => clearInterval(followTimer));
+  $("#download", main).addEventListener("click", () => downloadNdjson(rows, "logs"));
 }
 
-/** The structured fields of a log record, minus the three the table already shows. */
+/** The level is a word in the line, not a colour: the pane reads correctly with no colour. */
+const logLine = (l, i) =>
+  `<div class="line" data-line="${i}" role="button" tabindex="0">
+     <span class="mono">${esc(String(l.ts).slice(11, 23))}</span>
+     <span class="lvl-${esc(l.level)}">${esc(String(l.level).toUpperCase())}</span>
+     <span>${esc(l.msg)} <span class="subtle">${esc(summarise(l))}</span></span>
+   </div>`;
+
+/** The structured fields of a log record, minus the three the line already shows. */
 const summarise = (record) => {
   const rest = { ...record };
   for (const k of ["ts", "level", "msg"]) delete rest[k];
@@ -530,7 +593,7 @@ const summarise = (record) => {
 
 // ── usage ────────────────────────────────────────────────────────────────────
 async function usage() {
-  main.innerHTML = `<header class="dip-pagehead"><div class="dip-pagehead__row"><h1>Usage</h1></div></header><div id="body">${skeletonRows(4)}</div>`;
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Usage</h1></div></header><div id="body">${skeletonRows(4)}</div>`;
   const [u, docs] = await Promise.all([api("/api/v1/admin/usage"), api("/api/v1/documents?page_size=200")]);
   // Documents per day for the last fortnight, derived from the records themselves. No
   // ARAG-calls time series is drawn: the counters are cumulative since boot, and a chart
@@ -548,7 +611,7 @@ async function usage() {
   const max = Math.max(1, ...days.map((d) => d.count));
 
   $("#body", main).innerHTML = `
-    <div class="dip-statstrip">
+    <div class="arag-statstrip">
       ${kpi("Requests", u.requests, `uptime ${Math.round(u.uptimeSec / 60)} min`)}
       ${kpi("ARAG calls", u.aragCalls, `${Math.round(u.aragMs)} ms total`)}
       ${kpi("ARAG errors", u.aragErrors, `${u.aragConflicts} expected provisioning conflicts`)}
@@ -580,117 +643,279 @@ async function usage() {
 }
 
 // ── branding ─────────────────────────────────────────────────────────────────
+/**
+ * The same form the operator app's Settings → Branding renders, beside the same preview.
+ * The screen stays where a partner's operator learned to find it; what changed is that it
+ * is now a form rather than a list of environment variables with an apology under it.
+ */
 async function branding() {
-  const [cfg, b] = await Promise.all([api("/api/v1/admin/config"), api("/api/v1/branding")]);
-  const row = (name, value, variable) =>
-    `<dt>${esc(name)}<br /><span class="mono small subtle">${esc(variable)}</span></dt><dd>${value}</dd>`;
-  main.innerHTML = `<header class="dip-pagehead"><div class="dip-pagehead__row"><h1>Branding</h1></div>
-      <p class="dip-pagehead__sub">Read-only: branding is environment configuration, and a form that appeared to save but could not would be a lie.</p>
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Branding</h1></div>
+      <p class="sub">White-label presentation only. Values set here override the BRAND_* environment
+        defaults, take effect on the next request and are audited.</p>
     </header>
-    <div class="dip-split">
-      <div class="arag-card"><div class="head"><h3>Effective values</h3></div><div class="body">
-        <dl class="arag-kv">
-          ${row("Product name", esc(b.productName), "BRAND_PRODUCT_NAME")}
-          ${row("Tagline", esc(b.tagline || "—"), "BRAND_TAGLINE")}
-          ${row("Logo", b.logoUrl ? `<span class="mono small">${esc(b.logoUrl)}</span>` : "Default Progress wordmark", "BRAND_LOGO_URL")}
-          ${row("Primary colour", b.primaryColor ? `<span class="dip-swatch" style="background:${esc(b.primaryColor)}"></span><span class="mono">${esc(b.primaryColor)}</span>` : "Kit default", "BRAND_PRIMARY_COLOR")}
-          ${row("Accent colour", b.accentColor ? `<span class="dip-swatch" style="background:${esc(b.accentColor)}"></span><span class="mono">${esc(b.accentColor)}</span>` : "Kit default", "BRAND_ACCENT_COLOR")}
-          ${row("Powered-by credit", b.poweredBy ? "Shown" : "Hidden", "BRAND_POWERED_BY")}
-          ${row("Footer", esc(b.footerText || "Open source · Apache-2.0"), "BRAND_FOOTER_TEXT")}
-          ${row("Docs URL", esc(b.docsUrl || "—"), "BRAND_DOCS_URL")}
-          ${row("Support URL", esc(b.supportUrl || "—"), "BRAND_SUPPORT_URL")}
-        </dl>
-        <p class="muted small" style="margin-top:12px">${esc(cfg.branding?.howToChange ?? "")}</p>
-      </div></div>
-      <div class="arag-card"><div class="head"><h3>Preview</h3></div><div class="body">
-        <div class="arag-band" style="border-radius:var(--arag-radius);border-bottom:2px solid var(--dip-progress-green)">
-          <div class="arag-container" style="max-width:none;padding:0 12px">
-            <span class="brand"><img src="/brand/arag-logo-alt.svg" alt="" style="height:16px" /></span>
-          </div>
-        </div>
-        <div class="dip-brandmark" style="padding:12px 0">
-          <span class="dip-brandmark__stack">
-            <img src="${esc(b.logoUrl || "/brand/arag-logo.svg")}" alt="" style="height:20px" />
-            <span class="dip-brandmark__name">${esc(b.productName)}</span>
-          </span>
-        </div>
+    <div class="arag-split">
+      <div id="brandForm">${skeletonRows(6)}</div>
+      <div class="arag-card" id="brandPreview"></div>
+    </div>`;
+  const host = $("#brandForm", main);
+  const ctx = await mountSettings(host, "branding", branding);
+  const b = await api("/api/v1/branding").catch(() => ({}));
+  const preview = $("#brandPreview", main);
+  const read = () => {
+    const out = { ...b };
+    for (const row of $$(".dip-setting[data-key]", host)) {
+      const el = $("[data-control]", row);
+      if (!el) continue;
+      out[row.dataset.key.split(".")[1]] = row.dataset.type === "boolean" ? el.checked : el.value;
+    }
+    return out;
+  };
+  const repaint = () => {
+    const v = read();
+    preview.innerHTML = `
+      <div class="head"><h3>Preview</h3></div>
+      <div class="body">
+        ${brandPreviewHead(v)}
         <div class="arag-row" style="margin:12px 0">
           <button class="arag-btn" type="button">Primary</button>
           <button class="arag-btn secondary" type="button">Secondary</button>
         </div>
-        <div class="dip-chips">
+        <div class="arag-chips">
           <span class="arag-chip ok">Ready</span><span class="arag-chip warn">Degraded</span>
           <span class="arag-chip danger">Failed</span><span class="arag-chip info">Processing</span>
         </div>
-        <p class="muted small" style="margin-top:12px">Status, verification and grounding colours are never branded: a partner may recolour their product, but not the evidence.</p>
-      </div></div>
-    </div>`;
+        <p class="muted small" style="margin-top:12px">Status, verification, grounding and validation
+          colours are <strong>never branded</strong>: a partner may recolour their product, but not the
+          evidence.</p>
+      </div>`;
+  };
+  repaint();
+  for (const el of $$("[data-control]", host)) {
+    el.addEventListener("input", repaint);
+    el.addEventListener("change", repaint);
+  }
+  void ctx;
 }
 
 // ── security ─────────────────────────────────────────────────────────────────
 async function security() {
-  main.innerHTML = `<header class="dip-pagehead"><div class="dip-pagehead__row"><h1>Security</h1></div></header><div id="body">${skeletonRows(3)}</div>`;
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Security</h1></div>
+      <p class="sub">The credentials in force, and the retention that limits how long anything is kept.</p>
+    </header>
+    <div class="arag-stack" id="body">${skeletonRows(4)}</div>`;
+  const body = $("#body", main);
   const s = await api("/api/v1/admin/security");
-  $("#body", main).innerHTML = `
-    <div class="arag-stack">
-      <div class="arag-card"><div class="head"><h3>Credentials</h3></div><div class="body">
-        <dl class="arag-kv">
-          <dt>API keys</dt><dd>${s.apiKeys.count ? `${s.apiKeys.count} configured · ${s.apiKeys.hints.map((h) => `<span class="mono">${esc(h)}</span>`).join(" ")}` : "None — the public API is open for reads and uploads"}</dd>
-          <dt>Admin token</dt><dd>${s.adminTokenSet ? "Set" : "Not set"}</dd>
-          <dt>Session cookie</dt><dd>${Math.round(s.sessionTtlSec / 3600)} h, SameSite=Lax, HttpOnly</dd>
-          <dt>Writes</dt><dd>${s.writesRequireCredential ? "Always require a credential — deletes and config creation, even when API_KEYS is unset" : "Open"}</dd>
-        </dl>
-        <p class="muted small" style="margin-top:12px">API keys are set with the <span class="mono">API_KEYS</span> environment variable; there is no key store, so they cannot be created or revoked from here.</p>
-      </div></div>
-      <div class="arag-card"><div class="head"><h3>Request protection</h3></div><div class="body">
-        <dl class="arag-kv">
-          <dt>Rate limit</dt><dd>${s.rateLimit.rps > 0 ? `${s.rateLimit.rps} req/s, burst ${s.rateLimit.burst}` : "Disabled (RATE_LIMIT_RPS is 0)"}</dd>
-          <dt>CORS</dt><dd>${s.cors.length ? esc(s.cors.join(", ")) : "same-origin only"}</dd>
-          <dt>Max upload</dt><dd>${esc(fmtBytes(s.maxUploadBytes))}</dd>
-          <dt>Max body</dt><dd>${esc(fmtBytes(s.maxBodyBytes))}</dd>
-          <dt>Headers</dt><dd>${Object.entries(s.headers)
-            .filter(([, v]) => v)
-            .map(([k]) => k.toUpperCase())
-            .join(", ")} on</dd>
-          <dt>Trusted proxy</dt><dd>${esc(s.trustProxy)}</dd>
-        </dl>
-      </div></div>
-      <div class="arag-card dip-danger-zone"><div class="head"><h3>Retention</h3></div><div class="body">
-        <div class="arag-row">
-          <label class="arag-label" for="days">Delete documents older than</label>
-          <input class="arag-input" id="days" type="number" min="0" max="3650" value="${s.retention.defaultOlderThanDays}" style="width:90px" />
-          <span class="muted">days</span>
-          <button class="arag-btn ghost" type="button" id="preview">Preview</button>
-          <button class="arag-btn danger" type="button" id="purge" disabled>Purge</button>
-        </div>
-        <div id="purgeResult" style="margin-top:12px"><p class="muted small">Preview first: nothing is deleted until the exact count and date range have been shown.</p></div>
-      </div></div>
-    </div>`;
+  body.innerHTML = `
+    <div id="secForm"></div>
+    <div class="arag-card"><div class="head"><h3>Posture</h3></div><div class="body">
+      <dl class="arag-kv">
+        <dt>API keys</dt><dd>${
+          s.apiKeys.count
+            ? `${s.apiKeys.count} in force · ${s.apiKeys.hints.map((h) => `<span class="mono">${esc(h)}</span>`).join(" ")}`
+            : "None — the public API is open for reads and uploads"
+        } · <a href="/#/settings/keys">Create and revoke keys ›</a></dd>
+        <dt>Admin token</dt><dd>${s.adminTokenSet ? "Set" : "Not set"}</dd>
+        <dt>Session cookie</dt><dd>${Math.round(s.sessionTtlSec / 3600)} h, SameSite=Lax, HttpOnly</dd>
+        <dt>Writes</dt><dd>${
+          s.writesRequireCredential
+            ? "Always require a credential — deletes, config creation and field corrections, even when API_KEYS is unset"
+            : "Open"
+        }</dd>
+        <dt>Rate limit</dt><dd>${
+          s.rateLimit.rps > 0
+            ? `${s.rateLimit.rps} req/s, burst ${s.rateLimit.burst}`
+            : "Disabled (0 means no limit)"
+        }</dd>
+        <dt>CORS</dt><dd>${s.cors.length ? esc(s.cors.join(", ")) : "same-origin only"}</dd>
+        <dt>Max upload</dt><dd>${esc(fmtBytes(s.maxUploadBytes))}</dd>
+        <dt>Max body</dt><dd>${esc(fmtBytes(s.maxBodyBytes))}</dd>
+        <dt>Headers</dt><dd>${Object.entries(s.headers)
+          .filter(([, v]) => v)
+          .map(([k]) => k.toUpperCase())
+          .join(", ")} on</dd>
+        <dt>Trusted proxy</dt><dd>${esc(s.trustProxy)}</dd>
+      </dl>
+      <p class="muted small" style="margin-top:12px">Key values never leave the process: the count and
+        the prefix are what an operator needs to tell keys apart.</p>
+    </div></div>
+    <div id="retForm"></div>
+    <div id="purgeCard"></div>`;
+  await mountSettings($("#secForm", main), "security", security);
+  await mountSettings($("#retForm", main), "retention", security);
+  mountPurge($("#purgeCard", main), { editable: true, defaultDays: s.retention.defaultOlderThanDays });
+}
 
-  let previewed = null;
-  $("#preview", main).addEventListener("click", async () => {
-    const olderThanDays = Number($("#days", main).value);
-    previewed = await api("/api/v1/admin/purge", { method: "POST", json: { olderThanDays, dryRun: true } });
-    $("#purge", main).disabled = previewed.wouldDelete === 0;
-    $("#purgeResult", main).innerHTML = previewed.wouldDelete
-      ? `<div class="arag-alert warn"><strong>${previewed.wouldDelete} document${previewed.wouldDelete === 1 ? "" : "s"}</strong> would be deleted from the store and the Knowledge Box —
-           created between ${esc(fmtAbsolute(previewed.oldest))} and ${esc(fmtAbsolute(previewed.newest))}. Nothing has been deleted yet.</div>`
-      : '<div class="arag-alert ok">No documents are older than that. Nothing would be deleted.</div>';
-  });
-  $("#purge", main).addEventListener("click", async () => {
-    const olderThanDays = Number($("#days", main).value);
-    const ok = await confirmDialog({
-      title: "Purge documents",
-      body: `<p><strong>${previewed.wouldDelete} document${previewed.wouldDelete === 1 ? "" : "s"}</strong> will be deleted from the store and from the Knowledge Box. This cannot be undone.</p>`,
-      confirmLabel: `Purge ${previewed.wouldDelete}`,
-      typed: "DELETE",
+// ── audit ────────────────────────────────────────────────────────────────────
+/**
+ * Who changed what, when — the record the brief asks for beside "every setting is editable".
+ * Newest first, cursor-paged like the runtime log, and filterable by action and actor. The
+ * before → after values arrive redacted: a settings change records that a secret changed,
+ * never what it changed to.
+ */
+async function audit(ctx) {
+  const action = ctx.query.action ?? "";
+  const actor = ctx.query.actor ?? "";
+  main.innerHTML = `<header class="arag-pagehead"><div class="row"><h1>Audit</h1>
+      <div class="actions"><button class="arag-btn ghost" type="button" id="auditDownload">${icon("download")} Download</button></div>
+    </div>
+    <p class="sub">Every settings change, key creation, revocation, provision, purge and field correction,
+      with the actor and the before → after values. Secrets are redacted to <span class="mono">***</span>.</p>
+    </header>
+    <div class="arag-filterbar">
+      <label class="sr-only" for="auditAction">Action</label>
+      <select class="arag-select" id="auditAction"><option value="">All actions</option></select>
+      <label class="sr-only" for="auditActor">Actor</label>
+      <select class="arag-select" id="auditActor">
+        ${["", "admin", "api-key", "session", "system", "anonymous"]
+          .map(
+            (a) =>
+              `<option value="${a}"${a === actor ? " selected" : ""}>${a ? esc(label(a)) : "Any actor"}</option>`,
+          )
+          .join("")}
+      </select>
+      <span class="spacer"></span>
+      <span class="muted small" id="auditTotal"></span>
+      ${action || actor ? '<button class="arag-btn ghost sm" type="button" id="auditClear">Clear filters</button>' : ""}
+    </div>
+    <div id="body">${skeletonRows(6)}</div>`;
+
+  let rows = [];
+
+  const load = async (cursor, direction) => {
+    const qs = new URLSearchParams({ limit: "50" });
+    if (action) qs.set("action", action);
+    if (actor) qs.set("actor", actor);
+    if (cursor) {
+      qs.set("cursor", cursor);
+      qs.set("direction", direction);
+    }
+    const page = await api(`/api/v1/admin/audit?${qs}`);
+    rows = page.items;
+    const select = $("#auditAction", main);
+    if (select.options.length === 1) {
+      for (const a of page.actions ?? []) {
+        const opt = document.createElement("option");
+        opt.value = a;
+        opt.textContent = a;
+        opt.selected = a === action;
+        select.appendChild(opt);
+      }
+    }
+    $("#auditTotal", main).textContent = `${page.total} record${page.total === 1 ? "" : "s"}`;
+    $("#body", main).innerHTML = rows.length
+      ? `<div class="arag-datatable" id="auditTable"><div class="scroll"><table class="arag-table">
+          <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Change</th></tr></thead>
+          <tbody>${rows
+            .map(
+              (e, i) => `<tr data-id="${i}">
+                <td class="small" style="white-space:nowrap" title="${esc(fmtAbsolute(e.ts))}">${esc(fmtRelative(e.ts))}</td>
+                <td class="small">${esc(e.actor?.name ?? "—")}<span class="cell-sub">${esc(e.actor?.type ?? "")}</span></td>
+                <td class="mono small">${esc(e.action)}</td>
+                <td class="mono small">${esc(e.target)}</td>
+                <td class="small">${esc(summariseChange(e))}</td>
+              </tr>`,
+            )
+            .join("")}</tbody></table></div>
+          <nav class="arag-pagination">
+            <button type="button" id="auditNewer"${page.hasPrev ? "" : " disabled"} aria-label="Show newer audit records">‹ Newer</button>
+            <span class="range">${rows.length} of ${page.total} · ${esc(fmtAbsolute(rows[rows.length - 1].ts))} to ${esc(fmtAbsolute(rows[0].ts))}</span>
+            <button type="button" id="auditOlder"${page.hasMore ? "" : " disabled"} aria-label="Show older audit records">Older ›</button>
+            ${page.hasMore ? "" : '<span class="muted">The oldest record this deployment keeps.</span>'}
+          </nav></div>`
+      : emptyState({
+          icon: "shield",
+          title: action || actor ? "No audit records match these filters" : "No audit records yet",
+          body:
+            action || actor
+              ? "Records appear as settings, keys, configs and records are changed."
+              : "Records appear the first time somebody changes a setting, creates a key or corrects a field.",
+          actions:
+            action || actor
+              ? '<button class="arag-btn secondary" type="button" id="auditClear2">Clear filters</button>'
+              : "",
+        });
+    $("#auditClear2", main)?.addEventListener("click", () => navigate("/audit", {}));
+    wireTable($("#auditTable", main), {
+      onOpen: (i) => {
+        const e = rows[Number(i)];
+        const d = openDrawer({
+          wide: true,
+          title: `<span class="mono">${esc(e.action)}</span>`,
+          sub: `${esc(e.actor?.name ?? "")} · ${esc(fmtAbsolute(e.ts))}`,
+          body: '<arag-json id="auditJson"></arag-json>',
+        });
+        $("#auditJson", d.host).data = e;
+      },
     });
-    if (!ok) return;
-    const out = await api("/api/v1/admin/purge", { method: "POST", json: { olderThanDays } });
-    $("#purge", main).disabled = true;
-    $("#purgeResult", main).innerHTML =
-      `<div class="arag-alert ${out.failed.length ? "warn" : "ok"}">Deleted ${out.deleted.length} document${out.deleted.length === 1 ? "" : "s"}${out.failed.length ? `; ${out.failed.length} failed` : ""}.</div>`;
-  });
+    // Directional, never `1 2 3 ›`: an audit log has no stable page 2, because new records
+    // arrive at the head and shift everything. The cursors bound this exact window.
+    $("#auditOlder", main)?.addEventListener("click", async () => {
+      await load(page.nextCursor, "older");
+      $("#body", main).focus?.();
+      announce(`${rows.length} audit records, older.`);
+    });
+    $("#auditNewer", main)?.addEventListener("click", async () => {
+      await load(page.prevCursor, "newer");
+      announce(`${rows.length} audit records, newer.`);
+    });
+  };
+
+  await load();
+  $("#auditAction", main).addEventListener("change", (e) =>
+    navigate("/audit", { ...ctx.query, action: e.target.value || undefined }),
+  );
+  $("#auditActor", main).addEventListener("change", (e) =>
+    navigate("/audit", { ...ctx.query, actor: e.target.value || undefined }),
+  );
+  $("#auditClear", main)?.addEventListener("click", () => navigate("/audit", {}));
+  $("#auditDownload", main).addEventListener("click", () => downloadNdjson(rows, "audit"));
+}
+
+/** `before → after` in one cell; the drawer has the whole record. */
+function summariseChange(entry) {
+  const one = (v) =>
+    v === null || v === undefined
+      ? "—"
+      : typeof v === "object"
+        ? JSON.stringify(v).slice(0, 60)
+        : String(v).slice(0, 60);
+  if (entry.before === null && entry.after === null) return entry.detail ?? "";
+  return `${one(entry.before)} → ${one(entry.after)}${entry.detail ? ` · ${entry.detail}` : ""}`;
+}
+
+function downloadNdjson(rows, stem) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(
+    new Blob([rows.map((r) => JSON.stringify(r)).join("\n")], { type: "application/x-ndjson" }),
+  );
+  a.download = `${stem}-${new Date().toISOString().slice(0, 19)}.ndjson`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ── the shared settings form ─────────────────────────────────────────────────
+/**
+ * One group of `GET /api/v1/admin/settings`, rendered by the module the operator app uses.
+ * The console is always signed in, so there is no locked rendering here — but it is the same
+ * form, so an edit made in either place behaves identically and is audited identically.
+ */
+async function mountSettings(host, groupId, rerender) {
+  const loaded = await loadSettings();
+  const ctx = {
+    data: loaded.data,
+    editable: loaded.editable,
+    reload: async () => {
+      await rerender();
+    },
+    setDirty: () => {},
+  };
+  const group = ctx.data?.groups?.find((g) => g.id === groupId);
+  if (!group) {
+    host.innerHTML = errorState({ message: "The settings document did not describe this group." });
+    return ctx;
+  }
+  mountGroup(host, group, ctx);
+  return ctx;
 }
 
 // ── boot ─────────────────────────────────────────────────────────────────────
@@ -707,7 +932,7 @@ async function boot() {
     );
     return;
   }
-  mountShell();
+  mount();
   if (!router) {
     router = createRouter(
       [
@@ -716,6 +941,7 @@ async function boot() {
         ["/configs", withNav("configs", configs)],
         ["/jobs", withNav("jobs", jobs)],
         ["/logs", withNav("logs", logs)],
+        ["/audit", withNav("audit", audit)],
         ["/usage", withNav("usage", usage)],
         ["/branding", withNav("branding", branding)],
         ["/security", withNav("security", security)],

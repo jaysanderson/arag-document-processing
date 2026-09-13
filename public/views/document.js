@@ -10,10 +10,12 @@
 import {
   $,
   $$,
+  announce,
   api,
   buildHash,
   confirmDialog,
   docState,
+  emptyState,
   errorState,
   esc,
   failureAdvice,
@@ -27,14 +29,18 @@ import {
   menuButton,
   navigate,
   onLeave,
+  parseHash,
   pct,
   popover,
+  skeletonRows,
   sse,
   statusChip,
   toast,
   verifyOf,
+  wireSegmented,
   wireTabs,
 } from "../lib/core.js";
+import { canWrite } from "../lib/session.js";
 import { exportOne, reprocess } from "./documents.js";
 
 const TABS = [
@@ -44,6 +50,13 @@ const TABS = [
   ["ask", "Ask"],
   ["json", "JSON"],
 ];
+
+/**
+ * Compare is not a greyed tab waiting for something to exist: it appears when a generator
+ * agent has been provisioned for this document's config, and the place that provisions one
+ * is the config, where the schema it needs is defined.
+ */
+const COMPARE_TAB = ["compare", "Compare"];
 
 const STAGE_GLOSSARY = [
   [
@@ -103,7 +116,7 @@ let closeStream = null;
 export async function renderDocument(main, { params, query, stale }, tab = "") {
   closeStream?.();
   closeStream = null;
-  main.innerHTML = `<div class="dip-skeleton" style="width:40%"></div>${'<div class="dip-skeleton"></div>'.repeat(5)}`;
+  main.innerHTML = `<div class="arag-skeleton" style="width:40%"></div>${'<div class="arag-skeleton"></div>'.repeat(5)}`;
   let doc;
   try {
     doc = await api(`/api/v1/documents/${params.id}`);
@@ -124,28 +137,37 @@ export async function renderDocument(main, { params, query, stale }, tab = "") {
 
   const h = headline(doc);
   const title = [h.counterparty, h.identifier].filter(Boolean).join(" — ") || doc.filename;
+  const generator =
+    doc.status === "ready" && doc.meta?.config
+      ? await api(`/api/v1/extraction-configs/${encodeURIComponent(doc.meta.config)}/generator`)
+          .then((r) => r.agent ?? null)
+          .catch(() => null)
+      : null;
+  const tabs = generator || tab === "compare" ? [...TABS, COMPARE_TAB] : TABS;
   main.innerHTML = `
-    <header class="dip-pagehead">
-      <nav class="dip-breadcrumb" aria-label="Breadcrumb">
+    <header class="arag-pagehead">
+      <nav class="arag-breadcrumb" aria-label="Breadcrumb">
         <ol>
           <li><a href="${buildHash("/documents")}">Documents</a></li>
           <li aria-current="page" title="${esc(doc.filename)}">${esc(doc.filename)}</li>
         </ol>
       </nav>
-      <div class="dip-pagehead__row">
+      <div class="row">
         <h1>${esc(title)}</h1>
-        <div class="dip-pagehead__actions" id="docActions">
+        <div class="actions" id="docActions">
           <button class="arag-btn secondary" type="button" id="exportCsv">${icon("download")} Export CSV</button>
           <a class="arag-btn ghost" href="${buildHash(`/documents/${doc.id}/ask`)}">Ask</a>
         </div>
       </div>
     </header>
-    <div class="arag-tabs dip-tabs" role="tablist">
-      ${TABS.map(([slug, text]) => {
-        const href = buildHash(`/documents/${doc.id}${slug ? `/${slug}` : ""}`);
-        const on = slug === tab;
-        return `<a role="tab" href="${href}" aria-selected="${on}" tabindex="${on ? 0 : -1}">${esc(text)}</a>`;
-      }).join("")}
+    <div class="arag-tabs" role="tablist">
+      ${tabs
+        .map(([slug, text]) => {
+          const href = buildHash(`/documents/${doc.id}${slug ? `/${slug}` : ""}`);
+          const on = slug === tab;
+          return `<a role="tab" href="${href}" aria-selected="${on}" tabindex="${on ? 0 : -1}">${esc(text)}</a>`;
+        })
+        .join("")}
     </div>
     <div id="tabPanel" role="tabpanel" tabindex="0"></div>`;
 
@@ -165,12 +187,14 @@ export async function renderDocument(main, { params, query, stale }, tab = "") {
   );
 
   const panel = $("#tabPanel", main);
-  wireTabs($(".dip-tabs", main), panel);
+  const refresh = () => renderDocument(main, { params, query, stale: () => false }, tab);
+  wireTabs($(".arag-tabs", main), panel);
   if (tab === "source") await renderSource(panel, doc, query);
   else if (tab === "pipeline") await renderPipeline(panel, doc);
   else if (tab === "ask") renderAskTab(panel, doc);
-  else if (tab === "json") renderJson(panel, doc);
-  else renderRecord(panel, doc);
+  else if (tab === "json") await renderJson(panel, doc, query);
+  else if (tab === "compare") await renderCompare(panel, doc, refresh);
+  else renderRecord(panel, doc, query, refresh);
 
   // A document that is still moving should move on screen too — and the stream is closed
   // when the screen is left, not only when this screen renders again.
@@ -215,6 +239,17 @@ async function remove(doc) {
 
 // ── record tab ───────────────────────────────────────────────────────────────
 
+/**
+ * The trust strip's sentence.
+ *
+ * A corrected field is **not** excluded from the score. It stays in the denominator and
+ * counts in the numerator only when the value a reviewer typed is itself found in the
+ * document — which is exactly what the API re-checks when the correction lands. A score
+ * that rose because somebody typed over the evidence would be the most dishonest number
+ * this product could publish, and one that silently shrank its own denominator would be
+ * the second. The corrections are named alongside the ratio instead, so the reader can see
+ * both facts at once.
+ */
 function groundingStrip(doc) {
   const fields = doc.fields ?? [];
   const evidence = doc.evidence ?? [];
@@ -223,6 +258,8 @@ function groundingStrip(doc) {
   const near = evidence.filter((e) => e.verified === "normalised").length;
   const none = fields.length - exact - near;
   const score = doc.meta?.groundingScore;
+  const corrected = doc.meta?.correctedFields ?? new Set((doc.corrections ?? []).map((c) => c.field)).size;
+  const correctedNote = corrected ? ` · ${corrected} corrected by a reviewer` : "";
 
   let band = "strong";
   let scoreHtml = "";
@@ -233,8 +270,7 @@ function groundingStrip(doc) {
   } else if (!evidence.length) {
     // A missing measurement and a measured zero are different facts. Never show 0%.
     band = "none";
-    claim =
-      "No evidence returned. This record's fields are not backed by quotes — treat every value as unchecked.";
+    claim = `No evidence returned. This record's fields are not backed by quotes — treat every value as unchecked.${correctedNote}`;
   } else {
     const verified = fields.filter((f) => {
       const v = byField.get(f.key);
@@ -242,7 +278,7 @@ function groundingStrip(doc) {
     }).length;
     const ratio = typeof score === "number" ? score : verified / fields.length;
     band = ratio >= 0.85 ? "strong" : ratio >= 0.5 ? "partial" : "weak";
-    claim = `${verified} of ${fields.length} fields carry a quote found in this document.`;
+    claim = `${verified} of ${fields.length} fields carry a verified quote${correctedNote}.`;
     scoreHtml = `<div class="dip-grounding__score">
         <span class="dip-grounding__label">Grounding</span>
         <span class="dip-grounding__pct">${esc(pct(ratio))}</span>
@@ -296,15 +332,56 @@ function valueHtml(f) {
   return `${esc(String(v))} ${raw}`;
 }
 
-function fieldRow(doc, f, evidence, issues) {
+const flatValue = (v) => (Array.isArray(v) ? v.join(", ") : v === null || v === undefined ? "" : String(v));
+
+/** What the Knowledge Box now holds for a corrected field, stated rather than implied. */
+function kvNote(correction) {
+  const kv = correction?.kv;
+  if (!kv) return "";
+  if (!kv.written)
+    return `<p class="small dip-field__who"><strong>Not written to the Knowledge Box.</strong>
+        ${esc(kv.error ?? "The key-value write did not succeed.")} Filters and searches there still
+        see the extracted value.</p>`;
+  const stale = kv.filterIndexStale
+    ? ` The Knowledge Box's filter index also keeps the value this correction replaced, so a filter
+       on “${esc(flatValue(correction.previousValue))}” still matches this document.`
+    : "";
+  return `<p class="small dip-field__who">The Knowledge Box holds the corrected value, so filters and
+      searches see it.${stale} Who corrected it, when and why lives in this product's record and in the
+      audit log.</p>`;
+}
+
+function correctedMeta(correction) {
+  const when = new Date(correction.at).toLocaleString();
+  const why = correction.reason ? ` · ${esc(correction.reason)}` : "";
+  return `<p class="dip-field__who">Corrected by ${esc(correction.actor)} · ${esc(when)}${why}</p>`;
+}
+
+function fieldRow(
+  doc,
+  f,
+  evidence,
+  issues,
+  { correction = null, editing = false, writer = true, id = null } = {},
+) {
   const ev = evidence.get(f.key);
   const v = verifyOf(ev);
   const unverified = !ev || ev.verified === "unverified";
   const conf = typeof f.confidence === "number" ? Math.round(f.confidence * 100) : null;
   const mine = issues.filter((i) => i.field === f.key);
-  return `<div class="dip-field${unverified ? " dip-field--unverified" : ""}" id="field-${esc(f.key)}" tabindex="-1">
-    <div class="dip-field__label">${esc(f.label)}</div>
+  return `<div class="dip-field${unverified ? " dip-field--unverified" : ""}${
+    correction ? " is-corrected" : ""
+  }${editing ? " is-editing" : ""}" id="${esc(id ?? `field-${f.key}`)}" tabindex="-1">
+    <div class="dip-field__labelrow">
+      <div class="dip-field__label">${esc(f.label)}</div>
+      <span class="dip-field__actions" data-field-actions="${esc(f.key)}"></span>
+    </div>
     <div class="dip-field__value">${valueHtml(f)}</div>
+    ${
+      correction
+        ? `<div class="dip-field__was">was <b>${esc(flatValue(correction.previousValue) || "Not found")}</b> · extracted</div>`
+        : ""
+    }
     <div class="dip-field__meta">
       ${
         conf === null
@@ -312,17 +389,30 @@ function fieldRow(doc, f, evidence, issues) {
           : `<span class="dip-field__conf" title="How sure the model was of this value. It is not a check against the document.">
                <span class="arag-progress" role="img" aria-label="Confidence ${conf} per cent"><i style="width:${conf}%"></i></span> ${conf}%</span>`
       }
+      ${correction ? '<span class="arag-chip info">Corrected</span>' : ""}
       <span class="arag-chip ${v.cls}">${esc(v.text)}</span>
     </div>
     ${
       ev
         ? `<details class="dip-field__evidence"><summary>Evidence</summary>
              <blockquote class="dip-quote">“${esc(ev.quote)}”</blockquote>
+             ${
+               correction
+                 ? '<p class="small muted" style="margin:6px 0 0">This quote was found for the corrected value, so the field is still scored for grounding.</p>'
+                 : ""
+             }
              <a class="dip-field__jump" href="${buildHash(`/documents/${doc.id}/source`, { ev: f.key })}">${icon("external-link", { size: 13 })} Open in source</a>
            </details>`
-        : `<p class="small muted" style="margin:6px 0 0">This value is not backed by a quote from the document. Check it against the source before using it.
+        : correction
+          ? `<p class="small muted" style="margin:6px 0 0">The corrected value is not in this document's
+               text, so it carries no quote and it no longer counts towards the grounding score.
+               <a class="dip-field__jump" href="${buildHash(`/documents/${doc.id}/source`)}">Open source</a></p>`
+          : `<p class="small muted" style="margin:6px 0 0">This value is not backed by a quote from the document. Check it against the source before using it.
              <a class="dip-field__jump" href="${buildHash(`/documents/${doc.id}/source`)}">Open source</a></p>`
     }
+    ${correction ? correctedMeta(correction) : ""}
+    ${correction ? kvNote(correction) : ""}
+    ${editing ? editorHtml(f, ev, writer) : ""}
     ${mine
       .map(
         (i) =>
@@ -332,10 +422,92 @@ function fieldRow(doc, f, evidence, issues) {
   </div>`;
 }
 
-function renderRecord(panel, doc) {
+const REASONS = [
+  "Wrong value read from the page",
+  "The value is on a page that did not read cleanly",
+  "The document itself is wrong",
+  "Other — say why",
+];
+
+/**
+ * The editor is inline, never a drawer: the quote that supports the current value has to
+ * stay on screen beside the value being changed, or the reviewer is guessing.
+ */
+function editorHtml(f, ev, writer) {
+  const current = flatValue(f.value);
+  const kind = Array.isArray(f.value)
+    ? "list"
+    : typeof f.value === "number"
+      ? "number"
+      : typeof f.value === "boolean"
+        ? "boolean"
+        : "text";
+  const control =
+    kind === "boolean"
+      ? `<select class="arag-select" id="correctValue"><option value="true"${
+          f.value === true ? " selected" : ""
+        }>Yes</option><option value="false"${f.value === false ? " selected" : ""}>No</option></select>`
+      : `<input class="arag-input${kind === "number" ? "" : ""}" id="correctValue" type="${
+          kind === "number" ? "number" : "text"
+        }" step="any" value="${esc(current)}" data-kind="${kind}" />`;
+  return `<div class="dip-editor" data-editor="${esc(f.key)}">
+      <div class="arag-field">
+        <label for="correctValue">Correct the value of ${esc(f.label)}</label>
+        <div class="dip-editor__value">
+          ${control}
+          <span class="dip-editor__extracted">${
+            ev ? `extracted “${esc(ev.quote)}”` : "no quote was returned for the extracted value"
+          }</span>
+        </div>
+        ${kind === "list" ? '<p class="arag-help">Separate repeated values with commas.</p>' : ""}
+      </div>
+      <div class="arag-field">
+        <label for="correctReason">Why is it changing?</label>
+        <select class="arag-select" id="correctReason">
+          ${REASONS.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="arag-field" id="otherWrap" hidden>
+        <label for="correctOther">Say why</label>
+        <input class="arag-input" id="correctOther" maxlength="140" />
+      </div>
+      <p class="arag-help" id="correctHelp">The extracted value and its quote are kept. The new value is
+        re-checked against this document's own text: if it is there it earns a real quote, and if it is
+        not, the field loses its quote and the grounding score falls. This correction is recorded
+        against your session.</p>
+      <div id="correctError"></div>
+      <div class="dip-editor__actions">
+        <button class="arag-btn ghost" type="button" id="cancelCorrect">Cancel</button>
+        <button class="arag-btn" type="button" id="saveCorrect"${writer ? "" : " disabled"}>Save correction</button>
+      </div>
+    </div>`;
+}
+
+function renderRecord(panel, doc, query = {}, refresh = null) {
   const evidence = new Map((doc.evidence ?? []).map((e) => [e.field, e]));
   const issues = doc.issues ?? [];
   const fields = doc.fields ?? [];
+  const writer = canWrite();
+  // The newest correction per field is the one the row tells the story of; the whole list
+  // is the Pipeline tab's Corrections timeline.
+  const latest = new Map();
+  for (const c of doc.corrections ?? []) latest.set(c.field, c);
+  const editKey = typeof query.edit === "string" ? query.edit : "";
+  // An unverified field is *also* pinned into "Check these first", so it is rendered twice.
+  // The pinned copy takes its own id (`risk-<key>`) — leaving `field-<key>` unique for the
+  // issue anchors — and the editor is placed in whichever copy is rendered first, so there is
+  // never a second input claiming the same id.
+  const placed = new Set();
+  const rowOpts = (f, pinned = false) => {
+    const editing = editKey === f.key && !placed.has(f.key);
+    if (editing) placed.add(f.key);
+    return {
+      correction: latest.get(f.key) ?? null,
+      editing,
+      writer,
+      id: `${pinned ? "risk" : "field"}-${f.key}`,
+    };
+  };
   // Schema order, because a person reads an invoice in the shape of an invoice — with one
   // exception: an unverified field is pinned to the top, because trust beats familiarity.
   const risky = fields.filter((f) => {
@@ -348,20 +520,20 @@ function renderRecord(panel, doc) {
     ${groundingStrip(doc)}
     ${
       docState(doc) === "failed"
-        ? `<div class="arag-alert error dip-prose" role="alert"><strong>Processing failed.</strong> ${esc(doc.error ?? "")}<br />${esc(failureAdvice(doc.error))}
+        ? `<div class="arag-alert error arag-prose" role="alert"><strong>Processing failed.</strong> ${esc(doc.error ?? "")}<br />${esc(failureAdvice(doc.error))}
              <div style="margin-top:8px"><button class="arag-btn sm" type="button" id="retryDoc">Reprocess</button></div></div>`
         : ""
     }
     ${
       stageErrors.length
-        ? `<div class="arag-alert warn dip-prose"><strong>Degraded.</strong> ${esc(stageErrors.join("; "))}. The extracted fields are unaffected.
+        ? `<div class="arag-alert warn arag-prose"><strong>Degraded.</strong> ${esc(stageErrors.join("; "))}. The extracted fields are unaffected.
              <div style="margin-top:8px"><button class="arag-btn sm secondary" type="button" id="retryDoc2">Reprocess</button></div></div>`
         : ""
     }
     ${issues
       .filter((i) => i.severity !== "info")
       .map(
-        (i) => `<div class="arag-alert ${i.severity === "error" ? "error" : "warn"} dip-prose">
+        (i) => `<div class="arag-alert ${i.severity === "error" ? "error" : "warn"} arag-prose">
             <strong>${esc(label(i.field))}</strong> — ${esc(i.message)}
             ${consequence(i.message) ? `<div class="small" style="margin-top:4px">${esc(consequence(i.message))}</div>` : ""}
             <div style="margin-top:6px"><a href="#field-${esc(i.field)}" data-focus-field="${esc(i.field)}">Go to field ›</a></div>
@@ -369,12 +541,14 @@ function renderRecord(panel, doc) {
       )
       .join("")}
 
-    <div class="dip-split" style="margin-top:16px">
+    <div class="arag-split" style="margin-top:16px">
       <section>
         ${
           risky.length && fields.length
             ? `<h2>Check these first (${risky.length})</h2>
-               <div class="dip-fields">${risky.map((f) => fieldRow(doc, f, evidence, issues)).join("")}</div>`
+               <div class="dip-fields">${risky
+                 .map((f) => fieldRow(doc, f, evidence, issues, rowOpts(f, true)))
+                 .join("")}</div>`
             : ""
         }
         <h2>Extracted fields (${fields.length})</h2>
@@ -382,14 +556,14 @@ function renderRecord(panel, doc) {
           fields.length
             ? `<div class="dip-fields">${fields
                 .slice(0, FIELD_PREVIEW)
-                .map((f) => fieldRow(doc, f, evidence, issues))
+                .map((f) => fieldRow(doc, f, evidence, issues, rowOpts(f)))
                 .join("")}</div>
                ${
                  fields.length > FIELD_PREVIEW
                    ? `<details id="allFields"><summary class="arag-btn ghost sm" style="display:inline-flex;margin-top:12px">Show all fields (${fields.length - FIELD_PREVIEW} more)</summary>
                         <div class="dip-fields">${fields
                           .slice(FIELD_PREVIEW)
-                          .map((f) => fieldRow(doc, f, evidence, issues))
+                          .map((f) => fieldRow(doc, f, evidence, issues, rowOpts(f)))
                           .join("")}</div>
                       </details>`
                    : ""
@@ -403,8 +577,8 @@ function renderRecord(panel, doc) {
           <div class="body">
             ${
               doc.summary
-                ? `<p class="dip-prose">${esc(doc.summary)}</p>
-                   <div class="dip-chips">${(doc.tags ?? []).map((t) => `<span class="arag-chip neutral">${esc(t)}</span>`).join("")}</div>`
+                ? `<p class="arag-prose">${esc(doc.summary)}</p>
+                   <div class="arag-chips">${(doc.tags ?? []).map((t) => `<span class="arag-chip neutral">${esc(t)}</span>`).join("")}</div>`
                 : `<p class="muted">${stageErrors.some((s) => s.startsWith("summary")) ? "Not produced — the summary stage failed." : "No summary was produced."}</p>`
             }
           </div>
@@ -414,7 +588,7 @@ function renderRecord(panel, doc) {
           <div class="body">
             ${
               (doc.entities ?? []).length
-                ? `<div class="dip-chips">${doc.entities
+                ? `<div class="arag-chips">${doc.entities
                     .slice(0, 24)
                     .map((e) => `<span class="dip-entity"><b>${esc(e.type)}</b>${esc(e.text)}</span>`)
                     .join("")}</div>`
@@ -430,7 +604,7 @@ function renderRecord(panel, doc) {
               <dt>Schema</dt><dd class="mono">${esc(doc.meta?.schema ?? "—")}</dd>
               <dt>Model</dt><dd>${esc(doc.meta?.model ?? "—")}</dd>
               <dt>ARAG config</dt><dd class="mono">${esc(doc.meta?.searchConfiguration ?? "—")}</dd>
-              <dt>Source</dt><dd>${doc.meta?.sourceChars ? `${doc.meta.sourceChars.toLocaleString()} characters` : "—"} · ${esc(fmtBytes(doc.bytes))}</dd>
+              <dt>Source</dt><dd>${doc.meta?.sourceChars ? `${doc.meta.sourceChars.toLocaleString()} characters` : "—"} · ${doc.bytes == null ? "—" : esc(fmtBytes(doc.bytes))}</dd>
               <dt>Run</dt><dd>${esc(fmtAbsolute(doc.meta?.processedAt))}</dd>
               <dt>Document id</dt><dd class="mono small">${esc(doc.id)}</dd>
             </dl>
@@ -451,9 +625,12 @@ function renderRecord(panel, doc) {
     popover(
       e.currentTarget,
       `<p>Each extracted value is asked for with the sentence that supports it. We then look for that sentence in the text Progress Agentic RAG read from your document.</p>
-       <p><strong>Exact</strong> means we found it character for character; <strong>near match</strong> means we found it after ignoring case, spacing and punctuation; <strong>no quote</strong> means we did not find it, or the model returned none.</p>`,
+       <p><strong>Exact</strong> means we found it character for character; <strong>near match</strong> means we found it after ignoring case, spacing and punctuation; <strong>no quote</strong> means we did not find it, or the model returned none.</p>
+       <p>A field a reviewer corrected stays in this count. It earns its place in the numerator only if the value they typed is itself in the document — so a correction can lower this score, and typing over the evidence can never raise it.</p>
+       <p>The Knowledge Box holds the corrected value, so filters and searches see it. Who corrected it, when and why lives in this product's record and in the audit log.</p>`,
     );
   });
+  wireCorrections(panel, doc, latest, editKey, writer, refresh);
   for (const a of $$("[data-focus-field]", panel)) {
     a.addEventListener("click", (e) => {
       e.preventDefault();
@@ -471,6 +648,142 @@ function renderRecord(panel, doc) {
   for (const id of ["retryDoc", "retryDoc2"]) {
     $(`#${id}`, panel)?.addEventListener("click", () => reprocess(doc, null));
   }
+}
+
+// ── correction ───────────────────────────────────────────────────────────────
+
+/**
+ * The row menu and the inline editor.
+ *
+ * `?edit=<fieldKey>` lives in the hash, so Back cancels an edit and a link can open a record
+ * with one field ready to correct. The menu is not an always-visible pencil: a persistent
+ * edit affordance on every field makes a checked record read as a draft.
+ */
+function wireCorrections(panel, doc, latest, editKey, writer, refresh) {
+  const byKey = new Map((doc.fields ?? []).map((f) => [f.key, f]));
+  const evidence = new Map((doc.evidence ?? []).map((e) => [e.field, e]));
+  const ready = doc.status === "ready";
+  const go = (edit) => {
+    const { path, query } = parseHash();
+    navigate(path, { ...query, edit }, { replace: false });
+  };
+
+  for (const host of $$("[data-field-actions]", panel)) {
+    const key = host.dataset.fieldActions;
+    const f = byKey.get(key);
+    if (!f || host.childElementCount) continue;
+    host.appendChild(
+      menuButton(
+        () => [
+          { label: "Copy value", onSelect: () => copy(flatValue(f.value), `${f.label} copied`) },
+          {
+            label: "Jump to source",
+            hidden: !evidence.get(key),
+            href: buildHash(`/documents/${doc.id}/source`, { ev: key }),
+          },
+          {
+            label: "Correct this value",
+            hidden: !ready,
+            onSelect: () =>
+              writer
+                ? go(key)
+                : toast(
+                    "Corrections need a credential: an API key, the operator token, or a same-origin session.",
+                    "error",
+                  ),
+          },
+          {
+            label: "Revert to the extracted value",
+            hidden: !latest.has(key),
+            onSelect: () => revertField(doc, f, refresh),
+          },
+        ],
+        { ariaLabel: `More actions for ${f.label}` },
+      ),
+    );
+  }
+
+  const editor = $("[data-editor]", panel);
+  if (!editor) return;
+  const f = byKey.get(editKey);
+  const value = $("#correctValue", editor);
+  const reason = $("#correctReason", editor);
+  const other = $("#correctOther", editor);
+  const otherWrap = $("#otherWrap", editor);
+  value?.focus();
+  value?.select?.();
+  reason.addEventListener("change", () => {
+    otherWrap.hidden = !reason.value.startsWith("Other");
+    if (!otherWrap.hidden) other.focus();
+  });
+  editor.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      go(undefined);
+    }
+  });
+  $("#cancelCorrect", editor).addEventListener("click", () => go(undefined));
+  $("#saveCorrect", editor).addEventListener("click", async () => {
+    const kind = value.dataset?.kind ?? "boolean";
+    let next;
+    if (kind === "boolean") next = value.value === "true";
+    else if (kind === "number") next = value.value === "" ? null : Number(value.value);
+    else if (kind === "list")
+      next = value.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    else next = value.value;
+    const why = reason.value.startsWith("Other") ? other.value.trim() : reason.value;
+    if (reason.value.startsWith("Other") && !why) {
+      $("#correctError", editor).innerHTML =
+        '<div class="arag-alert error" role="alert">Say why, so the record explains itself later.</div>';
+      other.focus();
+      return;
+    }
+    const btn = $("#saveCorrect", editor);
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    editor.setAttribute("aria-busy", "true");
+    try {
+      const out = await api(`/api/v1/documents/${doc.id}/fields/${encodeURIComponent(editKey)}`, {
+        method: "PUT",
+        json: { value: next, reason: why },
+      });
+      toast(`${f.label} corrected`);
+      announce(
+        out.correction.verified === "unverified"
+          ? `${f.label} corrected to ${flatValue(next)}. That value is not in this document, so the field lost its quote and the grounding score fell.`
+          : `${f.label} corrected to ${flatValue(next)}. That value was found in this document, so it keeps a verified quote.`,
+      );
+      // Dropping `?edit=` from the hash is itself the re-render: the router refetches the
+      // record, so the row, the trust strip and the Corrections timeline all agree.
+      go(undefined);
+    } catch (err) {
+      editor.removeAttribute("aria-busy");
+      btn.disabled = false;
+      btn.textContent = "Save correction";
+      $("#correctError", editor).innerHTML = `<div class="arag-alert error" role="alert">${esc(err.message)}${
+        err.status === 401
+          ? " Corrections need a credential: an API key, the operator token, or a same-origin session."
+          : ""
+      }</div>`;
+    }
+  });
+}
+
+async function revertField(doc, f, refresh) {
+  const ok = await confirmDialog({
+    title: `Revert ${esc(f.label)}?`,
+    body: "<p>The extracted value and its original verification come back, and the grounding score returns to what the pipeline earned. The correction stays in this record's history.</p>",
+    confirmLabel: "Revert to the extracted value",
+    danger: false,
+  });
+  if (!ok) return;
+  await api(`/api/v1/documents/${doc.id}/fields/${encodeURIComponent(f.key)}`, { method: "DELETE" });
+  toast(`${f.label} reverted`);
+  announce(`${f.label} reverted to the extracted value.`);
+  await refresh?.();
 }
 
 // ── source & evidence tab ────────────────────────────────────────────────────
@@ -495,7 +808,7 @@ function markUp(text, evidence) {
 const ORDER = { unverified: 0, normalised: 1, exact: 2 };
 
 async function renderSource(panel, doc, query) {
-  panel.innerHTML = `<div class="dip-skeleton" style="width:30%"></div>${'<div class="dip-skeleton"></div>'.repeat(8)}`;
+  panel.innerHTML = `<div class="arag-skeleton" style="width:30%"></div>${'<div class="arag-skeleton"></div>'.repeat(8)}`;
   let text = null;
   let textError = null;
   try {
@@ -596,7 +909,7 @@ async function renderSource(panel, doc, query) {
       views.file.hidden = b.dataset.view !== "file";
       if (b.dataset.view === "file" && !views.file.dataset.loaded) {
         views.file.dataset.loaded = "1";
-        views.file.innerHTML = '<div class="dip-skeleton" style="height:200px"></div>';
+        views.file.innerHTML = '<div class="arag-skeleton" style="height:200px"></div>';
         const url = `/api/v1/documents/${doc.id}/source`;
         const res = await fetch(url, { credentials: "same-origin" });
         if (!res.ok) {
@@ -635,7 +948,7 @@ async function renderPipeline(panel, doc) {
   panel.innerHTML = `
     ${
       stageErrors.length
-        ? `<div class="arag-alert warn dip-prose"><strong>Degraded</strong> — ${esc(stageErrors.join("; "))}. The rest of the record is complete.
+        ? `<div class="arag-alert warn arag-prose"><strong>Degraded</strong> — ${esc(stageErrors.join("; "))}. The rest of the record is complete.
              <div style="margin-top:8px"><button class="arag-btn sm secondary" type="button" id="rerun">Reprocess</button></div></div>`
         : ""
     }
@@ -661,6 +974,7 @@ async function renderPipeline(panel, doc) {
       Total ${esc(fmtMs(total))}${job ? ` · Job <span class="mono">${esc(job.id)}</span> ${jobChip(job.status)} · Started ${esc(fmtAbsolute(job.createdAt))}` : " · the job for this document is no longer stored"}
       ${job ? ` · <a href="${buildHash("/jobs", { q: job.id })}">Open in Jobs</a>` : ""}
     </p>
+    ${correctionsHtml(doc)}
     <details class="arag-card pad" style="margin-top:16px" id="glossary">
       <summary><strong>What each stage does</strong></summary>
       <dl class="arag-kv" style="margin-top:12px">
@@ -675,6 +989,167 @@ async function renderPipeline(panel, doc) {
       localStorage.setItem("dip.glossarySeen", "1");
     } catch {
       /* private window — the disclosure simply opens again next time */
+    }
+  });
+}
+
+/**
+ * The record's own review history, next to the record's own timeline. Newest last, so it
+ * reads in the order it happened — the stage table above does the same.
+ */
+function correctionsHtml(doc) {
+  const items = doc.corrections ?? [];
+  if (!items.length) return "";
+  return `<section class="arag-card" style="margin-top:16px" aria-labelledby="correctionsHead">
+      <div class="head"><h3 id="correctionsHead">Corrections (${items.length})</h3></div>
+      <div class="body">
+        <ol class="arag-timeline">
+          ${items
+            .map((c) => {
+              const v = verifyOf({ verified: c.verified });
+              return `<li class="${c.verified === "unverified" ? "" : "ok"}"><span class="dot"></span>
+                <div>
+                  <strong>${esc(c.label)}</strong>
+                  <div class="small">${esc(flatValue(c.previousValue) || "Not found")} →
+                    <b>${esc(flatValue(c.value) || "Not found")}</b>
+                    <span class="arag-chip ${v.cls}">${esc(v.text)}</span></div>
+                  <div class="small muted">${esc(c.actor)} · ${esc(fmtAbsolute(c.at))}${
+                    c.reason ? ` · ${esc(c.reason)}` : ""
+                  }</div>
+                  ${
+                    c.kv
+                      ? `<div class="small muted">${
+                          c.kv.written
+                            ? `Written to the Knowledge Box${c.kv.filterIndexStale ? "; its filter index still also matches the superseded value" : ""}.`
+                            : `Not written to the Knowledge Box — ${esc(c.kv.error ?? "the write did not succeed")}.`
+                        }</div>`
+                      : ""
+                  }
+                </div></li>`;
+            })
+            .join("")}
+        </ol>
+        <p class="muted small" style="margin-top:12px">Every correction is also in the operator's audit
+          log as <span class="mono">document.field.correct</span>, with the actor, the field and the
+          before → after values.</p>
+      </div>
+    </section>`;
+}
+
+// ── compare: this product's pipeline against the generator agent ─────────────
+
+const AGREEMENT = {
+  agree: ["Agreed", "ok"],
+  differ: ["Differs", "warn"],
+  "pipeline-only": ["Pipeline only", "neutral"],
+  "generator-only": ["Agent only", "info"],
+  neither: ["Neither", "neutral"],
+};
+
+/**
+ * Two ways of getting the same values out of the same document, side by side — and the
+ * asymmetry between them rendered rather than smoothed over. The pipeline's column carries a
+ * verification badge because every value came with a quote that was checked against the
+ * document's own text. The agent's column carries none, because it returns none: there is
+ * nothing to check, and a badge here would imply a parity that does not exist.
+ */
+async function renderCompare(panel, doc, refresh) {
+  panel.innerHTML = skeletonRows(6);
+  let c;
+  try {
+    c = await api(`/api/v1/documents/${doc.id}/generator-comparison`);
+  } catch (err) {
+    panel.innerHTML = errorState(err);
+    return;
+  }
+  const s = c.summary ?? {};
+  const tile = (labelText, value, sub) =>
+    `<div><div class="label">${esc(labelText)}</div><div class="value">${value}</div><div class="sub">${esc(sub)}</div></div>`;
+
+  panel.innerHTML = `
+    <div class="arag-statstrip">
+      ${tile("Agreed", s.agree ?? 0, "same value both ways")}
+      ${tile("Differs", s.differ ?? 0, "needs a person")}
+      ${tile("Pipeline only", s["pipeline-only"] ?? 0, "the agent has no value")}
+      ${tile("Agent only", s["generator-only"] ?? 0, "the pipeline has no value")}
+    </div>
+    ${
+      c.agent
+        ? ""
+        : `<div class="arag-alert" style="margin-top:16px">
+             <strong>No generator agent is provisioned for this config.</strong>
+             The comparison below is the pipeline's own record with an empty column beside it.
+             <div style="margin-top:8px"><a class="arag-btn sm secondary" href="${buildHash(
+               `/configs/${doc.meta?.config ?? ""}`,
+             )}">Provision one on the config</a></div>
+           </div>`
+    }
+    ${
+      c.agent && !c.generatorHasWritten
+        ? `<div class="arag-alert warn" style="margin-top:16px">
+             <strong>The agent has not written anything to this resource yet.</strong>
+             Its schema is <span class="mono">${esc(c.generatorKvSchemaId ?? "—")}</span> and it is
+             ${esc(c.agent.state)}; until it writes, every row below reads “pipeline only”.
+             <div style="margin-top:8px"><button class="arag-btn sm" type="button" id="runAgent">Run the agent on this document</button></div>
+           </div>`
+        : ""
+    }
+    <div class="arag-alert" style="margin-top:16px">
+      <strong>These two columns are not the same kind of claim.</strong>
+      <div class="small" style="margin-top:6px"><strong>Pipeline —</strong> ${esc(c.evidenceContract?.pipeline ?? "")}</div>
+      <div class="small" style="margin-top:4px"><strong>Generator agent —</strong> ${esc(c.evidenceContract?.generator ?? "")}</div>
+    </div>
+    <div class="arag-datatable" style="margin-top:16px"><div class="scroll">
+      <table class="arag-table">
+        <thead><tr>
+          <th>Field</th><th>This product's pipeline</th><th>Generator agent</th><th>Agreement</th>
+        </tr></thead>
+        <tbody>${(c.fields ?? [])
+          .map((f) => {
+            const [text, cls] = AGREEMENT[f.agreement] ?? [f.agreement, "neutral"];
+            const v = f.pipeline?.evidence ? verifyOf(f.pipeline.evidence) : null;
+            return `<tr>
+              <td><span class="cell-title">${esc(f.label ?? f.field)}</span>
+                  <span class="cell-sub mono">${esc(f.field)}</span></td>
+              <td>${
+                f.pipeline?.present
+                  ? `${esc(flatValue(f.pipeline.value))}
+                     ${v ? `<span class="arag-chip ${v.cls}">${esc(v.text)}</span>` : ""}`
+                  : '<span class="dip-field__empty">Not extracted</span>'
+              }</td>
+              <td>${
+                f.generator?.present
+                  ? `${esc(flatValue(f.generator.value))}
+                     <span class="cell-sub">no quote — nothing to verify against</span>`
+                  : '<span class="dip-field__empty">Not written</span>'
+              }</td>
+              <td><span class="arag-chip ${cls}">${esc(text)}</span></td>
+            </tr>`;
+          })
+          .join("")}</tbody>
+      </table></div></div>
+    ${
+      c.observed && c.observed.endToEndLatency === false
+        ? `<div class="arag-alert warn" style="margin-top:16px">
+             <strong>How long the agent takes has not been observed.</strong>
+             <div class="small" style="margin-top:6px">${esc(c.observed.note ?? "")}</div>
+           </div>`
+        : ""
+    }
+    <p class="muted small" style="margin-top:12px">Schemas: pipeline
+      <span class="mono">${esc(c.kvSchemaId ?? "—")}</span>, agent
+      <span class="mono">${esc(c.generatorKvSchemaId ?? "—")}</span>. They are separate, so the two paths
+      never overwrite each other's values.</p>`;
+
+  $("#runAgent", panel)?.addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      await api(`/api/v1/documents/${doc.id}/generator-run`, { method: "POST", json: {} });
+      toast("The agent was asked to run on this document");
+      announce("The generator agent was started for this document. Values appear when it writes them.");
+      await refresh?.();
+    } catch (err) {
+      toast(err.message, "error");
     }
   });
 }
@@ -736,7 +1211,7 @@ const DEFAULT_SUGGESTIONS = [
 export function renderAskPanel(panel, doc) {
   const suggestions = SUGGESTIONS[doc.docType] ?? DEFAULT_SUGGESTIONS;
   panel.innerHTML = `
-    <p class="muted dip-prose">Answers come from this document only. Nothing is remembered between visits — this conversation is not saved.</p>
+    <p class="muted arag-prose">Answers come from this document only. Nothing is remembered between visits — this conversation is not saved.</p>
     <div class="dip-suggestions">
       ${suggestions.map((s) => `<button class="arag-btn ghost sm" type="button" data-suggest="${esc(s)}">${esc(s)}</button>`).join("")}
     </div>
@@ -798,8 +1273,158 @@ function renderAskTab(panel, doc) {
   renderAskPanel(panel, doc);
 }
 
-function renderJson(panel, doc) {
-  panel.innerHTML = `<p class="muted dip-prose">The canonical record exactly as <span class="mono">GET /api/v1/documents/${esc(doc.id)}</span> returns it.</p>
+// ── JSON / key-value tab ─────────────────────────────────────────────────────
+
+/**
+ * Two views of the same record: the canonical JSON this API returns, and the typed
+ * key-value fields that were written into the Knowledge Box itself.
+ *
+ * The second one is the pass's headline capability and the one that has to be honest: a
+ * value the Knowledge Box does not have is exactly what a reader needs to know, so skipped
+ * and rejected fields are shown as prominently as written ones, and the filter-index trap —
+ * the Knowledge Box keeps every value ever written to a field — is stated rather than
+ * buried.
+ */
+function renderJson(panel, doc, query) {
+  const view = query.view === "kv" ? "kv" : "record";
+  panel.innerHTML = `
+    <div class="dip-scope">
+      <div class="arag-segmented" id="jsonView" aria-label="What to show">
+        <button type="button" data-value="record" aria-selected="${view === "record"}">Record</button>
+        <button type="button" data-value="kv" aria-selected="${view === "kv"}">Key-value fields</button>
+      </div>
+    </div>
+    <div id="jsonPane"></div>`;
+  wireSegmented($("#jsonView", panel), (value) => {
+    if (value === view) return;
+    const { path, query: q } = parseHash();
+    navigate(path, { ...q, view: value === "kv" ? "kv" : undefined });
+  });
+  const pane = $("#jsonPane", panel);
+  if (view === "kv") return renderKeyValues(pane, doc);
+  pane.innerHTML = `<p class="muted arag-prose">The canonical record exactly as
+      <span class="mono">GET /api/v1/documents/${esc(doc.id)}</span> returns it.</p>
     <arag-json id="recJson"></arag-json>`;
-  $("#recJson", panel).data = doc;
+  $("#recJson", pane).data = doc;
+}
+
+const kvValueHtml = (v) =>
+  v === null || v === undefined
+    ? '<span class="dip-field__empty">Not written</span>'
+    : Array.isArray(v)
+      ? `<ul>${v.map((x) => `<li>${esc(String(x))}</li>`).join("")}</ul>`
+      : esc(String(v));
+
+async function renderKeyValues(pane, doc) {
+  const kv = doc.meta?.kv;
+  if (!kv) {
+    pane.innerHTML = `${emptyState({
+      icon: "layers",
+      title: "Nothing was written to the Knowledge Box for this record",
+      body: "A config provisions a matching key-value schema, and the verified record is written to it after extraction. This record has no schema behind it — either the config was never provisioned, or it was processed before the schema existed.",
+      actions: `<a class="arag-btn secondary" href="${buildHash(`/configs/${doc.meta?.config ?? ""}`)}">Open the config</a>`,
+    })}`;
+    return;
+  }
+  // The config supplies the declared kv type for each property; without it the values are
+  // still shown, just without their type column.
+  const cfg = doc.meta?.config
+    ? await api(`/api/v1/extraction-configs/${encodeURIComponent(doc.meta.config)}`).catch(() => null)
+    : null;
+  const typeOf = new Map((cfg?.fields ?? []).map((f) => [f.key, f.kvType ?? f.type]));
+  const labelOf = new Map((doc.fields ?? []).map((f) => [f.key, f.label]));
+  const keys = Object.entries(kv.keys ?? {});
+  const skipped = kv.skipped ?? [];
+  const rejected = kv.rejected ?? [];
+  const superseded = kv.superseded ?? [];
+
+  pane.innerHTML = `
+    <p class="muted arag-prose">The typed values this record wrote into the Knowledge Box. They live on
+      the resource itself, so a search or a catalogue filter can match them — this product's store is not
+      the only place they exist.</p>
+    <div class="arag-card" style="margin-bottom:16px">
+      <div class="head"><h3>Schema</h3>
+        ${
+          kv.written
+            ? '<span class="arag-chip ok">Written</span>'
+            : '<span class="arag-chip danger">Not written</span>'
+        }
+      </div>
+      <div class="body">
+        <dl class="arag-kv">
+          <dt>Key-value schema</dt><dd class="mono">${esc(kv.schemaId ?? "—")}</dd>
+          <dt>Fields written</dt><dd>${kv.fields ?? 0}${skipped.length ? ` · ${skipped.length} skipped` : ""}${
+            rejected.length ? ` · ${rejected.length} rejected` : ""
+          }</dd>
+          <dt>Writes</dt><dd>${kv.writes ?? 0}</dd>
+          <dt>Last written</dt><dd>${esc(fmtAbsolute(kv.at))}</dd>
+        </dl>
+        ${kv.error ? `<div class="arag-alert error" style="margin-top:12px">${esc(kv.error)}</div>` : ""}
+      </div>
+    </div>
+    ${
+      kv.filterIndexStale
+        ? `<div class="arag-alert warn" style="margin-bottom:16px">
+             <strong>The Knowledge Box's filter index also matches earlier values.</strong>
+             A key-value field keeps every value ever written to it for filtering, so this document still
+             matches a filter on ${superseded
+               .map((sv) => `<span class="mono">${esc(sv.field)} = ${esc(String(sv.value))}</span>`)
+               .join(", ")} even though the current value is different. A search over the values
+             themselves is unaffected.
+           </div>`
+        : ""
+    }
+    <h2>Written values (${keys.length})</h2>
+    <div class="arag-datatable"><div class="scroll">
+      <table class="arag-table">
+        <thead><tr><th>Field</th><th>Knowledge Box key</th><th>Type</th><th>Value written</th></tr></thead>
+        <tbody>${keys
+          .map(
+            ([prop, kvKey]) => `<tr>
+              <td><span class="cell-title">${esc(labelOf.get(prop) ?? prop)}</span>
+                  <span class="cell-sub mono">${esc(prop)}</span></td>
+              <td class="mono small">${esc(kvKey)}</td>
+              <td class="small">${esc(typeOf.get(prop) ?? "—")}</td>
+              <td>${kvValueHtml(kv.values?.[kvKey])}</td>
+            </tr>`,
+          )
+          .join("")}</tbody>
+      </table></div></div>
+    ${
+      skipped.length
+        ? `<h2 style="margin-top:20px">Not written (${skipped.length})</h2>
+           <div class="arag-datatable"><div class="scroll"><table class="arag-table">
+             <thead><tr><th>Field</th><th>Why the Knowledge Box does not have it</th></tr></thead>
+             <tbody>${skipped
+               .map(
+                 (sk) => `<tr><td><span class="cell-title">${esc(labelOf.get(sk.field) ?? sk.field)}</span>
+                     <span class="cell-sub mono">${esc(sk.field)}</span></td>
+                   <td class="small">${esc(sk.reason)}</td></tr>`,
+               )
+               .join("")}</tbody>
+           </table></div></div>`
+        : ""
+    }
+    ${
+      rejected.length
+        ? `<h2 style="margin-top:20px">Rejected by the Knowledge Box (${rejected.length})</h2>
+           <p class="muted small">A key-value write is validated against the schema, so a value of the
+             wrong type is refused rather than silently coerced. The record keeps the value as extracted;
+             the Knowledge Box does not have it.</p>
+           <div class="arag-datatable"><div class="scroll"><table class="arag-table">
+             <thead><tr><th>Field</th><th>Reason</th><th>Expected</th><th>Got</th></tr></thead>
+             <tbody>${rejected
+               .map(
+                 (r) => `<tr><td><span class="cell-title">${esc(labelOf.get(r.field) ?? r.field)}</span>
+                     <span class="cell-sub mono">${esc(r.kind ?? "")}</span></td>
+                   <td class="small">${esc(r.message ?? "")}</td>
+                   <td class="mono small">${esc(String(r.expected ?? "—"))}</td>
+                   <td class="mono small">${esc(String(r.got ?? "—"))}</td></tr>`,
+               )
+               .join("")}</tbody>
+           </table></div></div>`
+        : ""
+    }
+    <p class="muted small" style="margin-top:16px">The schema this record was written against is on the
+      config: <a href="${buildHash(`/configs/${doc.meta?.config ?? ""}`)}">${esc(doc.meta?.config ?? "—")} ›</a></p>`;
 }

@@ -7,7 +7,6 @@
  */
 import {
   $,
-  $$,
   api,
   buildHash,
   emptyState,
@@ -23,6 +22,7 @@ import {
   openDrawer,
   skeletonRows,
   toast,
+  wireTable,
 } from "../lib/core.js";
 
 let timer = null;
@@ -39,17 +39,17 @@ export async function renderJobs(main, { query, stale }) {
   const q = query.q ?? "";
   const page = Number(query.page ?? 1);
   main.innerHTML = `
-    <header class="dip-pagehead">
-      <div class="dip-pagehead__row"><h1>Jobs</h1>
-        <div class="dip-pagehead__actions">
+    <header class="arag-pagehead">
+      <div class="row"><h1>Jobs</h1>
+        <div class="actions">
           <label class="arag-switch"><input type="checkbox" id="auto" checked /> Auto-refresh</label>
           <button class="arag-btn ghost" type="button" id="reload">${icon("refresh")} Reload</button>
         </div>
       </div>
-      <p class="dip-pagehead__sub">Every upload starts a job. Its seven stages are recorded, so a finished run can still be explained hours later.</p>
+      <p class="sub">Every upload starts a job. Its seven stages are recorded, so a finished run can still be explained hours later.</p>
     </header>
-    <div class="dip-filterbar${status || q ? " has-filters" : ""}">
-      <div class="dip-search">${icon("search")}
+    <div class="arag-filterbar">
+      <div class="arag-search">${icon("search")}
         <label class="sr-only" for="jq">Search jobs</label>
         <input class="arag-input" id="jq" type="search" value="${esc(q)}" placeholder="Search by job or document id" />
       </div>
@@ -62,8 +62,8 @@ export async function renderJobs(main, { query, stale }) {
           )
           .join("")}
       </select>
-      <span class="dip-filterbar__spacer"></span>
-      <button class="arag-btn ghost sm dip-filterbar__clear" type="button" id="clearJobs">Clear all filters</button>
+      <span class="spacer"></span>
+      ${status || q ? '<button class="arag-btn ghost sm" type="button" id="clearJobs">Clear all filters</button>' : ""}
     </div>
     <div id="jobList">${skeletonRows(5)}</div>`;
 
@@ -96,7 +96,7 @@ export async function renderJobs(main, { query, stale }) {
     const value = e.target.value;
     debounce = setTimeout(() => navigate("/jobs", { ...query, q: value || undefined, page: undefined }), 250);
   });
-  $("#clearJobs", main).addEventListener("click", () => navigate("/jobs", {}));
+  $("#clearJobs", main)?.addEventListener("click", () => navigate("/jobs", {}));
 
   // Auto-refresh is a pause switch for demos and screenshots, not a poll-interval control.
   const auto = $("#auto", main);
@@ -116,13 +116,13 @@ function renderList(main, res, ctx) {
     host.innerHTML =
       ctx.status || ctx.q
         ? emptyState({
-            iconName: "search",
+            icon: "search",
             title: "No jobs match these filters",
             actions:
               '<button class="arag-btn secondary" type="button" id="clearJobs2">Clear all filters</button>',
           })
         : emptyState({
-            iconName: "clock",
+            icon: "clock",
             title: "No jobs yet",
             body: "Every upload starts a job. Its seven stages appear here while it runs.",
             actions: `<a class="arag-btn" href="${buildHash("/documents/upload")}">Upload document</a>`,
@@ -132,16 +132,16 @@ function renderList(main, res, ctx) {
   }
   const from = (res.page - 1) * res.page_size + 1;
   host.innerHTML = `
-    <div class="dip-tablewrap"><div class="dip-tablescroll">
-    <table class="arag-table dip-datatable">
+    <div class="arag-datatable" id="jobsTable"><div class="scroll">
+    <table class="arag-table">
       <caption class="sr-only">Processing jobs, newest first</caption>
       <thead><tr><th>Job</th><th>Status</th><th>Stage</th><th>Elapsed</th><th>Started</th></tr></thead>
       <tbody>
         ${res.items
           .map(
-            (j) => `<tr data-job="${esc(j.id)}">
-            <td><span class="dip-datatable__primary">${esc(j.kind)}</span>
-              <span class="dip-datatable__sub mono">${esc(j.id)}${j.ref ? ` · document ${esc(j.ref.slice(0, 8))}…` : ""}</span></td>
+            (j) => `<tr data-job="${esc(j.id)}" data-href="${buildHash(`/jobs/${j.id}`)}">
+            <td><a class="cell-title" href="${buildHash(`/jobs/${j.id}`)}">${esc(j.kind)}</a>
+              <span class="cell-sub mono">${esc(j.id)}${j.ref ? ` · document ${esc(j.ref.slice(0, 8))}…` : ""}</span></td>
             <td>${jobChip(j.status)}</td>
             <td>${esc(j.stage ?? "—")}</td>
             <td class="num">${esc(fmtMs(elapsed(j)))}</td>
@@ -151,23 +151,17 @@ function renderList(main, res, ctx) {
           .join("")}
       </tbody>
     </table></div>
-    <div class="dip-tablefoot">
-      <nav class="dip-pagination" aria-label="Pagination">
-        <span class="dip-pagination__count">${from}–${Math.min(res.page * res.page_size, res.total)} of ${res.total}</span>
-        <button class="arag-btn ghost sm" type="button" id="jPrev"${res.page <= 1 ? " disabled" : ""}>Previous</button>
-        <button class="arag-btn ghost sm" type="button" id="jNext"${res.next_page ? "" : " disabled"}>Next</button>
-      </nav>
-    </div></div>`;
+    <nav class="arag-pagination" aria-label="Pagination">
+      <span class="range">${from}–${Math.min(res.page * res.page_size, res.total)} of ${res.total}</span>
+      <span class="spacer"></span>
+      <button type="button" data-page="prev"${res.page <= 1 ? " disabled" : ""}>Previous</button>
+      <button type="button" data-page="next"${res.next_page ? "" : " disabled"}>Next</button>
+    </nav></div>`;
 
-  for (const tr of $$("tr[data-job]", host)) {
-    tr.addEventListener("click", () => navigate(`/jobs/${tr.dataset.job}`));
-  }
-  $("#jPrev", host).addEventListener("click", () =>
-    navigate("/jobs", { ...ctx.query, page: String(res.page - 1) }),
-  );
-  $("#jNext", host).addEventListener("click", () =>
-    navigate("/jobs", { ...ctx.query, page: String(res.page + 1) }),
-  );
+  wireTable($("#jobsTable", host), {
+    onPage: (to) =>
+      navigate("/jobs", { ...ctx.query, page: String(to === "prev" ? res.page - 1 : res.page + 1) }),
+  });
 }
 
 /** The job drawer is a route over the list, so Back closes it. */
