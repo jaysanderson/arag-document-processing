@@ -15,8 +15,11 @@ the admin API.
    `aragConfig`, `kvSchemaId` and `kvFields` — creating a config now provisions **two**
    Knowledge Box objects (DP-46), not one, and the response reports each separately
    under `provisioning`.
-2. Upload `public/samples/invoice.txt` (or any sample) with `?config=<your id>` and
-   look at `meta.config` on the resulting record — see the note on it below.
+2. Upload `public/samples/invoice.txt` (or any sample) with `?config=<your id>`, then
+   answer two questions from the finished record: which of `meta.config` and
+   `meta.configLabel` is the id and which is the human wording, and why the record
+   carries both rather than one. Then check the two things that depend on it —
+   `GET /api/v1/documents?config=<your id>` and the config's own `documentCount`.
 3. Open the workspace at `http://localhost:8080/#/configs/new` and recreate the same
    config by hand. Confirm it appears immediately at `#/configs/:id` and in
    `GET /api/v1/extraction-configs`.
@@ -31,25 +34,31 @@ the admin API.
 6. Delete both configs you created (`DELETE /api/v1/extraction-configs/{id}`) and
    confirm a built-in (e.g. `invoice`) refuses deletion with `409`.
 
-## A known defect to notice, not work around
+## Why the record carries two config fields
 
-`meta.config` on a forced document is set to the config's **name** ("Vehicle
-Registration"), not its **id** (`cfg_...`) — this is a real bug
-(`src/services/pipeline.ts:343`), not designed behaviour: `ConfigsService.resolve()`
-already returns a `configId` right alongside the label, and the pipeline uses the wrong
-one. The concrete consequence you'll see in step 2: `GET
-/api/v1/documents?config=<your id>` returns **zero** results even though the document
-you just forced through that config exists — the `config` filter matches against the id,
-and the record never got one. Don't write an acceptance criterion around that filter
-finding the document; it won't, and that's the defect, not a mistake in your steps.
+`meta.config` is the config **id** (`cfg_...` for a custom config, the doc type for a
+built-in) and `meta.configLabel` is the human wording ("Vehicle Registration",
+"purchase order"). The id is the contract — it is what `?config=` filters on, what
+`documentCount` counts, what reprocess re-resolves, what the Key-value view looks up to
+show a field's declared type, and what a generator agent uses to find its way back to
+the configuration it belongs to. The label exists because the record header has to read
+"Insurance Card", not "Cfg abc123".
+
+Until 13 September the forced path stored the label in `meta.config` and there was no
+`meta.configLabel`, which broke all five of those quietly — a previous version of this
+exercise sheet told you to expect `?config=` to return nothing. If you are reading an
+older copy, that note is out of date: the filter works now, and this exercise asserts
+that it does.
 
 ## Acceptance criteria
 
 - [ ] The `POST` response has `provisioned: true`, a `kvSchemaId`, and
       `provisioning.state: "provisioned"` with both `searchConfiguration` and
       `keyValueSchema` present — all without any separate "provision" call.
-- [ ] The forced upload's record has `meta.forced: true` and
-      `meta.config: "Vehicle Registration"` (the name — see the defect note above).
+- [ ] The forced upload's record has `meta.forced: true`, `meta.config` equal to the
+      `cfg_...` **id** the `POST` returned, and `meta.configLabel: "Vehicle Registration"`.
+- [ ] `GET /api/v1/documents?config=<your id>` returns that document, and the config's
+      own `documentCount` reads `1` — both read the id, which is why step 2 matters.
 - [ ] `POST /api/v1/extraction-configs/{id}/provision` returns `200` with an `ok: true`
       search-configuration result and a `keyValueSchema` result, for a config you own;
       called with no credential it answers `401`.

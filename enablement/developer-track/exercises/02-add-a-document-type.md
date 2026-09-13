@@ -49,8 +49,8 @@ Concretely:
       `docType: "insurance_card"` and `meta.schema` ending in `insurance_card_extraction`.
 - [ ] `make test` passes with **zero** failures, with **no test file edited** — the
       built-in-count assertions are derived from `DOC_TYPE_VALUES.length`, not a literal
-      number, so they move with you automatically. Baseline before your change: 241
-      tests, pass 241, fail 0.
+      number, so they move with you automatically. Baseline before your change: 242
+      tests, pass 242, fail 0.
 - [ ] `make check` is green.
 
 ## Hints

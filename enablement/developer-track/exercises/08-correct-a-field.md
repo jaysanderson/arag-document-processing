@@ -33,7 +33,10 @@ consequence of that write it cannot fix (DP-49, DP-51).
    and find the same list on the record itself. Note which order each is in and why.
 7. **Read the operator's audit trail.** `GET /api/v1/admin/audit?action=document.field.correct`,
    and then the same query filtered by `target`. Note what the audit entry carries that
-   the correction record does not, and vice versa.
+   the correction record does not, and vice versa. Then compare it with a
+   `settings.update` entry for a secret (rotate `connection.apiKey` if you have not
+   already) and work out the rule the redactor follows — what is blanked, what is not,
+   and why an audit log that blanked more would be worse rather than safer.
 8. **Undo it.** `DELETE /api/v1/documents/{id}/fields/po_number`. Confirm the value, the
    `verified` state and the grounding score all return — then find the three things that
    do **not** return to their original state, and be able to say why each one is right.
@@ -56,7 +59,11 @@ consequence of that write it cannot fix (DP-49, DP-51).
 - [ ] `GET /api/v1/documents/{id}/corrections` returns the correction newest-first, and
       the record's own `corrections` array has it oldest-first.
 - [ ] The audit log has a `document.field.correct` entry whose `target` is
-      `<documentId>#<fieldKey>` with a `before` and an `after`.
+      `<documentId>#<fieldKey>`, with the **real** old and new values in `before` and
+      `after` — not `***`.
+- [ ] A `settings.update` entry for a secret has `before` and `after` of `"***"` and a
+      `detail` of `"secret rotated"`, and you can state the rule that separates the two
+      cases.
 - [ ] After the undo: the value is restored, `verified` is `"exact"` again and
       `meta.groundingScore` is back to `1` — while `meta.correctedFields` is still `1`,
       `meta.kv.writes` is `3`, and `meta.kv.superseded` now lists **both** values.

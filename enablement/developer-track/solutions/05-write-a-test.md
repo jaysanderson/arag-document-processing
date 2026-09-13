@@ -84,8 +84,8 @@ make check
 ```
 
 The verified baseline for this codebase (commit `2c9cc30` on `mvp`, before this
-exercise) is **241 tests, pass 241, fail 0**. Your two new tests take the full suite to
-**243** — confirm your own run reports that count and `fail 0`, rather than trusting a
+exercise) is **242 tests, pass 242, fail 0**. Your two new tests take the full suite to
+**244** — confirm your own run reports that count and `fail 0`, rather than trusting a
 number pasted here: the exact figure moves if you've also kept earlier exercises' code
 in your working tree, or wrote a different number of tests than this solution did.
 `make check` (Biome, `tsc --noEmit`, and the 80%-line-coverage run) should exit `0`.

@@ -157,7 +157,7 @@ like:
 make test
 ```
 
-**Checkpoint:** `make test` reports `pass 241` and `fail 0` (the exact count drifts as the
+**Checkpoint:** `make test` reports `pass 242` and `fail 0` (the exact count drifts as the
 suite grows — confirm your own number and use it as your baseline). If it does not, stop
 and fix your environment before continuing; every later section assumes this baseline.
 
@@ -462,6 +462,32 @@ the same call, which is why `provisioned` is already `true` with no separate ste
 Note `kvType: "date"` on one field. On a custom config the overrides are
 `kvType`/`kvRepeated`/`kvRange`, the same capability `date()` and `money()` give a built-in
 schema. Section 6 is where that pays off.
+
+Now force a document through it and look at what the record kept:
+
+```bash
+CFG=$(…)   # the id from the response above
+curl -sS -X POST "http://localhost:8080/api/v1/documents?config=$CFG" \
+     -H 'Content-Type: text/plain' -H 'X-Filename: card.txt' \
+     --data-binary @public/samples/invoice.txt | jq -r .document.id
+# … then, on the finished record:
+curl -sS "http://localhost:8080/api/v1/documents/<id>" \
+  | jq '{config: .meta.config, configLabel: .meta.configLabel, forced: .meta.forced}'
+# { "config": "cfg_…", "configLabel": "Insurance Card", "forced": true }
+```
+
+**`meta.config` is the config id; `meta.configLabel` is the human wording.** The same
+split holds for a built-in (`config: "purchase_order"`, `configLabel: "purchase order"`)
+and for auto-classification. Five things read the id — the `?config=` list filter, a
+config's `documentCount`, `reprocess`, the Key-value view's type lookup, and a generator
+agent finding its configuration — and exactly one thing reads the label: the record
+header, because it has to say "Insurance Card" rather than "Cfg abc123". One value cannot
+be both a stable identifier and readable prose, which is why there are two.
+
+```bash
+curl -sS "http://localhost:8080/api/v1/documents?config=$CFG" | jq '.total'              # 1
+curl -sS "http://localhost:8080/api/v1/extraction-configs/$CFG" | jq '.documentCount'    # 1
+```
 
 ### 3.2 Through the workspace
 
@@ -974,6 +1000,13 @@ shape with settings edits, key creation, config changes, purges and deletes. `ta
 The endpoint returns corrections **newest first** — the order a review panel wants — while
 the record's own `corrections` array is **oldest first**, the order it happened in and the
 order the Pipeline tab's timeline renders.
+
+Notice that the audit entry's `before` and `after` are the **real** values, not `***`.
+Redaction is anchored to property names ending in a credential word (`apiKey`,
+`adminToken`, `clientSecret`, `password`, `authorization`, `cookie`), so a secret
+rotation records only that it happened (`before`/`after` of `"***"`, `detail: "secret
+rotated"`) while everything else stays readable. A log that blanked its own subject would
+be worse than no log, because it would still look complete.
 
 ### 8.5 Undo
 

@@ -32,7 +32,7 @@ Real output (verified against the mock; your `id` will differ):
 
 ```json
 {
-  "id": "cfg_b5959186",
+  "id": "cfg_4e07d764",
   "name": "Vehicle Registration",
   "docType": "generic",
   "description": "Custom extraction config: Vehicle Registration",
@@ -50,7 +50,7 @@ Real output (verified against the mock; your `id` will differ):
     "searchConfiguration": { "name": "dip_custom_vehicle_registration", "state": "provisioned" },
     "keyValueSchema": {
       "state": "provisioned",
-      "at": "2026-09-13T08:38:28.390Z",
+      "at": "2026-09-13T09:12:28.407Z",
       "schemaId": "dip_custom_vehicle_registration",
       "fields": 3
     }
@@ -60,8 +60,8 @@ Real output (verified against the mock; your `id` will differ):
     { "key": "owner_name", "label": "Owner Name", "type": "string", "required": false },
     { "key": "registration_expiry", "label": "Registration Expiry", "type": "string", "required": false }
   ],
-  "createdAt": "2026-09-13T08:38:28.387Z",
-  "updatedAt": "2026-09-13T08:38:28.387Z"
+  "createdAt": "2026-09-13T09:12:28.404Z",
+  "updatedAt": "2026-09-13T09:12:28.404Z"
 }
 ```
 
@@ -74,47 +74,79 @@ same string as `aragConfig` — this one `POST` provisioned both a search config
 *and* a key-value schema (DP-46), and `provisioning.state` is `"provisioned"` only
 because both halves report `"state": "provisioned"` individually.
 
-## 2. Use it to force extraction — and see the `meta.config` defect
+## 2. Use it to force extraction, and check what the record kept
 
 ```bash
-CFG=cfg_b5959186   # substitute your own id
+CFG=cfg_4e07d764   # substitute your own id
 curl -sS -X POST "http://localhost:8080/api/v1/documents?config=$CFG" \
      -H 'Content-Type: text/plain' -H 'X-Filename: reg.txt' \
      --data-binary @public/samples/invoice.txt | jq -r .document.id
 # … wait for the job (or just re-GET after a moment) …
-curl -sS "http://localhost:8080/api/v1/documents/<id>" | jq '.meta.config, .meta.forced'
-```
-
-```
-"Vehicle Registration"
-true
-```
-
-No credential was needed for this call — creating a document stays anonymous-friendly
-by design; only the config *create* above needed one. `meta.forced: true` confirms
-classification was skipped and the pipeline used your three fields directly. But
-`meta.config` reading `"Vehicle Registration"` — the config's **name**, not its **id**
-`cfg_b5959186` — is a real product bug, not a design choice:
-`src/services/pipeline.ts:343` assigns `record.meta.config = forced.label`, even though
-`ConfigsService.resolve()` (`src/services/configs.ts`) returns a `configId` right next
-to that label. Verified consequence, against this exact document:
-
-```bash
-curl -sS "http://localhost:8080/api/v1/documents?config=$CFG" | jq '.total, .items'
+curl -sS "http://localhost:8080/api/v1/documents/<id>" \
+  | jq '{config: .meta.config, configLabel: .meta.configLabel, forced: .meta.forced, schema: .meta.schema}'
 ```
 
 ```json
-0
-[]
+{
+  "config": "cfg_4e07d764",
+  "configLabel": "Vehicle Registration",
+  "forced": true,
+  "schema": "custom_vehicle_registration"
+}
 ```
 
-Zero results, even though the document exists and was forced through this exact config
-— the `config` filter matches against the id, which the record never got. The same bug
-means a custom config's `documentCount` (visible on `GET /api/v1/extraction-configs`)
-reads `0` while documents exist for it, and the record's Key-value view can't resolve
-the config to show its declared kv field types. Treat this as a known defect to route
-around when building anything that depends on `?config=` after a forced upload — not
-something to "fix" in your own exercise.
+No credential was needed for this call — creating a document stays anonymous-friendly by
+design; only the config *create* above needed one. `meta.forced: true` confirms
+classification was skipped and the pipeline used your three fields directly.
+
+**`meta.config` is the id; `meta.configLabel` is the wording.** The same split holds on
+every path a record can take:
+
+| Path | `meta.config` | `meta.configLabel` |
+|---|---|---|
+| Forced custom (`?config=cfg_…`) | `"cfg_4e07d764"` | `"Vehicle Registration"` |
+| Forced built-in (`?config=purchase_order`) | `"purchase_order"` | `"purchase order"` |
+| Auto-classified | `"invoice"` | `"invoice"` |
+| DA agent (`?config=agent`, with agent output on the resource) | `"generic"` | `"ARAG DA agent (persisted)"` |
+
+The first three rows are from runs against the mock in this lab. **The fourth is read
+from the source** (`runPipeline`'s agent branch in `src/services/pipeline.ts`), not
+observed here: the mock's resources carry no Data Augmentation agent output, so
+`?config=agent` logs a `classify` `skip` and falls back to live extraction — try it and
+you will get the auto-classified row instead. It is worth knowing anyway, because it is
+the one path where the two fields genuinely disagree about *kind*: the values came from
+an agent rather than an extraction config, so there is no config id to store and
+`meta.config` falls back to the `generic` schema the record was built against, while the
+label still says where the values actually came from.
+
+The id is the one that carries obligations. Five things read it, and you can check the
+first two right now:
+
+```bash
+curl -sS "http://localhost:8080/api/v1/documents?config=$CFG" | jq '.total'
+# 1
+curl -sS "http://localhost:8080/api/v1/extraction-configs/$CFG" | jq '.documentCount'
+# 1
+```
+
+The other three are `POST /documents/{id}/reprocess` (which re-resolves the
+configuration from the record), the Key-value view (which fetches
+`/extraction-configs/<meta.config>` to show each field's declared kv type — Exercise 6),
+and a generator agent finding its way back to the configuration it belongs to
+(`src/services/generators.ts`).
+
+The label exists for exactly one reason: the record header has to say "Vehicle
+Registration", not "Cfg 4e07d764". Two fields, because one value cannot be both a stable
+identifier and readable prose — which is the general lesson here, and the one this
+product got wrong until 13 September.
+
+> **If you are working from an older copy of this sheet**, it told you to expect
+> `?config=` to return `0` and called it a known defect. It was: the forced branch of
+> the pipeline stored `forced.label` in `meta.config` even though `resolve()` returned a
+> `configId` right beside it, and all five consumers above broke quietly. It is fixed —
+> the id is stored on every path, the label moved to `meta.configLabel`, and the contract
+> test now asserts the id, the label, the filter and the document count rather than
+> asserting the bug.
 
 ## 3. Through the workspace
 

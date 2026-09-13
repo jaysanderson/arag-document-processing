@@ -178,7 +178,7 @@ curl -sS http://localhost:8080/api/v1/schemas | jq '.items | length'   # 12
 ```
 
 The verified baseline for this codebase (commit `2c9cc30` on `mvp`, before your change)
-is **241 tests, pass 241, fail 0** — not the `39` an older version of this lab claimed.
+is **242 tests, pass 242, fail 0** — not the `39` an older version of this lab claimed.
 Every one of the checks above passes **without editing a single test file.**
 `test/api.test.ts`'s extraction-config and schema-catalogue tests, and
 `test/e2e/admin.spec.ts`'s admin config-table assertion, all import `DOC_TYPE_VALUES`

@@ -267,9 +267,11 @@ curl -sS "$B/api/v1/documents?kv=dip_custom_utility_bill:amount_due:gte:100" | j
 kv field "amount_due" is a text field, which supports eq, not "gte"
 ```
 
-`PUT` the config with the override. A `PUT` keeps the id — so `meta.config` on every
-document already processed with it stays meaningful, which delete-and-recreate would
-break — and re-provisions both Knowledge Box objects:
+`PUT` the config with the override. A `PUT` keeps the id — so `meta.config` (which is the
+config **id**, with the human wording in `meta.configLabel`) on every document already
+processed with it still resolves, and `?config=` filtering and `documentCount` keep
+working. Delete-and-recreate would break all three. It also re-provisions both Knowledge
+Box objects:
 
 ```bash
 CFG=cfg_98dcddfa

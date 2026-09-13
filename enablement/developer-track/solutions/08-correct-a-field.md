@@ -211,6 +211,39 @@ possible: one field's entire change history across every reviewer, without readi
 document. Paging is by sequence number rather than offset, so an entry written while an
 operator is reading cannot duplicate or hide a row.
 
+### What the log redacts, and what it must not
+
+Your correction's `before` and `after` are the real values — `"PO-88421"` and
+`"PO-88422"` — not `***`. That is the point of the log: an entry that hides its own
+subject is worse than no entry, because it looks complete. Redaction is anchored to
+property names that *end* in a credential word (`apiKey`, `api_key`, `adminToken`,
+`clientSecret`, `password`, `authorization`, `cookie`), so compare the correction above
+with a secret rotation:
+
+```bash
+curl -sS "$B/api/v1/admin/audit?action=settings.update" -H "$A" | jq '.items[0]'
+```
+```json
+{
+  "seq": 2,
+  "actor": { "type": "admin", "name": "admin token" },
+  "action": "settings.update",
+  "target": "connection.apiKey",
+  "before": "***",
+  "after": "***",
+  "detail": "secret rotated"
+}
+```
+
+For a secret, *that it changed* is the record — the target names which one, the actor
+names who, and `detail` says what happened, with no value anywhere. Everything else stays
+readable: a `config.create` entry carries the whole configuration, every field's `key`
+included, which is what lets an operator answer "what exactly did this config look like
+when it was created" months later. (Until 13 September the redaction pattern was an
+unanchored `key`, so a `config.create` entry came back with every field `key` and
+`provisioning.keyValueSchema` blanked to `***` — if your copy of this lab predates that
+fix, this is why your output looked shredded.)
+
 ## 8. Undo
 
 ```bash
