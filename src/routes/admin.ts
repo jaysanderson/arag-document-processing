@@ -70,6 +70,18 @@ export function registerAdminRoutes(app: App, deps: AdminDeps): void {
     { validate: operationSchemas(openapi, "/api/v1/admin/login", "post"), operationId: "adminLogin" },
   );
 
+  app.post(
+    "/api/v1/admin/logout",
+    (ctx) => {
+      // No guard and no 401: an operator signing out of a shared machine must always
+      // succeed, and answering differently for a caller who had no session would leak
+      // whether one existed. `maxAge: 0` is what actually removes the cookie.
+      ctx.setCookie("arag_admin", "", { maxAge: 0 });
+      return { ok: true };
+    },
+    { operationId: "adminLogout" },
+  );
+
   app.get(
     "/api/v1/admin/health",
     async () => {

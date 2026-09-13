@@ -1,8 +1,15 @@
 # Document Processing — showcase script
 
-Target length: **2:30–3:00**. Recorded against the mock ARAG (`make showcase`) so it is
+Target length: **3:04**. Recorded against the mock ARAG (`make showcase`) so it is
 deterministic and needs no credentials. Narration is written to be read at a measured,
 conversational pace — pause on each on-screen action rather than racing ahead of it.
+
+**The timings below are the recording's timings, not an aspiration.** `record.spec.ts` holds
+each beat on screen until its scripted end time (`BEATS` there mirrors the `### mm:ss–mm:ss`
+headings here), so the video is the length of this script and the narration lays over it
+without re-cutting. Keep the two in step: change a duration here and change it there. Set
+`SHOWCASE_PACE=0.25` to run the whole walkthrough quickly when you are only checking that it
+still passes.
 
 Screenshot filenames below are produced by `showcase/record.spec.ts` and match
 `STORYBOARD.md`. The video is `showcase/out/record-showcase-walkthrough/video.webm`.
@@ -41,7 +48,7 @@ alert stating this deployment runs the mock Knowledge Box.
 
 ---
 
-### 00:10–00:22 — The guided sample, and its tour
+### 00:10–00:21 — The guided sample, and its tour
 
 **On screen:** clicking `Start the guided sample` posts the built-in invoice and lands in
 the Documents queue; an advisory spotlight tour introduces the queue itself.
@@ -54,7 +61,7 @@ the Documents queue; an advisory spotlight tour introduces the queue itself.
 
 ---
 
-### 00:22–00:32 — Upload a document worth reviewing
+### 00:21–00:31 — Upload a document worth reviewing
 
 **On screen:** the upload drawer, opened over the Documents list: a dropzone, the accepted
 file types and size limit read from the API, and a config picker.
@@ -66,7 +73,7 @@ file types and size limit read from the API, and a config picker.
 
 ---
 
-### 00:32–00:44 — The queue: worth reviewing, worth trusting
+### 00:31–00:42 — The queue: worth reviewing, worth trusting
 
 **On screen:** the new row — `invoice-review.txt`, identified by its own invoice number and
 supplier rather than its filename — reaches `Ready`: 12 fields, 100% grounding, one issue
@@ -80,7 +87,7 @@ flagged.
 
 ---
 
-### 00:44–00:59 — The record: a claim with a denominator
+### 00:42–00:56 — The record: a claim with a denominator
 
 **On screen:** the document detail's Record tab. The trust strip states "12 of 12 fields
 carry a quote found in this document," the exact/near/none breakdown, and — right below
@@ -94,7 +101,7 @@ it — the reconciliation warning.
 
 ---
 
-### 00:59–01:14 — The evidence beat: a field's own quote
+### 00:56–01:09 — The evidence beat: a field's own quote
 
 **On screen:** the `Total` field's evidence disclosure, opened — the quote "TOTAL DUE:
 $25,750.00" in the model's own words, with the reconciliation issue carried inline beneath
@@ -107,7 +114,7 @@ it rather than left for a banner at the top to explain.
 
 ---
 
-### 01:14–01:29 — Source & evidence: the quote, in the document's own text
+### 01:09–01:22 — Source & evidence: the quote, in the document's own text
 
 **On screen:** the Source & evidence tab: the left rail lists every field's evidence, the
 right pane is the document's own extracted text with each quote highlighted; selecting
@@ -121,32 +128,50 @@ right pane is the document's own extracted text with each quote highlighted; sel
 
 ---
 
-### 01:29–01:39 — Pipeline: seven stages, real timings
+### 01:22–01:36 — The values, as the Knowledge Box now holds them
+
+**On screen:** the record's JSON tab, switched to `Key-value fields`: the schema
+`dip_invoice_extraction` the config provisioned, a `Written` chip, and a table pairing each
+of the product's own property names with the Knowledge Box key it was written under and the
+value that went in — `invoice_number` → `INV-2026-1188`.
+**Screenshot:** `08-keyvalues.png`
+
+> "Here is the part that outlives this product. Those values weren't only written to our own
+> store — they were written onto the resource in your Knowledge Box, as typed key-value
+> fields, under a schema this extraction config provisioned. Which means they're queryable
+> by anything else already pointed at that Knowledge Box: every invoice over ten thousand
+> dollars from this supplier, issued after March. And if the platform refused a value —
+> wrong type, or a field the scan never gave us — the record says so, here, rather than
+> quietly dropping it."
+
+---
+
+### 01:36–01:46 — Pipeline: seven stages, real timings
 
 **On screen:** the Pipeline tab — process, classify, extract, entities, summary, validate,
 standardize — each with a real duration and a status.
-**Screenshot:** `08-pipeline.png`
+**Screenshot:** `09-pipeline.png`
 
 > "Every stage that produced this record is on the Pipeline tab, with its own timing — this
 > is the same job the queue streamed live, available afterwards for any run."
 
 ---
 
-### 01:39–01:47 — Export the record
+### 01:46–01:53 — Export the record
 
 **On screen:** back on Record, `Export CSV` downloads the file; a toast confirms it.
-**Screenshot:** `09-export.png`
+**Screenshot:** `10-export.png`
 
 > "The record exports as CSV, JSON or XML — whatever the downstream ledger expects, with no
 > re-mapping."
 
 ---
 
-### 01:47–01:59 — Ask this document
+### 01:53–02:05 — Ask this document
 
 **On screen:** the Ask tab: "What is the total due and when?" answered from the document's
 own text, with an `Open in source` link back to the passage it came from.
-**Screenshot:** `10-ask.png`
+**Screenshot:** `11-ask.png`
 
 > "Because the document lives in a Knowledge Box, not just a table row, you can ask it a
 > question directly and get an answer traced back to the same source text — not the
@@ -154,22 +179,22 @@ own text, with an `Open in source` link back to the passage it came from.
 
 ---
 
-### 01:59–02:11 — A custom extraction config
+### 02:05–02:17 — A custom extraction config
 
 **On screen:** Configs → `+ New config`: naming two fields — Policy Number, Insurer — the
 key preview updating live as they're typed.
-**Screenshot:** `11-config-builder.png`
+**Screenshot:** `12-config-builder.png`
 
 > "Eleven document types ship built in, but real catalogues always have one more form.
 > Naming the fields here is the whole job — saving is what does the work."
 
 ---
 
-### 02:11–02:19 — Saved, and provisioned
+### 02:17–02:26 — Saved, and provisioned
 
 **On screen:** the new config's detail page: `Ready`, and its own stored ARAG search
 configuration, `dip_custom_insurance_card`.
-**Screenshot:** `12-config-saved.png`
+**Screenshot:** `13-config-saved.png`
 
 > "Saving doesn't just store a list of names — it provisions a stored search configuration
 > that forces the model to return exactly these fields, grounded in the document, every
@@ -177,34 +202,34 @@ configuration, `dip_custom_insurance_card`.
 
 ---
 
-### 02:19–02:27 — Settings: what this deployment is connected to
+### 02:26–02:34 — Settings: what this deployment is connected to
 
 **On screen:** Settings → Connection — Knowledge Box, model, extract strategy, mean
 grounding — and the same mock-Knowledge-Box statement, without needing an admin token.
-**Screenshot:** `13-settings.png`
+**Screenshot:** `14-settings.png`
 
 > "Anyone using the product can answer 'what am I actually connected to?' for themselves,
 > here — no admin token required."
 
 ---
 
-### 02:27–02:37 — Admin: sign in, and the operator's own view
+### 02:34–02:44 — Admin: sign in, and the operator's own view
 
 **On screen:** signing in to `/admin/` with the deployment's admin token; the Overview
 shows Knowledge Box health, the grounding mean and anything that needs attention.
-**Screenshot:** `14-admin-overview.png`
+**Screenshot:** `15-admin-overview.png`
 
 > "Operators get a separate product behind its own sign-in: live health, grounding, and a
 > worklist of what needs attention — not a tab bolted onto the app Dana uses."
 
 ---
 
-### 02:37–02:47 — Admin → Connection: the stored search configurations
+### 02:44–02:54 — Admin → Connection: the stored search configurations
 
 **On screen:** the Connection tab lists every stored ARAG search configuration, including
 the one just created; opening `dip_invoice_extraction` shows its model, grounding strategy
 and JSON schema.
-**Screenshot:** `15-admin-connection.png`
+**Screenshot:** `16-admin-connection.png`
 
 > "Every extraction config is backed by a real, inspectable search configuration — the
 > model, the `full_resource` grounding strategy, the prompt and the schema — readable here
@@ -212,14 +237,19 @@ and JSON schema.
 
 ---
 
-### 02:47–02:55 — The API docs
+### 02:54–03:04 — The API explorer: the contract, running
 
-**On screen:** `/api/v1/docs`, the generated Redoc reference.
-**Screenshot:** `16-api-docs.png`
+**On screen:** the workspace's own `API` section: every operation grouped by tag, generated
+from `/api/v1/openapi.json`; `listDocuments` selected, `page_size` set to 5, `Send request`
+answering 200 with the real payload, and the copyable curl beneath it.
+**Screenshot:** `17-api-explorer.png`
 
-> "Every screen in this recording is a documented, contract-tested `/api/v1` endpoint —
-> there is no UI-only capability. Clone the repo, run `make install && make dev`, and it's
-> the same product, running against the same mock, with no account required to start."
+> "Every screen in this recording is a documented `/api/v1` endpoint — and you don't have to
+> take that on trust, because the product ships the API as a screen. This list is generated
+> from the OpenAPI document the server serves, so an operation that exists is an operation
+> you can see here, fill in, send against this deployment, and copy out as curl. There is no
+> UI-only capability. Clone the repo, run `make install && make dev`, and it's the same
+> product against the same mock, with no account required to start."
 
 ---
 

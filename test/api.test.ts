@@ -423,6 +423,17 @@ test("admin routes require the token; login sets an HttpOnly cookie", async () =
   assert.equal((await c.get("/api/v1/admin/usage", { cookie })).status, 200);
   assert.equal((await c.get("/api/v1/admin/logs?level=info&limit=10", { cookie })).status, 200);
   assert.equal((await c.post("/api/v1/admin/login", { token: "wrong" })).status, 401);
+
+  // Sign-out is the other half of sign-in: an operator on a shared machine must be able to
+  // end the session rather than wait twelve hours for the cookie to expire.
+  const out = await c.post("/api/v1/admin/logout", {}, { cookie });
+  assert.equal(out.status, 200);
+  const cleared = out.headers.get("set-cookie") ?? "";
+  assert.match(cleared, /arag_admin=/);
+  assert.match(cleared, /Max-Age=0/, "the cookie must actually be removed, not just emptied");
+  // Signing out when you were not signed in is not an error — answering differently would
+  // tell an unauthenticated caller whether a session existed.
+  assert.equal((await c.post("/api/v1/admin/logout", {})).status, 200);
 });
 
 test("admin config redacts secrets", async () => {

@@ -2221,6 +2221,23 @@ export const openapi = buildOpenApi({
         },
       },
     },
+    "/api/v1/admin/logout": {
+      post: {
+        operationId: "adminLogout",
+        tags: ["admin"],
+        summary: "End the operator session",
+        description:
+          "Clears the `arag_admin` cookie. The other half of `adminLogin`: an operator who can " +
+          "sign in on a shared machine has to be able to sign out of it, and waiting twelve hours " +
+          "for the cookie to expire is not a control. Always answers 200 — signing out when you " +
+          "were not signed in is not an error, and reporting one would tell an unauthenticated " +
+          "caller whether a session existed.",
+        responses: {
+          200: jsonResponse({ type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } }),
+          ...standardResponses,
+        },
+      },
+    },
     "/api/v1/admin/health": {
       get: {
         operationId: "adminHealth",

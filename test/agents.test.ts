@@ -50,7 +50,10 @@ test("every schema is internally consistent", () => {
       assert.ok(key in schema.labels, `${docType}: property "${key}" missing a label`);
     }
     // answer_json_schema shape is valid
-    const ajs = toAnswerJsonSchema(schema) as any;
+    const ajs = toAnswerJsonSchema(schema) as {
+      name: string;
+      parameters: { type: string; required: string[] };
+    };
     assert.equal(typeof ajs.name, "string");
     assert.equal(ajs.parameters.type, "object");
     assert.deepEqual(ajs.parameters.required, schema.required);

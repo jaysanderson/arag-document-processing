@@ -1,0 +1,37 @@
+{
+  "_note": "Applied by videos/shared/narrate-walkthrough.mjs on top of showcase/SCRIPT.md, which is never edited. No cue TIMES are changed: the narrated video is showcase/out/record-showcase-walkthrough/video-retimed.webm, built by videos/shared/retime-walkthrough.mjs, which maps the 16.8s raw recording onto SCRIPT.md's own timeline (see anchors.json), so every beat lands on its scripted screen by construction. The only changes are trims, because the script is written longer than the beats it sits in: at this voice's ~162 wpm the 16 cues need 3:49 of speech against the scripted 3:01.",
+  "cues": {
+    "1": {
+      "text": "Document Processing turns paperwork into a checked, structured record, and shows where every value came from. It runs against a mock Knowledge Box — and says so.",
+      "note": "trimmed 58w to 26w for a 10s beat"
+    },
+    "2": {
+      "text": "Starting the guided sample drops a document into the queue and opens a short tour of the real screen underneath it — not a mock of the product, the product itself. The tour never blocks the page it describes.",
+      "note": "trimmed 48w to 38w for a 12s beat"
+    },
+    "4": {
+      "text": "A supplier invoice whose subtotal and tax don't add up to the printed total. The row tells the story already: twelve fields, full grounding, one issue flagged.",
+      "note": "trimmed 46w to 27w for a 12s beat; the spoken filename read slowly and was cut"
+    },
+    "5": {
+      "text": "Every record opens with this strip — never a bare percentage. 'Twelve of twelve fields carry a quote found in this document' is a claim you can check. And the subtotal and tax don't reconcile with the total — flagged automatically.",
+      "note": "trimmed 61w to 40w for a 15s beat"
+    },
+    "6": {
+      "text": "Every field carries its own quote, not just a value. Opening the evidence on Total shows exactly what was read — and the issue that quote raised sits on the field itself, not only in a banner.",
+      "note": "trimmed 49w to 36w for a 15s beat; the spoken dollar figure read slowly and was cut"
+    },
+    "12": {
+      "text": "Saving doesn't just store names — it provisions a stored search configuration that forces the model to return exactly these fields, grounded. No redeploy.",
+      "note": "trimmed 36w to 24w for an 8s beat"
+    },
+    "15": {
+      "text": "Every extraction config is backed by a real search configuration — model, strategy, prompt and schema — readable without the Knowledge Box dashboard.",
+      "note": "trimmed 32w to 22w for a 10s beat"
+    },
+    "16": {
+      "text": "Every screen in this recording is a documented, contract-tested endpoint — there is no UI-only capability. Clone the repo, run it, and it's the same product against the same mock.",
+      "note": "trimmed 42w to 30w; the closing beat is held 14s by retime-walkthrough.mjs --tail 14"
+    }
+  }
+}

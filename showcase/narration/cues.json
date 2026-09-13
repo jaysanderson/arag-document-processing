@@ -1,0 +1,175 @@
+{
+  "voice": "WZlYpi1yf6zJhNWXih74",
+  "model": "eleven_multilingual_v2",
+  "settings": {
+    "stability": 0.45,
+    "similarity_boost": 0.8,
+    "style": 0.1,
+    "use_speaker_boost": true
+  },
+  "format": "mp3_44100_128",
+  "script": "showcase/SCRIPT.md",
+  "generated": "2026-09-13T02:00:21.829Z",
+  "cues": [
+    {
+      "index": 1,
+      "start": "00:00.0",
+      "startSeconds": 0,
+      "title": "Welcome, and the mock-Knowledge-Box honesty rule",
+      "hash": "d98427f3d8a26dfe",
+      "file": "01.mp3",
+      "duration": 10.449,
+      "text": "Document Processing turns paperwork into a checked, structured record, and shows where every value came from. It runs against a mock Knowledge Box — and says so."
+    },
+    {
+      "index": 2,
+      "start": "00:10.0",
+      "startSeconds": 10,
+      "title": "The guided sample, and its tour",
+      "hash": "5dcb3f1e7adb7858",
+      "file": "02.mp3",
+      "duration": 13.189,
+      "text": "Starting the guided sample drops a document into the queue and opens a short tour of the real screen underneath it — not a mock of the product, the product itself. The tour never blocks the page it describes."
+    },
+    {
+      "index": 3,
+      "start": "00:22.0",
+      "startSeconds": 22,
+      "title": "Upload a document worth reviewing",
+      "hash": "7a0e1a0844fb5ae9",
+      "file": "03.mp3",
+      "duration": 10.913,
+      "text": "To see the product prove something, I'll upload a document with a real problem in it — the accepted types and the size limit here come from the API, not from markup that could drift out of date."
+    },
+    {
+      "index": 4,
+      "start": "00:32.0",
+      "startSeconds": 32,
+      "title": "The queue: worth reviewing, worth trusting",
+      "hash": "22f138b0b72fde96",
+      "file": "04.mp3",
+      "duration": 11.053,
+      "text": "A supplier invoice whose subtotal and tax don't add up to the printed total. The row tells the story already: twelve fields, full grounding, one issue flagged."
+    },
+    {
+      "index": 5,
+      "start": "00:44.0",
+      "startSeconds": 44,
+      "title": "The record: a claim with a denominator",
+      "hash": "ec3fdf5545ee3172",
+      "file": "05.mp3",
+      "duration": 15.372,
+      "text": "Every record opens with this strip — never a bare percentage. 'Twelve of twelve fields carry a quote found in this document' is a claim you can check. And the subtotal and tax don't reconcile with the total — flagged automatically."
+    },
+    {
+      "index": 6,
+      "start": "00:59.0",
+      "startSeconds": 59,
+      "title": "The evidence beat: a field's own quote",
+      "hash": "9114cc0bcbc0638a",
+      "file": "06.mp3",
+      "duration": 13.978,
+      "text": "Every field carries its own quote, not just a value. Opening the evidence on Total shows exactly what was read — and the issue that quote raised sits on the field itself, not only in a banner."
+    },
+    {
+      "index": 7,
+      "start": "01:14.0",
+      "startSeconds": 74,
+      "title": "Source & evidence: the quote, in the document's own text",
+      "hash": "7a064e994fc52e98",
+      "file": "07.mp3",
+      "duration": 17.09,
+      "text": "This is the loop closing: the quote isn't just printed back at you, it's highlighted inside the actual text Progress Agentic RAG read from the document. Selecting a field jumps straight to its sentence — this is the difference between a system that asserts and one that shows."
+    },
+    {
+      "index": 8,
+      "start": "01:29.0",
+      "startSeconds": 89,
+      "title": "Pipeline: seven stages, real timings",
+      "hash": "eddb512a6070fee8",
+      "file": "08.mp3",
+      "duration": 9.242,
+      "text": "Every stage that produced this record is on the Pipeline tab, with its own timing — this is the same job the queue streamed live, available afterwards for any run."
+    },
+    {
+      "index": 9,
+      "start": "01:39.0",
+      "startSeconds": 99,
+      "title": "Export the record",
+      "hash": "67f10f82dcca5246",
+      "file": "09.mp3",
+      "duration": 6.92,
+      "text": "The record exports as CSV, JSON or XML — whatever the downstream ledger expects, with no re-mapping."
+    },
+    {
+      "index": 10,
+      "start": "01:47.0",
+      "startSeconds": 107,
+      "title": "Ask this document",
+      "hash": "1f8b10ea2df69496",
+      "file": "10.mp3",
+      "duration": 10.913,
+      "text": "Because the document lives in a Knowledge Box, not just a table row, you can ask it a question directly and get an answer traced back to the same source text — not the model's general knowledge."
+    },
+    {
+      "index": 11,
+      "start": "01:59.0",
+      "startSeconds": 119,
+      "title": "A custom extraction config",
+      "hash": "bfce12e424f7b665",
+      "file": "11.mp3",
+      "duration": 9.892,
+      "text": "Eleven document types ship built in, but real catalogues always have one more form. Naming the fields here is the whole job — saving is what does the work."
+    },
+    {
+      "index": 12,
+      "start": "02:11.0",
+      "startSeconds": 131,
+      "title": "Saved, and provisioned",
+      "hash": "b362202c0cdc362c",
+      "file": "12.mp3",
+      "duration": 9.334,
+      "text": "Saving doesn't just store names — it provisions a stored search configuration that forces the model to return exactly these fields, grounded. No redeploy."
+    },
+    {
+      "index": 13,
+      "start": "02:19.0",
+      "startSeconds": 139,
+      "title": "Settings: what this deployment is connected to",
+      "hash": "c1de526a655a6db7",
+      "file": "13.mp3",
+      "duration": 7.802,
+      "text": "Anyone using the product can answer 'what am I actually connected to?' for themselves, here — no admin token required."
+    },
+    {
+      "index": 14,
+      "start": "02:27.0",
+      "startSeconds": 147,
+      "title": "Admin: sign in, and the operator's own view",
+      "hash": "5690b58488da2b6d",
+      "file": "14.mp3",
+      "duration": 10.588,
+      "text": "Operators get a separate product behind its own sign-in: live health, grounding, and a worklist of what needs attention — not a tab bolted onto the app Dana uses."
+    },
+    {
+      "index": 15,
+      "start": "02:37.0",
+      "startSeconds": 157,
+      "title": "Admin → Connection: the stored search configurations",
+      "hash": "1d22b5fa78fa1ad5",
+      "file": "15.mp3",
+      "duration": 10.031,
+      "text": "Every extraction config is backed by a real search configuration — model, strategy, prompt and schema — readable without the Knowledge Box dashboard."
+    },
+    {
+      "index": 16,
+      "start": "02:47.0",
+      "startSeconds": 167,
+      "title": "The API docs",
+      "hash": "da94c5c75da7b370",
+      "file": "16.mp3",
+      "duration": 12.121,
+      "text": "Every screen in this recording is a documented, contract-tested endpoint — there is no UI-only capability. Clone the repo, run it, and it's the same product against the same mock."
+    }
+  ]
+}

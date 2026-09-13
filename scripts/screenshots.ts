@@ -116,14 +116,17 @@ async function main(): Promise<void> {
     const page = await ctx.newPage();
     page.on("pageerror", (e) => console.log("PAGEERROR", e.message));
 
-    const shot = async (name: string, fullPage = true): Promise<void> => {
-      if (ONLY && !name.includes(ONLY)) return;
-      await page.waitForTimeout(600);
-      const tag = await page.addStyleTag({ content: PIN_STICKY });
-      await page.screenshot({ path: `${OUT}/${name}.png`, fullPage });
-      await tag.evaluate((el) => (el as HTMLElement).remove());
-      console.log("shot", name);
-    };
+    const shotFor =
+      (p: Page): Shot =>
+      async (name: string, fullPage = true): Promise<void> => {
+        if (ONLY && !name.includes(ONLY)) return;
+        await p.waitForTimeout(600);
+        const tag = await p.addStyleTag({ content: PIN_STICKY });
+        await p.screenshot({ path: `${OUT}/${name}.png`, fullPage });
+        await tag.evaluate((el) => (el as HTMLElement).remove());
+        console.log("shot", name);
+      };
+    const shot = shotFor(page);
 
     const go = async (hash: string, ready: string): Promise<void> => {
       await page.goto(`${BASE}/${hash}`, { waitUntil: "networkidle" });
@@ -131,7 +134,13 @@ async function main(): Promise<void> {
     };
 
     await captureApp(page, go, shot);
-    await captureAdmin(page, shot);
+
+    // A fresh context for the operator console: the workspace capture above signs in as
+    // operator, and that cookie would skip straight past the sign-in card this shot is of.
+    const adminCtx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const adminPage = await adminCtx.newPage();
+    await captureAdmin(adminPage, shotFor(adminPage));
+    await adminCtx.close();
 
     // The responsive proof: the rail collapses to a scrim drawer and the page never
     // scrolls sideways.
@@ -174,34 +183,54 @@ async function captureApp(page: Page, go: Go, shot: Shot): Promise<void> {
   const id = new URL(page.url()).hash.split("/")[2];
   await go(`#/documents/${id}/source`, ".dip-source");
   await shot("after-04-document-source");
-  await go(`#/documents/${id}/pipeline`, ".dip-timeline__bar, .arag-timeline");
+  await go(`#/documents/${id}/pipeline`, "#tabPanel");
   await shot("after-05-document-pipeline");
-  await go(`#/documents/${id}/ask`, "form");
+  await go(`#/documents/${id}/ask`, "#askInput");
   await shot("after-06-document-ask");
-  await go(`#/documents/${id}/json`, "pre, .arag-json");
-  await shot("after-07-document-json-kv");
 
-  await go("#/configs", ".arag-datatable tbody tr, .arag-card");
-  await shot("after-08-configs");
-  await go("#/configs/new", "form");
-  await shot("after-09-config-builder");
+  // The pass's headline capability: the values as the Knowledge Box now holds them.
+  await go(`#/documents/${id}/json?view=kv`, "#jsonPane");
+  await shot("after-07-document-keyvalues");
+  await go(`#/documents/${id}/json`, "#jsonPane");
+  await shot("after-08-document-json");
+
+  await go("#/configs", ".arag-filterbar");
+  await shot("after-09-configs");
+  await go("#/configs/invoice", "#kvCard");
+  await shot("after-10-config-keyvalue-schema");
+  await go("#/configs/new", "#cfgName");
+  await shot("after-11-config-builder");
 
   await go("#/jobs", ".arag-datatable tbody tr");
-  await shot("after-10-jobs");
+  await shot("after-12-jobs");
 
-  await go("#/ask", "form");
-  await shot("after-11-ask");
+  await go("#/ask", "#askInput, form");
+  await shot("after-13-ask");
 
-  await go("#/api", "#apiList [data-op]");
-  await shot("after-12-api-explorer");
+  await go("#/api?op=listDocuments", "#tryForm");
+  await shot("after-14-api-explorer");
+
+  // Signed out first: the brief's rule is that a viewer can see every setting and where its
+  // value came from, and only editing needs the operator.
+  await go("#/settings/connection", "#panel");
+  await shot("after-15-settings-locked");
+
+  // Then signed in through the in-shell drawer, which is where the bar is actually met —
+  // every setting editable, in place, in the same shell.
+  await page.click("#signInTop");
+  await page.waitForSelector(".arag-drawer");
+  await page.fill("#opToken", ADMIN_TOKEN);
+  await page.click("#opSubmit");
+  await page.waitForSelector(".arag-drawer", { state: "detached", timeout: 30_000 });
 
   for (const [n, tab] of [
-    ["13-settings-connection", "connection"],
-    ["14-settings-branding", "branding"],
-    ["15-settings-limits", "limits"],
-    ["16-settings-keys", "keys"],
+    ["16-settings-connection", "connection"],
+    ["17-settings-branding", "branding"],
+    ["18-settings-limits", "limits"],
+    ["19-settings-keys", "keys"],
+    ["20-settings-retention", "retention"],
   ] as const) {
-    await go(`#/settings/${tab}`, ".arag-card, form");
+    await go(`#/settings/${tab}`, "#panel");
     await shot(`after-${n}`);
   }
 }
@@ -209,23 +238,24 @@ async function captureApp(page: Page, go: Go, shot: Shot): Promise<void> {
 async function captureAdmin(page: Page, shot: Shot): Promise<void> {
   await page.goto(`${BASE}/admin/`, { waitUntil: "networkidle" });
   await page.waitForSelector(".arag-signin");
-  await shot("after-20-admin-signin", false);
+  await shot("after-21-admin-signin", false);
 
   await page.fill("#token", ADMIN_TOKEN);
   await page.press("#token", "Enter");
   await page.waitForSelector(".arag-railnav", { timeout: 30_000 });
-  await shot("after-21-admin-overview");
+  await shot("after-22-admin-overview");
 
   for (const [n, nav] of [
-    ["22-admin-settings", "Settings"],
     ["23-admin-connection", "Connection"],
-    ["24-admin-logs", "Logs"],
-    ["25-admin-audit", "Audit"],
+    ["24-admin-configs", "Configs"],
+    ["25-admin-logs", "Logs"],
+    ["26-admin-audit", "Audit"],
+    ["27-admin-security", "Security"],
   ] as const) {
     const item = page.locator(`[data-nav="${nav}"]`);
     if ((await item.count()) === 0) continue;
     await item.click();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(900);
     await shot(`after-${n}`);
   }
 }
