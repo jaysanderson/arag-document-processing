@@ -6,7 +6,7 @@ Drop in a document — a PDF, a photo of a form, a scanned invoice — and get b
 
 ## Elevator paragraph
 
-Documents still arrive as pictures of data: PDFs, photographed forms, scanned statements. Document Processing turns them into canonical records — typed fields with confidence scores, named entities, a summary, and validation issues — by running a multi-agent pipeline on Progress Agentic RAG. Eleven built-in schemas cover invoices, claims, contracts, statements and more; anything else is a custom config away. Export to JSON, XML or CSV, or just ask the document a question. API-first, open source, zero runtime dependencies.
+Documents still arrive as pictures of data: PDFs, photographed forms, scanned statements. Document Processing turns them into canonical records — typed fields with confidence scores, named entities, a summary, and validation issues — by running a multi-agent pipeline on Progress Agentic RAG. Eleven built-in schemas cover invoices, claims, contracts, statements and more; anything else is a custom config away. The structured values do not stay locked in this product: each extraction config provisions a matching **key-value schema** in the Knowledge Box, and every verified record is written back as typed key-value fields, so the extracted data is searchable and filterable where the documents already live. Export to JSON, XML or CSV, ask one document a question or ask the whole filtered corpus, and correct a field by hand when the model gets it wrong. API-first, open source, zero runtime dependencies.
 
 ## Product name
 
@@ -80,12 +80,12 @@ The sentence that lands: "Ask the contract 'what's the termination notice period
 | Alternative | What it does well | Where it hurts | Where Document Processing wins |
 |---|---|---|---|
 | Cloud OCR/IDP services (AWS Textract, Azure Document Intelligence, Google Document AI) | Mature, high-volume OCR and layout extraction; deep integration into each cloud's own ecosystem; strong per-field bounding-box and table support | You still build the business logic on top: classification, validation, export formats, a Q&A layer and an API surface are all your own code; pricing and vendor lock-in are per-cloud | Ships that layer already — canonical record, confidence, validation, JSON/XML/CSV export and grounded Q&A behind one small API, open source so you can see and change how it works |
-| Specialist IDP vendors (Rossum, Instabase, Hyperscience) | Purpose-built human-in-the-loop review queues, learning/feedback loops, deep enterprise workflow integration, mature accuracy tuning for high-volume production use | Commercial licensing, longer sales and implementation cycles, often per-document pricing that adds up at volume | Open source, self-hostable, and usable in minutes against a mock with no account — but honestly, it does **not** yet have their review-queue or fine-tuning maturity (see below) |
+| Specialist IDP vendors (Rossum, Instabase, Hyperscience) | Purpose-built human-in-the-loop review queues, learning/feedback loops, deep enterprise workflow integration, mature accuracy tuning for high-volume production use | Commercial licensing, longer sales and implementation cycles, often per-document pricing that adds up at volume | Open source, self-hostable, and usable in minutes against a mock with no account, and it writes its structured output back into the Knowledge Box as typed, filterable key-value fields rather than only into its own store — but honestly, it has field-level correction, not their routed review-queue or fine-tuning maturity (see below) |
 | DIY: call an LLM API directly with your own prompt | Fast to start, full control over the prompt, no new vendor | No grounding discipline (easy to hallucinate a field that isn't in the document), no schema contract, no confidence/validation model, every team reinvents export formats and error handling | Encodes the hard-won grounding mechanics (`full_resource`, query seeding, string-then-normalise amounts) and a stable schema/API contract once, instead of every integrator rediscovering them independently |
 
 **What this MVP honestly does not do**, so nobody buys the wrong expectation:
 
-- No human-in-the-loop review queue or approval workflow — validation issues are visible via the API and admin panel, but there is no built-in UI for a person to correct a field and have that correction fed back.
+- Field-level human correction exists (in place, on the record, audited and written back to the Knowledge Box), but there is no routed **review queue** — no assignment, no approval steps, no SLA tracking. The worklist is a filtered list, not a workflow engine.
 - No fine-tuning or model-training tooling — extraction quality is inherited entirely from the configured ARAG generative model.
 - The job runner is a single in-process instance, not a distributed queue — fine for departmental volumes and demos, not yet built for high-throughput production scale.
 - No table-cell-level bounding boxes or layout coordinates — fields come back as values with confidence, not as a positional map onto the page image.
@@ -95,11 +95,69 @@ The sentence that lands: "Ask the contract 'what's the termination notice period
 - **Eleven built-in extraction schemas** (invoice, receipt, purchase order, contract, résumé, medical claim, pre-authorisation, bank statement, form, report, generic) plus unlimited **custom configs**, each provisioned as a stored ARAG search configuration (`dip_<schema>`) so the model, the grounding strategy and the JSON schema live in the Knowledge Box, not scattered across client code.
 - A **canonical record** for every document: typed fields with per-field confidence and the original raw value, named entities, a topic-tagged summary, and explicit validation issues (e.g. subtotal + tax not matching the total) rather than a silent best guess.
 - **Export to JSON, XML or CSV** from the same record, verified against the running server.
-- **Grounded Q&A** per document (`POST /documents/{id}/ask`), answering from the document's own text rather than the model's general knowledge.
+- **Typed key-value fields written into the Knowledge Box** for every processed document,
+  conforming to a schema the extraction config provisions and the platform validates on
+  write — filterable through `/find` from the Documents list and from `GET /api/v1/documents`.
+- **A Data Augmentation generator agent per config** as a second, platform-side extraction
+  path, compared field by field against this product's own pipeline on the record.
+- **Grounded Q&A** per document (`POST /documents/{id}/ask`) and across a filtered set of
+  them (`POST /api/v1/ask`), answering from the documents' own text rather than the model's
+  general knowledge, with every citation linking back to the document it came from.
+- **Human correction with honest consequences** (`PUT /documents/{id}/fields/{key}`): a
+  reviewer can fix a value, and the corrected value is re-checked against the document's own
+  text — if it is there, it earns a real locatable quote; if it is not, the field shows no
+  quote and the grounding score falls. The previous value, the reason and the reviewer are
+  kept, and the correction is written back to the Knowledge Box key-value field.
+- **An in-product API explorer**: every operation in the OpenAPI document, with its
+  parameters, a live "try it" against this deployment and a copyable curl — generated from
+  the spec, so it cannot drift from the API.
+- **Every setting editable in the product** and persisted, with environment variables as
+  defaults the store overrides, secrets as set-once-and-rotate, and every change audited.
 - A **full versioned API** under `/api/v1`, documented by an OpenAPI 3.1 spec served as both Redoc and Swagger UI, with RFC 9457 problem responses.
 - **Open source, Apache-2.0.**
 - **Zero runtime dependencies** — the entire service runs on the Node standard library.
 - Runs end-to-end against an **in-process mock Knowledge Box** with `ARAG_MOCK=1` — no ARAG account, no credentials, no LLM spend required to see it work.
+
+## Structured values live in the Knowledge Box
+
+*This is the paragraph for the product page.*
+
+Most document-extraction tools hand you a JSON blob and leave the structured data stranded
+in their own database. Document Processing writes it back where the documents already are.
+Every extraction config — the eleven built-ins and every custom one — provisions a matching
+**key-value schema** in the Progress Agentic RAG Knowledge Box: typed fields (text, integer,
+float, boolean, date), with required, range and repeated modifiers, and the field
+descriptions that give the extraction its intent. After a document is processed and its
+fields are verified against the document's own text, the record is written onto the resource
+as typed key-value fields, validated by the platform at write time — a value of the wrong
+type is rejected with a 422 and reported against the field that caused it, rather than
+silently stored. From that moment the extracted values are first-class Knowledge Box data:
+you can filter and search on them with a filter expression — "every invoice over $10,000
+from this supplier, issued after March" — from the product's Documents list, from the API,
+or from anything else you point at the same Knowledge Box. A Progress Agentic RAG **Data
+Augmentation generator agent** can be provisioned per config against the same schema, giving
+you a second, platform-side extraction path to run beside this product's own and compare
+field by field.
+
+**Why it matters.** The structured output outlives the tool that produced it. Your extracted
+data is not a report this product generated for you; it is typed, validated, queryable data
+on the resource itself, available to every other system already connected to that Knowledge
+Box. And because the schema and its field descriptions are the same artefact that guides the
+extraction, changing what you extract and changing what you can filter on are one action,
+not two.
+
+**What we verified, and what we did not.** Every call behind this — schema CRUD, both write
+shapes, the read path, the 422 behaviour, the filter-expression syntax and the generator
+agent's lifecycle — was exercised against a live Knowledge Box and the captured shapes are in
+[`../architecture/arag-integration.md`](../architecture/arag-integration.md). Three limits
+are worth stating plainly rather than discovering later: key-value filtering works through
+`/find` and `/ask` but **not** `/catalog`, and key-value fields are **not facetable**, so the
+product's key-value filters return matches rather than counts; and overwriting a value does
+not remove the previous one from the Knowledge Box's filter index, so a corrected document
+can still match a filter on the value it used to have — the product says so on the record
+rather than hiding it. The generator agent's end-to-end write latency we could not confirm:
+provisioned runs were still scheduled after twenty minutes, so we document the lifecycle we
+verified and make no claim about how quickly it lands.
 
 ## Objection handling
 
@@ -113,7 +171,7 @@ Every extraction agent uses `full_resource` grounding (the whole document goes i
 Accuracy on visually difficult documents is inherited from the configured ARAG generative model and, for images/PDFs, its extract strategy — this product does not do its own OCR model training or handwriting-specific tuning. If your documents are consistently low quality, budget time to evaluate the underlying model against samples before committing.
 
 **"Is there a screen for a human to review and correct extracted fields?"**
-Not in this MVP. Validation issues are visible through the API (`issues` on the record) and the admin panel, but there's no built-in review-and-correct workflow — a partner or customer would build that screen against the existing API, filtering on confidence or on the `issues` list.
+Yes, on the document record: a reviewer edits a field in place, gives a reason, and the change is kept with who made it and when, revertible, audited, and written back to the Knowledge Box key-value field. What it deliberately is *not* is a routed review queue with assignment, SLAs and approval steps — the worklist is the Documents list filtered by validation issues and grounding score, not a workflow engine. The correction is also honest about itself: a hand-entered value is re-checked against the document's own text, and if it is not there the field carries no quote and the grounding score drops rather than rising because a human touched it.
 
 **"Will this handle our production volume?"**
 The MVP job runner processes documents in a single in-process worker, which is appropriate for departmental volumes, pilots and demos. Scaling to high-throughput production means moving to a queue-backed worker pool — a known, scoped piece of work, not a redesign, since jobs are already a first-class resource in the API.
