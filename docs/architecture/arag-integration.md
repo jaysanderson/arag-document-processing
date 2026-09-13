@@ -413,6 +413,49 @@ On a resource written **once**, every operator is exactly correct, bounds inclus
 `integer` of 42 matches `lte: 42` and `gte: 42` but neither `lte: 41` nor `gte: 43`; a range
 of `{lower:1,upper:5}` matches `contains: 1` through `contains: 5` and nothing outside.
 
+### Write-to-filter lag (live behaviour, measured 2026-09-13)
+
+A key-value value is readable immediately and **filterable some time later**. Verified
+against the live Knowledge Box through this product's own `KvService`, three runs:
+
+```
+created schema dip_live_check {supplier: text, total: float, issued: date}
+created resource                                    → 201
+waitSearchable(rid)                                 → true   (resource IS searchable)
+PUT /resource/{rid}/key_value/dip_live_check        → 201
+GET /resource/{rid}?show=values                     → {"dip_live_check":{"supplier":"Acme Robotics",
+                                                        "total":116160,"issued":"2026-06-15T00:00:00Z"}}
+
+POST /find  filter_expression.key_value {schema_id:"dip_live_check", key:"total", gte:10000}
+  t+1s   matched  7 resources · ours: no
+  t+5s   matched 17 resources · ours: no
+  t+10s  matched 17 resources · ours: no
+  t+20s  matched 17 resources · ours: no
+  t+30s  matched 17 resources · ours: no      (≈66 s after the write, still not indexed)
+```
+
+Three things to take from it:
+
+- **The write is not the index.** `show=values` returns the value the instant it is written;
+  the filter does not see it for well over a minute. Waiting for the resource to be
+  *searchable* first does not help — the run above confirmed `waitSearchable` returned true
+  **before** the key-value write, and the filter still missed it. There is a second,
+  independent indexing step for key-value data with no status endpoint to wait on.
+- **What this means for the product.** A document that has just finished processing will not
+  be returned by a key-value filter yet, even though its Key-value view already shows every
+  value written. The Documents list reports what the Knowledge Box actually matched
+  (`filters.knowledgeBox.matchedResources`) rather than implying the filter is exhaustive,
+  which is the honest behaviour — but a reader who filters immediately after an upload and
+  sees their document missing is seeing this, not a bug in the filter.
+- **The matched count grew from 7 to 17** during the same window, against a schema created
+  seconds earlier, with none of the growth being our resource. Combined with the overwrite
+  trap below, the filter index is best understood as a separate, eventually-consistent store
+  that accumulates rather than mirrors: do not treat a key-value filter as a query over
+  current state, and do not build a count or a total on it.
+
+No `/find` call in any run returned an error: the filter-expression syntax is correct and
+the operators behave. This is latency and index semantics, not a rejected request.
+
 ### The overwrite trap (live behaviour, not documented)
 
 **Overwriting a kv value does not remove the previous value from the search index.** The
