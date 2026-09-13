@@ -702,6 +702,23 @@ Responses:
 Auth: public
 
 
+### `POST /api/v1/admin/logout`
+
+**End the operator session** — Clears the `arag_admin` cookie. The other half of `adminLogin`: an operator who can sign in on a shared machine has to be able to sign out of it, and waiting twelve hours for the cookie to expire is not a control. Always answers 200 — signing out when you were not signed in is not an error, and reporting one would tell an unauthenticated caller whether a session existed.
+
+Responses:
+
+- `200` OK — `application/json` object
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: public
+
+
 ### `GET /api/v1/admin/health`
 
 **Service health, KB connection test, extract strategy and model** — A live round trip to the Knowledge Box plus the operator's view of this process: uptime, the effective extract strategy and generative model, document counts by status (including `degraded`, records that finished but lost a stage) and the mean grounding score across stored records.
@@ -1131,7 +1148,9 @@ Auth: ApiKey or Bearer
 
 **Provision and start a Data Augmentation generator agent for this configuration** — The alternative extraction path: instead of this product asking the document a question per upload, ARAG runs a task of its own that sweeps resources and writes the values it extracts straight into this configuration's key-value schema. The schema's field descriptions are the instructions, which is why they are carried across verbatim when the schema is provisioned.
 
-ARAG allows only one running `ask` task per destination and the destination is the key-value schema, so starting again replaces the existing agent (stopped first — a running task cannot be deleted). Answers 400 when the configuration's key-value schema is not provisioned, because there would be nothing to write into.
+The agent writes into its **own** key-value schema (`<config schema>_gen`), provisioned on demand when the agent is started — not the schema the pipeline writes into. A key-value write is a full replace, so one shared schema would mean a sweep silently erasing the pipeline's values and polluting the resource's filter index; it also costs one more of the Knowledge Box's 20 key-value schemas, which is why it is not provisioned for every configuration at boot.
+
+ARAG allows only one running `ask` task per destination and the destination is that key-value schema, so starting again replaces the existing agent (stopped first — a running task cannot be deleted, which answers 409). Answers 400 when the configuration's key-value schema is not provisioned, because the agent's schema is derived from it.
 
 Note on what is verified: provisioning, the start → stop → delete lifecycle and reading generated values back were all confirmed against the live Knowledge Box. End-to-end write latency was **not** — every run started there was still scheduled after 20 minutes — so this returns as soon as the task is accepted and the caller polls.
 
@@ -1476,7 +1495,7 @@ Effective, non-secret runtime settings for the signed-in workspace: what this de
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `product` | object | yes |  |
-| `connection` | object | yes |  |
+| `connection` | object | yes | Whether this deployment can reach its Knowledge Box, and roughly where it is. The Knowledge Box id and its base URL are NOT here: they identify the tenant and its region host, which is an operator's business for the same reason the extract-strategy id is (DP-40). Both are on `GET /api/v1/admin/settings` behind `ADMIN_TOKEN`. |
 | `extraction` | object | yes |  |
 | `uploads` | object | yes |  |
 | `branding` | [Branding](#branding) | yes |  |
@@ -1848,6 +1867,17 @@ Which half of the query was answered by which system. `kv` filters are resolved 
 | `knowledgeBox` | object | yes |  |
 | `local` | array of string | yes | Parameters applied against this workspace's own store |
 
+### KvFilterSpec
+
+One parsed `kv=<schemaId>:<field>:<op>:<value>` filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `schemaId` | string | yes |  |
+| `key` | string | yes |  |
+| `op` | string (`eq`, `gte`, `lte`, `contains`) | yes |  |
+| `value` | string | yes |  |
+
 ### FieldCorrection
 
 One human correction to one extracted field, kept on the record forever. The model's original value and the reviewer are both preserved: a correction is recorded, never a silent overwrite. `verified` is the corrected value re-checked against the document's own text with the same contract the pipeline uses — a human typing a value does not make it grounded, but if the value they typed *is* in the document, that is worth showing.
@@ -1909,7 +1939,7 @@ A Data Augmentation generator agent this workspace started: an ARAG-side task (k
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `configId` | string | yes |  |
-| `kvSchemaId` | string | yes |  |
+| `kvSchemaId` | string | yes | The agent's own key-value schema (`<config schema>_gen`), never the pipeline's |
 | `taskId` | string | yes | ARAG task id |
 | `name` | string | yes | Task name as it appears in the ARAG dashboard |
 | `resourceId` | string |  | Set when the run was scoped to one document |
@@ -1927,7 +1957,8 @@ This product's extraction beside the generator agent's, field by field.
 | `documentId` | string | yes |  |
 | `resourceId` | string | yes |  |
 | `configId` | string | yes |  |
-| `kvSchemaId` | string | yes |  |
+| `kvSchemaId` | string | yes | Key-value schema the product's own pipeline writes into |
+| `generatorKvSchemaId` | string | yes | Key-value schema the generator agent writes into — deliberately a different one (`<schema>_gen`). A key-value write is a full replace, so one shared schema would mean whichever path ran last silently erased the other's values and polluted the resource's filter index; two schemas keep both columns independently readable. |
 | `agent` | object |  | The agent started for this configuration, or null when none is running. |
 | `generatorHasWritten` | boolean |  | True once the agent has written values onto this resource |
 | `fields` | array of object | yes |  |
