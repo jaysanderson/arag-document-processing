@@ -10,6 +10,8 @@ Documents still arrive as pictures of data: PDFs, photographed forms, scanned st
 
 ## Product name
 
+> **Shipped name: Document Processing.** The options below are the naming analysis kept for the record; the programme ships the product under its descriptive name, and a partner white-labels it under their own (DECISIONS D-30, D-31 in the workspace).
+
 The working name in code and UI is **Document Processing**; the earlier prototype called itself "Document Intelligence Studio". Per workspace decision D-15, naming does not block the MVP, but here are three real candidates.
 
 ### Option 1 — DocEngine
