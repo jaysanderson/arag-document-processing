@@ -55,8 +55,8 @@ By the end of this lab you will be able to:
 5. Write a unit or integration test against the mock and get `make check` green.
 6. **Write typed values into the Knowledge Box and filter on them** — and explain why an
    invoice total is a string on the record and a `float` in the Knowledge Box.
-7. **Change any setting in the running product** and prove, three ways, that it took effect
-   without a restart.
+7. **Change any setting in the running product** and prove, four ways, that it took
+   effect without a restart.
 8. **Correct an extracted field** and follow the consequences through the grounding score,
    the key-value filter index and the audit log.
 
@@ -571,10 +571,20 @@ const FORMATS = new Set(["json", "xml", "csv", "markdown"]);
 `src/openapi.ts`'s `/api/v1/documents/{id}/export` operation enumerates the same values in
 its `format` query parameter and lists a content type per format in its `200` response —
 add `"markdown"` to the `enum` and `"text/markdown": { schema: { type: "string" } }` to the
-content map. Skipping this does not break `curl`, but it does mean `missingFromSpec()` and
-`checkResponse()` — the contract tests — will not know the format exists, and STANDARDS §2
-requires every route and every documented shape it can return to live in `openapi.ts`
-first.
+content map.
+
+This step is **not** optional bookkeeping, and it is worth finding that out the hard way:
+if you skip it, the export answers `400` before your code is ever reached —
+
+```
+Invalid query: /format must be one of ["json","xml","csv"]
+```
+
+— because `operationSchemas(...)` validates every query parameter against the spec, so
+the spec's `enum` is the first gate a request meets. The `FORMATS` Set in the route is the
+second. This is what "API-first" means in practice here: the contract is executable, not
+documentation about the code. It is also what keeps `missingFromSpec()` and
+`checkResponse()` — the contract tests — able to see the new format at all.
 
 ### 4.4 Try it
 

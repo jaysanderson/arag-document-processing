@@ -84,6 +84,34 @@ export function serialize(rec: DocumentRecord, format: Format): string {
 checking — `Format` is a closed union — would itself flag a missing case if you forgot
 one; you don't need a `default: throw` to get that safety.)
 
+### The second switch
+
+Run `bunx tsc --noEmit -p tsconfig.json` now and it fails, in a file you have not
+touched a second time:
+
+```
+src/services/formats.ts(255,72): error TS2366: Function lacks ending return statement
+and return type does not include 'undefined'.
+```
+
+That is `serializeMany()` — the bulk projection `POST /api/v1/documents/bulk-export`
+calls. It switches on the same `Format` union, so widening the union broke it too. The
+exhaustiveness check found it for you; nothing about the error message says "markdown",
+which is why the exercise asks you to read it rather than telling you where to look.
+
+Decide what a bulk Markdown export *should* be before writing the case. Each of the
+other three keeps the single-record projection recognisable — an array, one `<documents>`
+root, one header then every record's rows. The Markdown equivalent is the documents one
+after another with a horizontal rule between them, which is exactly what someone pasting
+a batch into a ticket wants:
+
+```ts
+    case "markdown":
+      return recs.map((r) => toMarkdown(r)).join("\n\n---\n\n");
+```
+
+`bunx tsc --noEmit -p tsconfig.json` now passes.
+
 ## 2. `src/routes/documents.ts`
 
 ```ts
@@ -95,6 +123,23 @@ That's the only change this file needs — the handler already does
 returns.
 
 ## 3. `src/openapi.ts`
+
+Try the export first, without this edit:
+
+```bash
+curl -sS "http://localhost:8080/api/v1/documents/$ID/export?format=markdown" | jq -r .detail
+```
+```
+Invalid query: /format must be one of ["json","xml","csv"]
+```
+
+**A 400, from a spec you have not updated — not from the `FORMATS` Set you just
+widened.** `operationSchemas(...)` validates every `/api/v1` query parameter against the
+OpenAPI document before the handler runs, so the spec's `enum` is the *first* gate a
+request meets and the route's `FORMATS` Set is the second. Editing `openapi.ts` is
+therefore not documentation housekeeping you can defer — it is part of making the feature
+work. That is what "API-first" means concretely in this codebase (STANDARDS §2): the
+contract is executable.
 
 In the `/api/v1/documents/{id}/export` operation:
 
@@ -146,12 +191,13 @@ curl -sS -D - "http://localhost:8080/api/v1/documents/$ID/export?format=markdown
 ```
 HTTP/1.1 200 OK
 Content-Type: text/markdown; charset=utf-8
-Content-Disposition: attachment; filename="invoice.md"
+Content-Length: 1104
+Content-Disposition: attachment; filename="invoice.markdown"
 
 # invoice.txt
 
-**Type:** invoice
-**Status:** ready
+**Type:** invoice  
+**Status:** ready  
 
 ACME ROBOTICS PTY LTD …
 
@@ -162,6 +208,15 @@ ACME ROBOTICS PTY LTD …
 | Total | 116160 | 0.95 |
 …
 ```
+
+Two details worth noticing in that response. The two trailing spaces after `**Type:**
+invoice` and `**Status:** ready` are deliberate — they are Markdown's hard line break, so
+the two lines render as two lines rather than one run-together paragraph. And the download
+filename is `invoice.markdown`, not `invoice.md`: the route derives the extension from the
+format name, so a new format gets its own name as its extension for free. If you want
+`.md`, that is a change to the filename derivation in `src/routes/documents.ts`, not to
+anything you wrote in `formats.ts` — and it is worth asking whether it is worth a special
+case for one format.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' "http://localhost:8080/api/v1/documents/$ID/export?format=bogus"
