@@ -159,12 +159,16 @@ test("a kv filter narrows the list through the Knowledge Box, and says so", asyn
   assert.deepEqual(testing.checkResponse(openapi, "/api/v1/documents", "get", 200, res.json), []);
   const page = res.json as {
     items: Array<{ id: string }>;
-    filters: { knowledgeBox: { applied: unknown[]; matchedResources: number }; local: string[] };
+    filters: {
+      knowledgeBox: { applied: unknown[]; requested: unknown[]; matchedResources: number };
+      local: string[];
+    };
   };
   assert.ok(page.items.some((i) => i.id === invoiceId));
   assert.deepEqual(page.filters.knowledgeBox.applied, [
     { schemaId: "dip_invoice_extraction", key: "total", op: "gte", value: "1" },
   ]);
+  assert.deepEqual(page.filters.knowledgeBox.applied, page.filters.knowledgeBox.requested);
   assert.ok(page.filters.knowledgeBox.matchedResources >= 1);
   assert.deepEqual(page.filters.local, [], "nothing else was asked for");
 });
@@ -416,7 +420,9 @@ test("a generator agent is provisioned, inspected, stopped and deleted", async (
     [],
   );
   const agent = start.json as { taskId: string; kvSchemaId: string; state: string };
-  assert.equal(agent.kvSchemaId, "dip_invoice_extraction");
+  // Its OWN schema, never the pipeline's: a kv write is a full replace, so one shared schema
+  // would mean a sweep silently erasing the values this product wrote.
+  assert.equal(agent.kvSchemaId, "dip_invoice_extraction_gen");
   assert.ok(agent.taskId);
 
   const status = await c.get("/api/v1/extraction-configs/invoice/generator");
@@ -507,11 +513,18 @@ test("the comparison says plainly that only the product's values carry evidence"
 test("once the agent has written, the comparison marks agreement and disagreement per field", async () => {
   const { id } = await upload(INVOICE, "compare-me.txt");
   const rec = doc(id);
-  // Simulate what a generator run leaves behind: values on the resource that this product
-  // did not write. Clearing `meta.kv` is what marks them as not ours.
-  product.documents.replace({ ...rec, meta: { ...rec.meta, kv: undefined } });
+  // What a generator run really leaves behind: values under the agent's OWN schema, with the
+  // pipeline's values untouched beside them. No manufactured record state — this is the
+  // production shape, which is the point of giving the two paths separate schemas.
+  await product.kv.ensureKvSchema({
+    id: "dip_invoice_extraction_gen",
+    fields: [
+      { key: "invoice_number", type: "text" },
+      { key: "vendor_name", type: "text" },
+    ],
+  });
   await product.kv.writeResourceKeyValues(rec.resourceId, {
-    dip_invoice_extraction: {
+    dip_invoice_extraction_gen: {
       invoice_number: String(rec.meta.kv!.values!.invoice_number),
       vendor_name: "A Different Vendor Entirely",
     },
@@ -521,10 +534,17 @@ test("once the agent has written, the comparison marks agreement and disagreemen
   assert.equal(res.status, 200);
   const out = res.json as {
     generatorHasWritten: boolean;
+    kvSchemaId: string;
+    generatorKvSchemaId: string;
     fields: Array<{ field: string; agreement: string; generator: { value: unknown } }>;
     summary: Record<string, number>;
   };
   assert.equal(out.generatorHasWritten, true);
+  assert.equal(out.kvSchemaId, "dip_invoice_extraction");
+  assert.equal(out.generatorKvSchemaId, "dip_invoice_extraction_gen");
+  // The pipeline's own values are still there, untouched by the agent's write.
+  const stored = await product.kv.readResourceKeyValues(rec.resourceId);
+  assert.equal(stored.dip_invoice_extraction?.invoice_number, rec.meta.kv!.values!.invoice_number);
   const by = Object.fromEntries(out.fields.map((f) => [f.field, f]));
   assert.equal(by.invoice_number!.agreement, "agree");
   assert.equal(by.vendor_name!.agreement, "differ");
@@ -532,4 +552,61 @@ test("once the agent has written, the comparison marks agreement and disagreemen
   assert.equal(by.currency!.agreement, "pipeline-only");
   assert.equal(out.summary.agree, 1);
   assert.equal(out.summary.differ, 1);
+});
+
+// ─── failure surfaces ─────────────────────────────────────────────────────────
+
+test("a key-value validation failure is a 400 naming the field, never an undeclared 500", async () => {
+  // A config whose fields cannot be represented: the kv schema id would be fine, but a
+  // repeated float is a modifier ARAG refuses, so provisioning throws `KvValidationError`
+  // from inside a route that does not catch it. Without an error mapper the platform's
+  // default turns any non-HttpError into a 500 — an undeclared status, and a stack where a
+  // sentence belongs.
+  const created = await c.request("POST", "/api/v1/extraction-configs", {
+    json: {
+      name: "Repeated Float",
+      fields: [{ label: "Amounts", type: "array", kvType: "float", kvRepeated: true }],
+    },
+    headers: writer,
+  });
+  assert.equal(created.status, 201, created.text);
+  const cfg = created.json as { id: string; provisioning: { keyValueSchema: { state: string } } };
+  assert.equal(cfg.provisioning.keyValueSchema.state, "failed", "provisioning records the refusal");
+
+  // Starting a generator for it re-enters the same validation, this time uncaught by the route.
+  const started = await c.request("POST", `/api/v1/extraction-configs/${cfg.id}/generator`, {
+    json: {},
+    headers: writer,
+  });
+  assert.equal(started.status, 400, `expected a 400, got ${started.status}: ${started.text}`);
+  assert.match(started.text, /repeated is only allowed on text, not float|is failed/);
+  assert.doesNotMatch(started.text, /Internal/i);
+
+  await c.request("DELETE", `/api/v1/extraction-configs/${cfg.id}`, { headers: writer });
+});
+
+test("a Knowledge Box that cannot answer a kv filter degrades to the local list, and says so", async () => {
+  const original = product.kv.findResourceIdsByKv.bind(product.kv);
+  (product.kv as unknown as { findResourceIdsByKv: unknown }).findResourceIdsByKv = () =>
+    Promise.reject(new Error("ARAG POST /find network error: connect ECONNREFUSED"));
+  try {
+    const res = await c.get(
+      `/api/v1/documents?kv=${encodeURIComponent("dip_invoice_extraction:total:gte:1")}`,
+    );
+    assert.equal(res.status, 200, "a Knowledge Box outage is not a client error");
+    assert.deepEqual(testing.checkResponse(openapi, "/api/v1/documents", "get", 200, res.json), []);
+    const page = res.json as {
+      items: unknown[];
+      filters: { knowledgeBox: { applied: unknown[]; requested: unknown[]; error?: string } };
+    };
+    // The documents still come back — an outage must not read as "nothing matched"…
+    assert.ok(page.items.length > 0, "the local list is still served");
+    // …and the page says the filter was NOT applied, so a UI cannot render a filter chip
+    // over a result set that was never filtered.
+    assert.equal(page.filters.knowledgeBox.applied.length, 0, "no filter was applied");
+    assert.equal(page.filters.knowledgeBox.requested.length, 1, "what was asked for is still reported");
+    assert.match(page.filters.knowledgeBox.error ?? "", /ECONNREFUSED/);
+  } finally {
+    (product.kv as unknown as { findResourceIdsByKv: unknown }).findResourceIdsByKv = original;
+  }
 });

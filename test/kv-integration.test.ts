@@ -547,14 +547,20 @@ function fakeArag(responses: Record<string, unknown> = {}) {
 }
 
 test("a kv generator is started as an `ask` task whose question IS the JSON schema", async () => {
-  const arag = fakeArag({ "POST /task/start": { id: "task-1", name: "ask", status: "started" } });
+  const arag = fakeArag({
+    "POST /task/start?apply=EXISTING": { id: "task-1", name: "ask", status: "started" },
+  });
   const kv = new KvService({ arag: arag as never, log, mock: true });
   const da = new DaAgents({ arag: arag as never, kv, log, generativeModel: "chatgpt-azure-4o" });
   const mapping = schemaToKvSchema(SCHEMAS.invoice, { id: "dip_invoice_extraction" });
 
   const out = await da.provisionGenerator(SCHEMAS.invoice, mapping, { name: "dip_gen" });
   assert.equal(out.taskId, "task-1");
-  const body = arag.calls.find((c2) => c2.path === "/task/start")!.body as {
+  // `apply` is a QUERY parameter. In the body it is accepted and ignored, and the run then
+  // uses the platform default (`NEW`) — matching no already-ingested resource at all.
+  const started = arag.calls.find((c2) => c2.path.startsWith("/task/start"))!;
+  assert.equal(started.path, "/task/start?apply=EXISTING");
+  const body = started.body as {
     name: string;
     parameters: {
       on: number;
@@ -591,4 +597,113 @@ test("stopping a task that is already stopped or gone is not an error", async ()
   const kv = new KvService({ arag: arag as never, log, mock: true });
   const da = new DaAgents({ arag: arag as never, kv, log, generativeModel: "m" });
   await assert.doesNotReject(() => da.stopAndDelete("task-9"));
+});
+
+test("a rejected write then a successful one does NOT claim the filter index is stale", async () => {
+  const { configs, kv } = configsService();
+  await configs.provisionAll();
+  const rec = record();
+
+  // First write is refused, so nothing reached the Knowledge Box and nothing was superseded.
+  await kv.updateKvSchema("dip_invoice_extraction", {
+    fields: configs.kvFor("invoice")!.mapping.schema.fields.filter((f) => f.key !== "total"),
+  });
+  rec.meta.kv = await writeRecordKv(rec, SCHEMAS.invoice, { kv, configs, log });
+  assert.equal(rec.meta.kv.written, false);
+  assert.ok(rec.meta.kv.values, "values are computed before the call, so a rejection still has them");
+
+  // Put the schema back and write again. This is the resource's FIRST successful write.
+  await kv.updateKvSchema("dip_invoice_extraction", {
+    fields: configs.kvFor("invoice")!.mapping.schema.fields,
+  });
+  rec.meta.kv = await writeRecordKv(rec, SCHEMAS.invoice, { kv, configs, log });
+
+  assert.equal(rec.meta.kv.written, true);
+  assert.equal(rec.meta.kv.writes, 2, "two attempts were made, and that is worth counting");
+  assert.equal(
+    rec.meta.kv.filterIndexStale,
+    undefined,
+    "but only a write that LANDED can supersede anything — a false stale flag cries wolf on the product's headline honesty signal",
+  );
+  assert.equal(rec.meta.kv.superseded, undefined);
+});
+
+// ── the kv wire shapes ──────────────────────────────────────────────────────────────
+//
+// Every other test runs `KvService` with `mock: true`, which short-circuits before a request
+// is ever built — so the bodies and paths that actually go to the Knowledge Box are asserted
+// here, against the examples captured live in docs/architecture/arag-integration.md.
+
+function liveKv(responses: Record<string, unknown> = {}) {
+  const arag = fakeArag(responses);
+  return { arag, kv: new KvService({ arag: arag as never, log }) };
+}
+
+test("wire shape: a direct value write is PUT …/key_value/{schemaId} with {data}", async () => {
+  const { arag, kv } = liveKv();
+  await kv.putResourceKeyValue("res-1", "dip_verify_all", { v_text: "acme widgets", v_int: 42 });
+  assert.deepEqual(arag.calls, [
+    {
+      method: "PUT",
+      path: "/resource/res-1/key_value/dip_verify_all",
+      body: { data: { v_text: "acme widgets", v_int: 42 } },
+    },
+  ]);
+});
+
+test("wire shape: an inline write is PATCH /resource/{rid} with {key_values:{<id>:{data}}}", async () => {
+  const { arag, kv } = liveKv();
+  await kv.writeResourceKeyValues("res-1", { dip_verify_all: { v_text: "acme widgets" } });
+  assert.deepEqual(arag.calls, [
+    {
+      method: "PATCH",
+      path: "/resource/res-1",
+      // The extra `{data}` wrapper the read shape does NOT have.
+      body: { key_values: { dip_verify_all: { data: { v_text: "acme widgets" } } } },
+    },
+  ]);
+});
+
+test("wire shape: values are read with ?show=values and unwrapped from the extra .value", async () => {
+  const { arag, kv } = liveKv({
+    "GET /resource/res-1?show=values": {
+      data: { key_values: { dip_verify_all: { value: { data: { v_text: "acme widgets" } } } } },
+    },
+  });
+  const out = await kv.readResourceKeyValues("res-1");
+  assert.equal(arag.calls[0]!.path, "/resource/res-1?show=values");
+  // Note the `.value` between the schema id and `.data` — the write shape has no such wrapper.
+  assert.deepEqual(out, { dip_verify_all: { v_text: "acme widgets" } });
+});
+
+test("wire shape: a kv filter is a /find with an empty query and a key_value expression", async () => {
+  const arag = {
+    calls: [] as Array<{ body: unknown }>,
+    find(body: unknown) {
+      arag.calls.push({ body });
+      return Promise.resolve({ resources: { "rid-1": {}, "rid-2": {} } });
+    },
+  };
+  const kv = new KvService({ arag: arag as never, log });
+  const ids = await kv.findResourceIdsByKv([
+    { schema_id: "dip_invoice_extraction", key: "total", gte: 10000 },
+  ]);
+  assert.deepEqual(ids, ["rid-1", "rid-2"]);
+  assert.deepEqual(arag.calls[0]!.body, {
+    // Empty: this is a metadata filter, not a search. kv filter expressions are a 422 on
+    // /catalog, which is why this is /find at all.
+    query: "",
+    filter_expression: { key_value: { schema_id: "dip_invoice_extraction", key: "total", gte: 10000 } },
+    show: ["basic", "values"],
+    top_k: 200,
+  });
+});
+
+test("wire shape: schema CRUD hits the plural /kv-schemas path", async () => {
+  const { arag, kv } = liveKv({ "POST /kv-schemas": { id: "dip_x" } });
+  await kv.createKvSchema({ id: "dip_x", fields: [{ key: "a", type: "text" }] });
+  assert.equal(arag.calls[0]!.method, "POST");
+  // Plural — `/kv-schema/{id}` is a 404 on the live platform.
+  assert.equal(arag.calls[0]!.path, "/kv-schemas");
+  assert.deepEqual(arag.calls[0]!.body, { id: "dip_x", fields: [{ key: "a", type: "text" }] });
 });

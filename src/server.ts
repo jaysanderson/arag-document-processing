@@ -10,11 +10,13 @@
  * in place, `AragClient`, sits behind a proxy and is rebuilt when a connection setting
  * changes; every holder keeps the same reference and transparently talks to the new client.
  */
+import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import {
   App,
   AragClient,
   type Branding,
+  badRequest,
   constantTimeEqual,
   cors,
   log as defaultLog,
@@ -24,6 +26,7 @@ import {
   type MockAragServer,
   type PlatformEnv,
   Store,
+  type StoredDoc,
   securityHeaders,
   startMockArag,
 } from "../vendor/arag-platform/src/index.ts";
@@ -42,7 +45,7 @@ import { ConfigsService } from "./services/configs.ts";
 import { DaAgents } from "./services/da-agents.ts";
 import { DocumentsService } from "./services/documents.ts";
 import { GeneratorsService } from "./services/generators.ts";
-import { KvService } from "./services/kv.ts";
+import { KvService, KvValidationError } from "./services/kv.ts";
 import { mockEvidenceHook } from "./services/mock-evidence.ts";
 import { makeKvWriteback } from "./services/pipeline.ts";
 import { ReviewService } from "./services/review.ts";
@@ -247,7 +250,7 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     publicDir: resolve(HERE, "public"),
   });
 
-  const generators = new GeneratorsService({ da, kv, configs, documents, log });
+  const generators = new GeneratorsService({ da, kv, configs, documents, store, log });
 
   // Human review. `kvWriteback` is the pipeline's own key-value writer, so a correction
   // lands in the Knowledge Box by exactly the route an extraction does — including sending
@@ -334,7 +337,26 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     },
   ]);
 
-  const app = new App({ env, log });
+  // ── session signing ───────────────────────────────────────────────────────
+  // The platform defaults `sessionSecret` to ADMIN_TOKEN and captures it in the App
+  // constructor, which has two consequences the product must not inherit: rotating the admin
+  // token would leave every previously-issued `arag_session` cookie forgeable with the old
+  // token forever (and a session satisfies `requireWriter`), and anyone who has ever held the
+  // admin token could mint sessions indefinitely. The signing key is therefore independent of
+  // every credential, and persisted so that a restart — or a second instance on the same
+  // volume — does not invalidate every open tab.
+  const runtime = store.collection<{ id: string; secret: string } & StoredDoc>("runtime");
+  const sessionSecret =
+    runtime.get("session-secret")?.secret ??
+    runtime.put({ id: "session-secret", secret: randomBytes(32).toString("hex") }).secret;
+
+  const app = new App({ env, log, sessionSecret });
+
+  // A key-value validation failure is a *caller* problem — a value the Knowledge Box's schema
+  // refuses, an operator an unknown field does not have — and the platform's default mapper
+  // turns any non-HttpError into a 500. Mapped once here so every route answers 400 with the
+  // message naming the field, rather than each route remembering to catch it.
+  app.errorMapper = (err) => (err instanceof KvValidationError ? badRequest(err.message) : null);
 
   // ── authentication: stored API keys authenticate exactly like `API_KEYS` ────
   // The platform only knows the env list; a stored key is verified against its salted digest

@@ -526,7 +526,20 @@ one that writes a JSON text field is two fields on `AskOperation`:
 { "name": "ask", "status": "started", "id": "bfd00f6c-dfee-499f-ae93-8bd70e0417f9" }
 ```
 
-`apply` is a **query parameter** (`EXISTING`, `NEW`, `ALL`), not a body field.
+`apply` is a **query parameter** (`EXISTING`, `NEW`, `ALL`), not a body field — and the
+platform's default is `NEW`. Sent in `parameters` it is accepted and ignored, so a run
+filtered to an already-ingested `rid` matches nothing and completes having done nothing at
+all: a silent no-op, not an error. `startGenerator()` therefore defaults to `EXISTING`, which
+is the value captured above, and `runOnResource()` pins it.
+
+**Both paths must not share one kv schema.** The product's pipeline and a generator agent
+extract the same fields, and a kv write is a full replace — so pointing both at
+`dip_<schema>` would mean whichever ran last silently erased the other's values, polluting
+that resource's filter index (see the overwrite trap) with nothing recorded, and making a
+field-by-field comparison impossible because only one set can be stored. The agent therefore
+writes into `dip_<schema>_gen` (`generatorKvSchemaIdFor()`), used as both `kv_schema_id` and
+`destination`. It costs one more of the Knowledge Box's 20 kv schemas, so it is provisioned
+on demand when an agent is started rather than for every config at boot.
 
 Four lifecycle facts that cost real time to discover:
 

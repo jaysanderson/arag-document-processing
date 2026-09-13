@@ -938,12 +938,15 @@ export class KvService {
       this.mockValues.set(rid, current);
       return;
     }
-    const key_values = Object.fromEntries(Object.entries(values).map(([id, data]) => [id, { data }]));
-    await this.json<unknown>("PATCH", `/resource/${rid}`, { key_values });
+    await this.json<unknown>("PATCH", `/resource/${rid}`, { key_values: this.inlineKeyValues(values) });
     this.d.log.info("kv.value.write", { rid, schemas: Object.keys(values) });
   }
 
-  /** The `key_values` block of a `POST /resources` body, for setting values at create time. */
+  /**
+   * The `key_values` block of a `POST /resources` (create) or `PATCH /resource/{rid}`
+   * (update) body — the one definition of that wire shape, used by `writeResourceKeyValues`
+   * rather than duplicated inside it, so a test of this function tests what really goes out.
+   */
   inlineKeyValues(values: ResourceKeyValues): Record<string, { data: KvData }> {
     return Object.fromEntries(Object.entries(values).map(([id, data]) => [id, { data }]));
   }
@@ -1158,7 +1161,10 @@ function normaliseSchema(schema: KvSchema): KvSchema {
       key: f.key,
       type: f.type,
       description: f.description,
-      required: f.required ?? true,
+      // Live, an unspecified modifier comes back `false` — including `required` (see the
+      // captured 201 in the architecture doc). Defaulting it to `true` here made mock mode
+      // stricter than the Knowledge Box and contradicted the provisioning policy (DP-47).
+      required: f.required ?? false,
       range: f.range ?? false,
       repeated: f.repeated ?? false,
     })),

@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { openapi } from "../src/openapi.ts";
 import { createProduct, type Product } from "../src/server.ts";
+import { SettingsService } from "../src/services/settings.ts";
 import { Logger, readEnv, testing } from "../vendor/arag-platform/src/index.ts";
 
 const ADMIN = "settings-admin-token";
@@ -250,11 +251,18 @@ test("connection: the Knowledge Box, region, base URL and timeout rebuild the li
   const newKb = "11111111-2222-4333-8444-555555555555";
   let doc = await set("connection.kbId", newKb);
   assert.equal(doc.applied.arag!.kbId, newKb, "the running ARAG client was rebuilt, not restarted");
-  assert.equal(
-    ((await c.get("/api/v1/settings")).json as { connection: { kbId: string } }).connection.kbId,
-    newKb,
-    "the workspace settings screen reports the new Knowledge Box immediately",
-  );
+  // The Knowledge Box id identifies the customer's own tenant, so it is on the admin
+  // surface, not the anonymously-reachable workspace one (DP-40's reasoning, applied to the
+  // connection block).
+  const publicConnection = (
+    (await c.get("/api/v1/settings")).json as {
+      connection: Record<string, unknown>;
+    }
+  ).connection;
+  assert.equal(publicConnection.kbId, undefined, "the Knowledge Box id is not public");
+  assert.equal(publicConnection.baseUrl, undefined, "nor is the region host it lives on");
+  assert.ok("ok" in publicConnection, "reachability still is public — it is what the screen needs");
+  assert.equal(publicConnection.region, "aws-us-east-2-1", "and roughly where, which names no tenant");
   doc = await reset("connection.kbId");
   assert.equal(doc.applied.arag!.kbId, original.kbId);
 
@@ -554,9 +562,21 @@ test("every write is validated, and a rejected patch changes nothing", async () 
 test("settings persist in the product's store and survive a reload", async () => {
   await set("branding.footerText", "© Northwind, stored");
   product.store.flushAll();
-  // A second service reading the same store sees the override, which is what a restart does.
-  const reloaded = product.settings;
+  // A genuinely second service over the same store — which is what a restart is. Re-reading
+  // the same instance would prove only that the instance remembers its own edit.
+  const reloaded = new SettingsService({
+    store: product.store,
+    env: product.app.env,
+    log: new Logger({ level: "error", write: () => undefined }),
+    brandingDefaults: { productName: "Document Processing", tagline: "x", docsUrl: "/api/v1/docs" },
+  });
+  reloaded.apply();
   assert.equal(reloaded.branding().footerText, "© Northwind, stored");
+  assert.equal(
+    reloaded.effective().branding.footerText,
+    "© Northwind, stored",
+    "the stored override is in force from the first read of a fresh service, not after an edit",
+  );
   const raw = product.store.collection("settings").get("current") as unknown as {
     values: Record<string, unknown>;
   };

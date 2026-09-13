@@ -152,8 +152,12 @@ export async function writeRecordKv(
     return out;
   }
 
-  // Only a write that actually landed can have superseded anything.
-  if (writes > 1 && previous?.values) {
+  // Only a write that actually LANDED can have superseded anything. A rejected write still
+  // populates `values` (they are computed before the call), so testing the values alone made
+  // a resource written exactly once cry wolf — and named values that never reached the
+  // Knowledge Box as still-matching. This is the product's headline honesty signal: a false
+  // positive here is worse than a missing one.
+  if (writes > 1 && previous?.written && previous.values) {
     out.filterIndexStale = true;
     out.superseded = mergeSuperseded(previous, data, mapping.names);
   }

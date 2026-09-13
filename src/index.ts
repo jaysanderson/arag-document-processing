@@ -17,10 +17,27 @@ log.info("product.started", {
   dataDir: env.dataDir,
 });
 
+// A second SIGTERM while the first shutdown is draining must not start a second one:
+// `product.close()` flushes stores and closes the server, and running it twice can truncate
+// a half-written store file.
+let stopping = false;
 const shutdown = async () => {
+  if (stopping) return;
+  stopping = true;
   log.info("product.stopping");
   await product.close();
   process.exit(0);
 };
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+
+// Node's default for either of these is to print and exit non-zero with nothing in the
+// product's own log — so a crash in production would leave no record of itself where an
+// operator looks. Log first, then let the platform restart the process.
+process.on("unhandledRejection", (reason) => {
+  log.error("process.unhandledRejection", { message: String((reason as Error)?.message ?? reason) });
+});
+process.on("uncaughtException", (err) => {
+  log.error("process.uncaughtException", { message: err.message, stack: err.stack });
+  void shutdown();
+});

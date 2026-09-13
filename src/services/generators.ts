@@ -29,7 +29,14 @@
  * soon as the task is accepted and the caller polls, instead of pretending to await a
  * completion this product has never seen.
  */
-import { badRequest, type Logger, notFound } from "../../vendor/arag-platform/src/index.ts";
+import {
+  badRequest,
+  type Collection,
+  type Logger,
+  notFound,
+  type Store,
+  type StoredDoc,
+} from "../../vendor/arag-platform/src/index.ts";
 import type { DocumentRecord, Evidence, ExtractedField } from "../types.ts";
 import type { ConfigsService } from "./configs.ts";
 import type { DaAgents, DaTaskState } from "./da-agents.ts";
@@ -79,7 +86,10 @@ export interface GeneratorComparison {
   documentId: string;
   resourceId: string;
   configId: string;
+  /** kv schema the product's own pipeline writes into. */
   kvSchemaId: string;
+  /** kv schema the generator agent writes into — deliberately a different one. */
+  generatorKvSchemaId: string;
   /** The agent this product started for the config, when there is one. */
   agent: GeneratorAgent | null;
   /** True once the agent has written anything at all onto the resource. */
@@ -124,16 +134,46 @@ export interface GeneratorsDeps {
   kv: KvService;
   configs: ConfigsService;
   documents: DocumentsService;
+  store: Store;
   log: Logger;
+}
+
+/** One agent as it is persisted. The store's id is the config id: one agent per config. */
+interface StoredGenerator extends StoredDoc {
+  kvSchemaId: string;
+  taskId: string;
+  name: string;
+  resourceId?: string;
+  startedAt: string;
 }
 
 export class GeneratorsService {
   private readonly d: GeneratorsDeps;
-  /** config id → the agent this product started for it. One per config, by design. */
-  private readonly agents = new Map<string, GeneratorAgent>();
+  /**
+   * Persisted, not in memory. An `ask` task keeps running on the customer's Knowledge Box
+   * across a restart of this service, and an agent whose only record was a `Map` would be
+   * orphaned by that restart: still running, still costing model calls, and unreachable from
+   * the product. The store keeps the task id; `status()` reconciles it against the Knowledge
+   * Box's own task list and forgets records whose task is gone.
+   */
+  private readonly col: Collection<StoredGenerator>;
 
   constructor(deps: GeneratorsDeps) {
     this.d = deps;
+    this.col = deps.store.collection<StoredGenerator>("generators");
+  }
+
+  private toAgent(stored: StoredGenerator, state: DaTaskState): GeneratorAgent {
+    const agent: GeneratorAgent = {
+      configId: stored.id,
+      kvSchemaId: stored.kvSchemaId,
+      taskId: stored.taskId,
+      name: stored.name,
+      startedAt: stored.startedAt,
+      state,
+    };
+    if (stored.resourceId) agent.resourceId = stored.resourceId;
+    return agent;
   }
 
   /**
@@ -145,8 +185,22 @@ export class GeneratorsService {
    * deleted) so "start" is an operation an operator can repeat without reading the docs.
    */
   async start(configId: string, opts: { resourceId?: string; model?: string } = {}): Promise<GeneratorAgent> {
-    const projection = this.d.configs.kvFor(configId);
-    if (!projection) throw notFound("Extraction config");
+    // The generator writes into its OWN kv schema, never the pipeline's — see
+    // `generatorKvSchemaIdFor`. Same fields, separate id, so the two columns are both
+    // readable and neither replaces the other.
+    // "No such config" and "this config's fields cannot be represented as a key-value
+    // schema" are different answers: the second is a 400 naming the reason, and answering
+    // 404 for a configuration the caller can see in the list would be a lie.
+    const config = this.d.configs.get(configId);
+    if (!config) throw notFound("Extraction config");
+    const projection = this.d.configs.generatorKvFor(configId);
+    if (!projection) {
+      throw badRequest(
+        `The key-value schema for "${configId}" could not be built` +
+          `${config.provisioning.keyValueSchema.error ? `: ${config.provisioning.keyValueSchema.error}` : "."} ` +
+          "A generator agent writes into that schema, so it has to be valid first.",
+      );
+    }
     if (projection.status.state !== "provisioned") {
       throw badRequest(
         `The key-value schema for "${configId}" is ${projection.status.state}` +
@@ -157,72 +211,87 @@ export class GeneratorsService {
     await this.stopExisting(configId);
 
     const name = `dip_${projection.mapping.schema.id}_generator`;
-    const { taskId, kvSchemaId } = opts.resourceId
-      ? {
-          taskId: await this.d.da.runOnResource(opts.resourceId, projection.mapping, {
-            name,
-            model: opts.model,
-            description: projection.schema.description,
-          }),
-          kvSchemaId: projection.mapping.schema.id,
-        }
-      : await this.d.da.provisionGenerator(projection.schema, projection.mapping, {
+    // `runOnResource` and `provisionGenerator` both ensure the schema before starting, so the
+    // generator's own schema is provisioned on demand rather than for every config at boot.
+    const taskId = opts.resourceId
+      ? await this.d.da.runOnResource(opts.resourceId, projection.mapping, {
           name,
           model: opts.model,
-        });
+          description: projection.schema.description,
+        })
+      : (
+          await this.d.da.provisionGenerator(projection.schema, projection.mapping, {
+            name,
+            model: opts.model,
+          })
+        ).taskId;
 
-    const agent: GeneratorAgent = {
-      configId,
-      kvSchemaId,
+    const stored = this.col.put({
+      id: configId,
+      kvSchemaId: projection.mapping.schema.id,
       taskId,
       name,
+      resourceId: opts.resourceId,
       startedAt: new Date().toISOString(),
-      state: "running",
-    };
-    if (opts.resourceId) agent.resourceId = opts.resourceId;
-    this.agents.set(configId, agent);
-    this.d.log.info("generator.start", { configId, taskId, kvSchemaId, rid: opts.resourceId });
-    return agent;
+    });
+    this.d.log.info("generator.start", {
+      configId,
+      taskId,
+      kvSchemaId: stored.kvSchemaId,
+      rid: opts.resourceId,
+    });
+    return this.toAgent(stored, "running");
   }
 
-  /** The agent for a config with its state refreshed from the Knowledge Box. */
+  /**
+   * The agent for a config, reconciled against the Knowledge Box.
+   *
+   * A task that is in no bucket of the Knowledge Box's own task list no longer exists — it
+   * was deleted in the ARAG dashboard, or the Knowledge Box was reset — so the stored record
+   * is dropped rather than left claiming an agent that is not there.
+   */
   async status(configId: string): Promise<GeneratorAgent | null> {
-    const agent = this.agents.get(configId);
-    if (!agent) return null;
+    const stored = this.col.get(configId);
+    if (!stored) return null;
     const { state } = await this.d.da
-      .taskState(agent.taskId)
-      .catch(() => ({ state: "absent" as DaTaskState }));
-    agent.state = state;
-    return agent;
+      .taskState(stored.taskId)
+      .catch(() => ({ state: "unknown" as DaTaskState | "unknown" }));
+    if (state === "absent") {
+      this.col.delete(configId);
+      this.d.log.info("generator.reconcile.gone", { configId, taskId: stored.taskId });
+      return null;
+    }
+    // "unknown" means the Knowledge Box could not be reached: keep the record and report the
+    // last thing we can honestly say rather than deleting an agent that is probably running.
+    return this.toAgent(stored, state === "unknown" ? "running" : state);
   }
 
   /** Stop a running agent without deleting it, so a half-finished sweep can be halted. */
   async stop(configId: string): Promise<GeneratorAgent | null> {
-    const agent = this.agents.get(configId);
-    if (!agent) return null;
-    await this.d.da.stopTask(agent.taskId);
-    agent.state = "stopped";
-    this.d.log.info("generator.stop", { configId, taskId: agent.taskId });
-    return agent;
+    const stored = this.col.get(configId);
+    if (!stored) return null;
+    await this.d.da.stopTask(stored.taskId);
+    this.d.log.info("generator.stop", { configId, taskId: stored.taskId });
+    return this.toAgent(stored, "stopped");
   }
 
   /** Stop (a running task cannot be deleted) and then delete the agent. */
   async delete(configId: string): Promise<boolean> {
-    const agent = this.agents.get(configId);
-    if (!agent) return false;
-    await this.d.da.stopAndDelete(agent.taskId);
-    this.agents.delete(configId);
-    this.d.log.info("generator.delete", { configId, taskId: agent.taskId });
+    const stored = this.col.get(configId);
+    if (!stored) return false;
+    await this.d.da.stopAndDelete(stored.taskId);
+    this.col.delete(configId);
+    this.d.log.info("generator.delete", { configId, taskId: stored.taskId });
     return true;
   }
 
   private async stopExisting(configId: string): Promise<void> {
-    const agent = this.agents.get(configId);
-    if (!agent) return;
-    await this.d.da.stopAndDelete(agent.taskId).catch((err) => {
+    const stored = this.col.get(configId);
+    if (!stored) return;
+    await this.d.da.stopAndDelete(stored.taskId).catch((err) => {
       this.d.log.warn("generator.replace.fail", { configId, message: (err as Error).message });
     });
-    this.agents.delete(configId);
+    this.col.delete(configId);
   }
 
   /**
@@ -245,21 +314,24 @@ export class GeneratorsService {
     const record = this.d.documents.require(documentId);
     const configId = this.configIdFor(record);
     const projection = this.d.configs.kvFor(configId) ?? this.d.configs.kvFor(record.docType);
-    if (!projection) throw notFound("Extraction config");
+    const generatorProjection =
+      this.d.configs.generatorKvFor(configId) ?? this.d.configs.generatorKvFor(record.docType);
+    if (!projection || !generatorProjection) throw notFound("Extraction config");
     const { mapping } = projection;
 
-    // The generator writes into the kv field, so reading "what did the generator produce"
-    // is reading the resource's kv values back under the product's own property names.
-    const generated = await this.d.da.readGenerated(record.resourceId, mapping).catch((err) => {
-      this.d.log.warn("generator.read.fail", { documentId, message: (err as Error).message });
-      return undefined;
-    });
-
-    // Values this product wrote itself must not be mistaken for the agent's. When the
-    // pipeline has written this resource's kv field, what is stored there is ours.
-    const ours = record.meta.kv?.written === true;
-    const generatorValues = ours ? {} : (generated ?? {});
-    const generatorHasWritten = !ours && generated !== undefined && Object.keys(generated).length > 0;
+    // The agent writes into its own kv schema (`<schema>_gen`), so what comes back here is
+    // the agent's work and nothing else. When both paths shared one schema this read could
+    // only ever return whichever wrote last — which made the comparison unachievable and,
+    // worse, meant a generator sweep silently replaced the pipeline's values on the live
+    // Knowledge Box and polluted that resource's filter index with nothing recorded.
+    const generated = await this.d.da
+      .readGenerated(record.resourceId, generatorProjection.mapping)
+      .catch((err) => {
+        this.d.log.warn("generator.read.fail", { documentId, message: (err as Error).message });
+        return undefined;
+      });
+    const generatorValues = generated ?? {};
+    const generatorHasWritten = Object.keys(generatorValues).length > 0;
 
     const byKey = new Map(record.fields.map((f) => [f.key, f]));
     const evidenceByField = new Map(record.evidence.map((e) => [e.field, e]));
@@ -312,6 +384,7 @@ export class GeneratorsService {
       resourceId: record.resourceId,
       configId,
       kvSchemaId: mapping.schema.id,
+      generatorKvSchemaId: generatorProjection.mapping.schema.id,
       agent: (await this.status(configId)) ?? null,
       generatorHasWritten,
       fields,
@@ -327,9 +400,9 @@ export class GeneratorsService {
     };
   }
 
-  /** Every agent this process has started, for the admin view. */
+  /** Every agent this workspace has started, for the admin view. State is as last seen. */
   list(): GeneratorAgent[] {
-    return [...this.agents.values()];
+    return this.col.list().map((g) => this.toAgent(g, "running"));
   }
 
   /**

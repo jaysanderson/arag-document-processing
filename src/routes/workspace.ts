@@ -51,11 +51,14 @@ export function registerWorkspaceRoutes(app: App, deps: WorkspaceDeps): void {
           openapiUrl: "/api/v1/openapi.json",
         },
         connection: {
+          // Reachability and roughly where, never *which tenant*. The Knowledge Box id and
+          // the region host identify the customer's own KB — an operator's business for the
+          // same reason the extract-strategy id is (DP-40), and this endpoint is reachable
+          // anonymously when API keys are not enforced. Both live on
+          // `GET /api/v1/admin/settings`, behind ADMIN_TOKEN.
           ok: h.ok,
           mock: deps.env.arag.mock,
-          kbId: h.kbId,
           region: eff.connection.region,
-          baseUrl: h.baseUrl,
           resources: h.resources ?? null,
           ms: h.ms ?? null,
           error: h.error,

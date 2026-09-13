@@ -245,7 +245,7 @@ test("ask answers a question grounded in one document", async () => {
 
 test("uploads are validated: MIME allowlist, empty body, unknown config", async () => {
   const bad = await c.request("POST", "/api/v1/documents", {
-    body: "MZ binary" as unknown as BodyInit,
+    body: "MZ\x00binary" as unknown as BodyInit,
     headers: { "Content-Type": "application/x-msdownload", "X-Filename": "virus.exe" },
   });
   assert.equal(bad.status, 415);

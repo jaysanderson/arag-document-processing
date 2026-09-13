@@ -129,6 +129,25 @@ export function kvSchemaIdFor(schema: ExtractionSchema): string {
 }
 
 /**
+ * kv schema id for a config's **generator agent** output.
+ *
+ * Deliberately a different schema from the pipeline's. Both paths extract the same fields,
+ * and pointing them at one schema would mean a generator sweep silently replaces the values
+ * this product wrote (a kv write is a full replace) and pollutes that resource's filter index
+ * with nothing recorded — while making a field-by-field comparison impossible, because only
+ * one set of values can be stored at a time. Two schemas, two independently readable columns,
+ * and neither clobbers the other.
+ *
+ * Costs one more of the Knowledge Box's 20 kv schemas per config that actually runs a
+ * generator — which is why it is provisioned on demand when an agent is started, not for
+ * every config at boot.
+ */
+export function generatorKvSchemaIdFor(schema: ExtractionSchema): string {
+  // `_gen` has to fit inside ARAG's 64-character ceiling, so the base is trimmed, not the suffix.
+  return `${kvSchemaIdFor(schema).slice(0, 60)}_gen`;
+}
+
+/**
  * The kv schema as this product provisions it: **nothing is marked required.**
  *
  * A config's `required` list is an instruction to the model ("this field matters, find it"),
@@ -209,6 +228,18 @@ export class ConfigsService {
       mapping: { ...mapping, schema: provisionable(mapping.schema) },
       status: this.kvState.get(schemaId) ?? { state: "not provisioned" },
     };
+  }
+
+  /**
+   * The kv projection a **generator agent** writes into: the same fields under a separate
+   * schema id, so the agent's values and the pipeline's can both be read for one resource and
+   * neither overwrites the other. Provisioned on demand by `GeneratorsService`, not at boot.
+   */
+  generatorKvFor(configId: string): ConfigKv | undefined {
+    const base = this.kvFor(configId);
+    if (!base) return undefined;
+    const id = generatorKvSchemaIdFor(base.schema);
+    return { ...base, mapping: { ...base.mapping, schema: { ...base.mapping.schema, id } } };
   }
 
   /**

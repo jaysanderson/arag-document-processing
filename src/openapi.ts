@@ -447,13 +447,16 @@ const Settings = {
     },
     connection: {
       type: "object",
+      description:
+        "Whether this deployment can reach its Knowledge Box, and roughly where it is. The " +
+        "Knowledge Box id and its base URL are NOT here: they identify the tenant and its " +
+        "region host, which is an operator's business for the same reason the extract-strategy " +
+        "id is (DP-40). Both are on `GET /api/v1/admin/settings` behind `ADMIN_TOKEN`.",
       required: ["ok", "mock"],
       properties: {
         ok: { type: "boolean" },
         mock: { type: "boolean", description: "True when running against the in-process mock ARAG" },
-        kbId: { type: "string" },
         region: { type: "string" },
-        baseUrl: { type: "string" },
         resources: { type: ["integer", "null"] },
         ms: { type: ["number", "null"], description: "Round-trip of the last health check" },
         error: { type: "string" },
@@ -1019,20 +1022,20 @@ const AppliedFilters = {
   properties: {
     knowledgeBox: {
       type: "object",
-      required: ["applied", "matchedResources"],
+      required: ["applied", "requested", "matchedResources"],
       properties: {
         applied: {
           type: "array",
-          items: {
-            type: "object",
-            required: ["schemaId", "key", "op", "value"],
-            properties: {
-              schemaId: { type: "string" },
-              key: { type: "string" },
-              op: { type: "string", enum: ["eq", "gte", "lte", "contains"] },
-              value: { type: "string" },
-            },
-          },
+          description:
+            "Filters that were actually applied. **Empty when `error` is present** — the page " +
+            "is then the unnarrowed local list, and a UI must not render a filter chip from " +
+            "`requested`, which would claim a narrowing that never happened.",
+          items: { $ref: "#/components/schemas/KvFilterSpec" },
+        },
+        requested: {
+          type: "array",
+          description: "What the caller asked for, applied or not.",
+          items: { $ref: "#/components/schemas/KvFilterSpec" },
         },
         matchedResources: {
           type: "integer",
@@ -1051,6 +1054,18 @@ const AppliedFilters = {
       items: { type: "string" },
       description: "Parameters applied against this workspace's own store",
     },
+  },
+};
+
+const KvFilterSpec = {
+  type: "object",
+  description: "One parsed `kv=<schemaId>:<field>:<op>:<value>` filter.",
+  required: ["schemaId", "key", "op", "value"],
+  properties: {
+    schemaId: { type: "string" },
+    key: { type: "string" },
+    op: { type: "string", enum: ["eq", "gte", "lte", "contains"] },
+    value: { type: "string" },
   },
 };
 
@@ -1228,7 +1243,10 @@ const GeneratorAgent = {
   required: ["configId", "kvSchemaId", "taskId", "name", "startedAt", "state"],
   properties: {
     configId: { type: "string" },
-    kvSchemaId: { type: "string" },
+    kvSchemaId: {
+      type: "string",
+      description: "The agent's own key-value schema (`<config schema>_gen`), never the pipeline's",
+    },
     taskId: { type: "string", description: "ARAG task id" },
     name: { type: "string", description: "Task name as it appears in the ARAG dashboard" },
     resourceId: { type: "string", description: "Set when the run was scoped to one document" },
@@ -1251,6 +1269,7 @@ const GeneratorComparison = {
     "resourceId",
     "configId",
     "kvSchemaId",
+    "generatorKvSchemaId",
     "fields",
     "summary",
     "evidenceContract",
@@ -1260,7 +1279,15 @@ const GeneratorComparison = {
     documentId: { type: "string" },
     resourceId: { type: "string" },
     configId: { type: "string" },
-    kvSchemaId: { type: "string" },
+    kvSchemaId: { type: "string", description: "Key-value schema the product's own pipeline writes into" },
+    generatorKvSchemaId: {
+      type: "string",
+      description:
+        "Key-value schema the generator agent writes into — deliberately a different one " +
+        "(`<schema>_gen`). A key-value write is a full replace, so one shared schema would " +
+        "mean whichever path ran last silently erased the other's values and polluted the " +
+        "resource's filter index; two schemas keep both columns independently readable.",
+    },
     agent: {
       description: "The agent started for this configuration, or null when none is running.",
       anyOf: [{ $ref: "#/components/schemas/GeneratorAgent" }, { type: "null" }],
@@ -1458,6 +1485,7 @@ export const openapi = buildOpenApi({
     ProvisioningStatus,
     ConfigProvisioning,
     AppliedFilters,
+    KvFilterSpec,
     FieldCorrection,
     FieldCorrectionRequest,
     FieldCorrectionResult,
@@ -2760,10 +2788,17 @@ export const openapi = buildOpenApi({
           "the values it extracts straight into this configuration's key-value schema. The " +
           "schema's field descriptions are the instructions, which is why they are carried " +
           "across verbatim when the schema is provisioned.\n\n" +
-          "ARAG allows only one running `ask` task per destination and the destination is the " +
+          "The agent writes into its **own** key-value schema (`<config schema>_gen`), " +
+          "provisioned on demand when the agent is started — not the schema the pipeline " +
+          "writes into. A key-value write is a full replace, so one shared schema would mean " +
+          "a sweep silently erasing the pipeline's values and polluting the resource's filter " +
+          "index; it also costs one more of the Knowledge Box's 20 key-value schemas, which is " +
+          "why it is not provisioned for every configuration at boot.\n\n" +
+          "ARAG allows only one running `ask` task per destination and the destination is that " +
           "key-value schema, so starting again replaces the existing agent (stopped first — a " +
-          "running task cannot be deleted). Answers 400 when the configuration's key-value " +
-          "schema is not provisioned, because there would be nothing to write into.\n\n" +
+          "running task cannot be deleted, which answers 409). Answers 400 when the " +
+          "configuration's key-value schema is not provisioned, because the agent's schema is " +
+          "derived from it.\n\n" +
           "Note on what is verified: provisioning, the start → stop → delete lifecycle and " +
           "reading generated values back were all confirmed against the live Knowledge Box. " +
           "End-to-end write latency was **not** — every run started there was still scheduled " +

@@ -28,8 +28,8 @@
  *   - `GET /kb/{kb}/task/{id}` is 405; a single task is inspected by finding its id in the
  *     buckets of `GET /kb/{kb}/tasks`.
  */
-import type { AragClient, Logger } from "../../vendor/arag-platform/src/index.ts";
-import { AragError } from "../../vendor/arag-platform/src/index.ts";
+import type { AragClient, HttpError, Logger } from "../../vendor/arag-platform/src/index.ts";
+import { AragError, conflict } from "../../vendor/arag-platform/src/index.ts";
 import type { KvData, KvSchemaMapping, KvService, KvValue } from "./kv.ts";
 import type { ExtractionSchema } from "./schemas.ts";
 
@@ -53,6 +53,19 @@ export interface DaFilter {
   apply_to_agent_generated_fields?: boolean;
 }
 
+/**
+ * Which resources a task is applied to. **A query parameter, not a body field** — sending it
+ * in `parameters` is silently ignored, which is the difference between a run that reads the
+ * document and one that does nothing at all.
+ *
+ *   - `EXISTING` — resources already in the Knowledge Box. What a run over an uploaded
+ *     document needs, and the value captured in the verified request.
+ *   - `NEW` — only resources ingested after the task starts. The platform default, and the
+ *     reason an un-parameterised run over an existing rid is a no-op.
+ *   - `ALL` — both.
+ */
+export type DaApplyTo = "EXISTING" | "NEW" | "ALL";
+
 export interface GeneratorTaskOptions {
   /** Task name as it appears in the ARAG dashboard. */
   name: string;
@@ -65,6 +78,13 @@ export interface GeneratorTaskOptions {
   model?: string;
   /** Field id the output is written to. Defaults to `kvSchemaId`. */
   destination?: string;
+  /**
+   * Which resources to apply to. Defaults to `EXISTING`, because every run this product
+   * starts is over documents it has already ingested; the platform's own default is `NEW`,
+   * which would make such a run a silent no-op. Pass `ALL` for a standing agent that should
+   * also pick up documents uploaded after it started.
+   */
+  apply?: DaApplyTo;
 }
 
 export interface DaTaskRun {
@@ -196,12 +216,16 @@ export class DaAgents {
   }
 
   private async json<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await this.d.arag.request(method, path, {
-      body: body === undefined ? null : JSON.stringify(body),
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
-    });
-    const text = await res.text();
-    return (text ? JSON.parse(text) : {}) as T;
+    try {
+      const res = await this.d.arag.request(method, path, {
+        body: body === undefined ? null : JSON.stringify(body),
+        headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      });
+      const text = await res.text();
+      return (text ? JSON.parse(text) : {}) as T;
+    } catch (err) {
+      throw asTaskConflict(err) ?? err;
+    }
   }
 
   /**
@@ -212,7 +236,7 @@ export class DaAgents {
   async provisionGenerator(
     schema: ExtractionSchema,
     mapping: KvSchemaMapping,
-    opts: { name?: string; filter?: DaFilter; model?: string } = {},
+    opts: { name?: string; filter?: DaFilter; model?: string; apply?: DaApplyTo } = {},
   ): Promise<{ taskId: string; kvSchemaId: string; mapping: KvSchemaMapping }> {
     await this.d.kv.ensureKvSchema(mapping.schema);
     const taskId = await this.startGenerator({
@@ -221,6 +245,7 @@ export class DaAgents {
       jsonSchema: mappingToJsonSchema(mapping, schema.description),
       filter: opts.filter,
       model: opts.model,
+      apply: opts.apply,
     });
     return { taskId, kvSchemaId: mapping.schema.id, mapping };
   }
@@ -241,12 +266,20 @@ export class DaAgents {
       });
       return id;
     }
-    const res = await this.json<{ id?: string; name?: string; status?: string }>("POST", "/task/start", body);
+    // `apply` rides in the query string. In the body it is accepted and ignored, and the
+    // task then runs with the platform default (`NEW`) — over no existing resource at all.
+    const apply = opts.apply ?? "EXISTING";
+    const res = await this.json<{ id?: string; name?: string; status?: string }>(
+      "POST",
+      `/task/start?apply=${apply}`,
+      body,
+    );
     if (!res.id) throw new AragError("task/start returned no id", "protocol", "POST /task/start");
     this.d.log.info("da.generator.start", {
       taskId: res.id,
       kvSchemaId: opts.kvSchemaId,
       status: res.status,
+      apply,
       rids: opts.filter?.rids?.length ?? 0,
     });
     return res.id;
@@ -256,7 +289,8 @@ export class DaAgents {
    * Run a generator over exactly one resource. A DA task is the unit of work on ARAG — there
    * is no "run this task on that document" call — so a single-resource run is a task with
    * `filter.rids = [rid]`, which is also the only safe way to avoid sweeping the whole KB.
-   * The caller is responsible for deleting it (or pass `autoDelete` to `awaitRun`).
+   * `apply` is necessarily `EXISTING`: the resource is already ingested, so the platform's
+   * `NEW` default would match nothing. The caller is responsible for deleting the task.
    */
   async runOnResource(
     rid: string,
@@ -270,6 +304,7 @@ export class DaAgents {
       jsonSchema: mappingToJsonSchema(mapping, opts.description),
       filter: { rids: [rid], field_types: ["text", "file"] },
       model: opts.model,
+      apply: "EXISTING",
     });
   }
 
@@ -309,30 +344,6 @@ export class DaAgents {
   }
 
   /**
-   * Poll until the run leaves `running`. DA tasks are batch-scheduled and can sit queued for
-   * minutes, so the default deadline is generous and the caller gets the last state either
-   * way rather than an exception on timeout.
-   */
-  async awaitRun(
-    taskId: string,
-    opts: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal } = {},
-  ): Promise<{ state: DaTaskState; run?: DaTaskRun; timedOut: boolean }> {
-    if (this.mocked) {
-      const run = this.mockTasks.get(taskId);
-      if (run) run.completed = true;
-      return { state: run ? "done" : "absent", run, timedOut: false };
-    }
-    const deadline = Date.now() + (opts.timeoutMs ?? 10 * 60_000);
-    let last: { state: DaTaskState; run?: DaTaskRun } = { state: "absent" };
-    while (Date.now() < deadline) {
-      last = await this.taskState(taskId);
-      if (last.state !== "running") return { ...last, timedOut: false };
-      await sleep(opts.intervalMs ?? 10_000, opts.signal);
-    }
-    return { ...last, timedOut: true };
-  }
-
-  /**
    * Read back what a generator produced on a resource, projected onto the product's own
    * property names. Returns undefined when the agent has not written the field yet.
    */
@@ -364,7 +375,7 @@ export class DaAgents {
       this.d.log.info("da.generator.stop", { taskId });
     } catch (err) {
       if (err instanceof AragError && (err.status === 404 || err.status === 409)) return;
-      throw err;
+      throw asTaskConflict(err) ?? err;
     }
   }
 
@@ -387,37 +398,31 @@ export class DaAgents {
       this.d.log.info("da.generator.delete", { taskId });
     } catch (err) {
       if (err instanceof AragError && err.status === 404) return;
-      throw err;
+      throw asTaskConflict(err) ?? err;
     }
-  }
-
-  /** Delete every task whose configured name starts with `prefix` (product-owned cleanup). */
-  async deleteByNamePrefix(prefix: string): Promise<string[]> {
-    const snap = await this.listTasks();
-    const seen = new Set<string>();
-    const removed: string[] = [];
-    for (const run of [...snap.running, ...snap.done, ...snap.configs]) {
-      const name = (run.parameters as { name?: unknown } | undefined)?.name;
-      if (typeof name !== "string" || !name.startsWith(prefix)) continue;
-      if (!run.id || seen.has(run.id)) continue;
-      seen.add(run.id);
-      await this.deleteTask(run.id);
-      removed.push(run.id);
-    }
-    return removed;
   }
 }
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t);
-        reject(new Error("aborted"));
-      },
-      { once: true },
+/**
+ * A 422 from a `/task` route is a lifecycle conflict, not a validation failure and not an
+ * upstream outage: the platform says "Already running an operation of ask with destination X"
+ * when a second agent is started for the same destination, and "Cannot delete a running job"
+ * when a delete precedes a stop. The platform's default mapper turns a 422 into a 502 with
+ * the upstream sentence in the body; both the status and the leaked wording are wrong
+ * (STANDARDS §3), so they become a 409 in this product's own words.
+ */
+function asTaskConflict(err: unknown): HttpError | undefined {
+  if (!(err instanceof AragError) || err.status !== 422 || !err.operation.includes("/task")) return undefined;
+  const detail = err.detail ?? err.message;
+  if (/already running an operation/i.test(detail)) {
+    return conflict(
+      "A generator agent is already running for this configuration. Stop and delete it before starting another — the platform allows only one running agent per key-value schema.",
     );
-  });
+  }
+  if (/cannot delete a running/i.test(detail)) {
+    return conflict("That generator agent is still running. Stop it before deleting it.");
+  }
+  return conflict(
+    "The generator agent could not be changed in its current state. Check its status and retry.",
+  );
 }
