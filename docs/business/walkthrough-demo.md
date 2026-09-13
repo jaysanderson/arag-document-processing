@@ -52,10 +52,11 @@ that a solutions engineer can either narrate over or let the customer read thems
    Eleven types are built in; a new one is a list of field names."*
 
 **Back** / **Next** / **Skip tour** sit on each step's card (**Next** reads **Done** on the
-last step), and `Esc` ends the tour immediately. It never restarts on its own. The step
-lives in the URL
-(`?tour=1&step=2`), so any step can be linked to directly — which is how the showcase
-recording stays reproducible.
+last step), and `Esc` ends the tour immediately. It never restarts on its own. A step can be
+linked to directly — `?tour=1&step=2` opens the tour on that step, which is how the showcase
+recording stays reproducible. Stepping through it afterwards does not rewrite the URL: since
+platform kit v0.2.0 the tour owns its own index (DP-45), so the link is an entry point rather
+than a running position.
 
 ## 1 · Documents — the queue (`/#/documents`)
 

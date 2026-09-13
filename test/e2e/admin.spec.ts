@@ -7,25 +7,28 @@ test.describe.configure({ mode: "serial" });
 
 test("admin: the sign-in is a door, and a wrong token says so plainly", async ({ page }) => {
   await page.goto("/admin/");
-  await expect(page.locator(".dip-signin")).toBeVisible();
+  await expect(page.locator(".arag-signin")).toBeVisible();
   // No navigation before sign-in: a nav the visitor cannot use is noise.
-  await expect(page.locator(".dip-sidenav")).toHaveCount(0);
+  await expect(page.locator(".arag-railnav")).toHaveCount(0);
   // The sign-in card is a door into a different product, so it keeps the wordmark.
-  await expect(page.locator(".dip-signin__card img")).toHaveAttribute("src", "/brand/arag-logo.svg");
+  await expect(page.locator(".arag-signin .card img.wordmark")).toHaveAttribute(
+    "src",
+    "/ui/brand/arag-logo.svg",
+  );
 
   await page.fill("#token", "nope");
   await page.click("#signin");
-  await expect(page.locator(".dip-signin__error")).toContainText("That token was not accepted.");
+  await expect(page.locator(".arag-signin .error-slot")).toContainText("That token was not accepted.");
 
   // Enter must submit: a lone password input does not do this reliably without a form.
   await page.fill("#token", TOKEN);
   await page.press("#token", "Enter");
-  await expect(page.locator(".dip-sidenav")).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".dip-sidenav a")).toHaveCount(8);
+  await expect(page.locator(".arag-railnav")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".arag-railnav a")).toHaveCount(8);
   // Signed in, the wordmark is in the band only; the sidebar head is the operator identity.
-  await expect(page.locator(".dip-brandmark img")).toBeHidden();
-  await expect(page.locator(".dip-brandmark__name")).toHaveText("Operations");
-  await expect(page.locator(".dip-brandmark__tagline")).toHaveText("Document Processing");
+  await expect(page.locator(".arag-rail .ident img")).toBeHidden();
+  await expect(page.locator(".arag-rail .ident .name")).toHaveText("Operations");
+  await expect(page.locator(".arag-rail .ident .tag")).toHaveText("Document Processing");
   expect(await page.locator('img[src*="arag-logo"]').count()).toBe(1);
 });
 
@@ -35,24 +38,24 @@ test("admin: overview, connection and configs are an operator product", async ({
   await page.fill("#token", TOKEN);
   await page.press("#token", "Enter");
   await expect(page.locator("h1")).toContainText("Overview", { timeout: 20_000 });
-  await expect(page.locator(".dip-statstrip .arag-kpi")).toHaveCount(6);
-  await expect(page.locator(".dip-statstrip")).toContainText("Grounding");
+  await expect(page.locator(".arag-statstrip > *")).toHaveCount(6);
+  await expect(page.locator(".arag-statstrip")).toContainText("Grounding");
   // Expected provisioning conflicts must never read as failures.
-  await expect(page.locator(".dip-statstrip")).toContainText("expected conflicts");
+  await expect(page.locator(".arag-statstrip")).toContainText("expected conflicts");
   await expect(page.locator("body")).toContainText("Needs attention");
 
-  await page.click('[data-nav="connection"]');
+  await page.click('[data-nav="Connection"]');
   await expect(page.locator("h1")).toContainText("Connection");
   await expect(page.locator("table")).toContainText("dip_invoice_extraction");
   await page.click("#test");
   await expect(page.locator(".arag-toast")).toContainText("KB connected");
   // The stored configuration is readable without opening the ARAG dashboard.
   await page.click("tr[data-cfg] >> nth=0");
-  await expect(page.locator(".dip-drawer")).toContainText("full_resource", { timeout: 20_000 });
-  await expect(page.locator(".dip-drawer")).toContainText("answer_json_schema");
+  await expect(page.locator(".arag-drawer")).toContainText("full_resource", { timeout: 20_000 });
+  await expect(page.locator(".arag-drawer")).toContainText("answer_json_schema");
   await page.keyboard.press("Escape");
 
-  await page.click('[data-nav="configs"]');
+  await page.click('[data-nav="Configs"]');
   await expect(page.locator("table tbody tr")).toHaveCount(DOC_TYPE_VALUES.length);
   await page.click("#provAll");
   await expect(page.locator("#provResult")).toContainText("provisioned", { timeout: 30_000 });
@@ -71,29 +74,29 @@ test("admin: jobs, logs, usage and branding", async ({ page }) => {
   await page.goto("/admin/");
   await page.fill("#token", TOKEN);
   await page.press("#token", "Enter");
-  await expect(page.locator(".dip-sidenav")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".arag-railnav")).toBeVisible({ timeout: 20_000 });
 
-  await page.click('[data-nav="jobs"]');
+  await page.click('[data-nav="Jobs"]');
   await expect(page.locator("tr[data-job]").first()).toBeVisible({ timeout: 20_000 });
   await page.click("tr[data-job] >> nth=0");
-  await expect(page.locator(".dip-drawer .arag-steps li").first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".dip-drawer")).toContainText("process-document");
+  await expect(page.locator(".arag-drawer .arag-steps li").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".arag-drawer")).toContainText("process-document");
   await page.keyboard.press("Escape");
 
-  await page.click('[data-nav="logs"]');
+  await page.click('[data-nav="Logs"]');
   await expect(page.locator("tr[data-line]").first()).toBeVisible({ timeout: 20_000 });
   await page.click("tr[data-line] >> nth=0");
-  await expect(page.locator(".dip-drawer")).toContainText("level");
+  await expect(page.locator(".arag-drawer")).toContainText("level");
   await page.keyboard.press("Escape");
   await page.selectOption("#level", "warn");
   await expect(page).toHaveURL(/level=warn/);
 
-  await page.click('[data-nav="usage"]');
-  await expect(page.locator(".dip-statstrip")).toContainText("ARAG calls");
+  await page.click('[data-nav="Usage"]');
+  await expect(page.locator(".arag-statstrip")).toContainText("ARAG calls");
   await expect(page.locator("body")).toContainText("Documents processed, last 14 days");
   await expect(page.locator(".dip-bar")).toHaveCount(14);
 
-  await page.click('[data-nav="branding"]');
+  await page.click('[data-nav="Branding"]');
   await expect(page.locator("body")).toContainText("BRAND_PRODUCT_NAME");
   await expect(page.locator("body")).toContainText("Document Processing");
   await expect(page.locator("body")).toContainText("never branded");
@@ -104,8 +107,8 @@ test("admin: security states the posture and purge is previewed before it is con
   await page.goto("/admin/");
   await page.fill("#token", TOKEN);
   await page.press("#token", "Enter");
-  await expect(page.locator(".dip-sidenav")).toBeVisible({ timeout: 20_000 });
-  await page.click('[data-nav="security"]');
+  await expect(page.locator(".arag-railnav")).toBeVisible({ timeout: 20_000 });
+  await page.click('[data-nav="Security"]');
 
   await expect(page.locator("body")).toContainText("Always require a credential");
   await expect(page.locator("body")).toContainText("API_KEYS");
@@ -121,12 +124,12 @@ test("admin: security states the posture and purge is previewed before it is con
   await expect(page.locator("#purge")).toBeEnabled();
 
   await page.click("#purge");
-  await expect(page.locator(".dip-confirm")).toBeVisible();
+  await expect(page.locator(".arag-confirm")).toBeVisible();
   // The confirm button stays disabled until the word is typed.
-  await expect(page.locator(".dip-confirm [data-ok]")).toBeDisabled();
-  await page.fill("#typedConfirm", "DELETE");
-  await expect(page.locator(".dip-confirm [data-ok]")).toBeEnabled();
-  await page.click(".dip-confirm [data-ok]");
+  await expect(page.locator(".arag-confirm [data-ok]")).toBeDisabled();
+  await page.fill("#aragTyped", "DELETE");
+  await expect(page.locator(".arag-confirm [data-ok]")).toBeEnabled();
+  await page.click(".arag-confirm [data-ok]");
   await expect(page.locator("#purgeResult")).toContainText("Deleted", { timeout: 30_000 });
 });
 

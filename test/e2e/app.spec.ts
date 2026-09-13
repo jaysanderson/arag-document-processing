@@ -13,14 +13,17 @@ test("first run offers the guided sample and is honest about the mock Knowledge 
   await page.goto("/#/welcome");
   await expect(page.locator("h1")).toContainText("Read every document the first time");
   await expect(page.locator(".arag-alert.warn")).toContainText("mock Knowledge Box");
-  await expect(page.locator(".dip-sidenav a")).toHaveCount(5);
-  await expect(page.locator('[data-nav="documents"]')).toContainText("Documents");
+  await expect(page.locator(".arag-railnav a")).toHaveCount(6);
+  await expect(page.locator('[data-nav="Documents"]')).toContainText("Documents");
   // The Progress wordmark appears once, in the band. The sidebar head carries the product's
   // own identity — name and tagline — and no image unless a partner logo is configured.
-  await expect(page.locator(".dip-bandmark img")).toHaveAttribute("src", "/brand/arag-logo-alt.svg");
-  await expect(page.locator(".dip-brandmark img")).toBeHidden();
-  await expect(page.locator(".dip-brandmark__name")).toHaveText("Document Processing");
-  await expect(page.locator(".dip-brandmark__tagline")).toHaveText("Documents in, validated records out");
+  await expect(page.locator(".arag-appband .wordmark img")).toHaveAttribute(
+    "src",
+    "/ui/brand/arag-logo-alt.svg",
+  );
+  await expect(page.locator(".arag-rail .ident img")).toBeHidden();
+  await expect(page.locator(".arag-rail .ident .name")).toHaveText("Document Processing");
+  await expect(page.locator(".arag-rail .ident .tag")).toHaveText("Documents in, validated records out");
   expect(await page.locator('img[src*="arag-logo"]').count()).toBe(1);
 });
 
@@ -30,23 +33,23 @@ test("the guided sample processes a document and lands in the queue", async ({ p
   await page.click("#startSample");
   await expect(page).toHaveURL(/#\/documents/, { timeout: 20_000 });
   // The tour is advisory, not a cage: the screen underneath stays usable.
-  await expect(page.locator(".dip-tour__card")).toBeVisible();
-  await page.click("[data-tour-end]");
-  await expect(page.locator(".dip-tour__card")).toHaveCount(0);
+  await expect(page.locator(".arag-tour-card")).toBeVisible();
+  await page.click(".arag-tour-card [data-skip]");
+  await expect(page.locator(".arag-tour-card")).toHaveCount(0);
 
   await expect(page.locator("#docsTable tbody tr")).not.toHaveCount(0, { timeout: 30_000 });
   const row = page.locator("#docsTable tbody tr").first();
   await expect(row).toContainText("invoice.txt");
   await expect(row.locator(".arag-chip")).toContainText("Ready", { timeout: 60_000 });
   // The row carries the document's own identity, not just the filename it arrived under.
-  await expect(row.locator(".dip-datatable__sub")).toContainText("INV-2026-0042");
-  await expect(page.locator("#strip .arag-kpi").first()).toContainText("Documents");
+  await expect(row.locator(".cell-sub")).toContainText("INV-2026-0042");
+  await expect(page.locator("#strip .arag-statstrip > *").first()).toContainText("Documents");
 });
 
 test("the record shows verified evidence, and the source tab locates every quote", async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto("/#/documents?q=invoice.txt");
-  await page.click("#docsTable .dip-datatable__primary >> nth=0");
+  await page.click("#docsTable .cell-title >> nth=0");
   await expect(page.locator(".dip-grounding")).toBeVisible({ timeout: 20_000 });
 
   // Grounding is a claim with a denominator, never a bare percentage.
@@ -83,7 +86,7 @@ test("the record shows verified evidence, and the source tab locates every quote
 test("exports download in three formats and the document answers a question", async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto("/#/documents?q=invoice.txt");
-  await page.click("#docsTable .dip-datatable__primary >> nth=0");
+  await page.click("#docsTable .cell-title >> nth=0");
   await expect(page.locator(".dip-grounding")).toBeVisible({ timeout: 20_000 });
 
   const csv = page.waitForEvent("download");
@@ -110,10 +113,10 @@ test("the list searches, filters, sorts and exports a selection in bulk", async 
   await expect(page.locator("#docsTable")).toContainText("invoice.txt");
 
   await page.fill("#q", "nothing-matches-this");
-  await expect(page.locator(".dip-emptystate")).toContainText("No documents match these filters", {
+  await expect(page.locator(".arag-emptystate")).toContainText("No documents match these filters", {
     timeout: 10_000,
   });
-  await page.click(".dip-emptystate button");
+  await page.click(".arag-emptystate button");
   await expect(page.locator("#docsTable tbody tr")).not.toHaveCount(0);
 
   // Sorting is a real query parameter, so a sorted queue is a shareable link.
@@ -121,10 +124,10 @@ test("the list searches, filters, sorts and exports a selection in bulk", async 
   await expect(page).toHaveURL(/sort=grounding/);
 
   // Bulk export of a selection.
-  await page.click("#selectAll");
-  await expect(page.locator("#bulkbar")).toBeVisible();
+  await page.click("#docsTable [data-check-all]");
+  await expect(page.locator("#docsTable [data-bulkbar]")).toBeVisible();
   await expect(page.locator("#docsTable tbody tr").first()).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".dip-bulkbar__count")).toContainText("selected");
+  await expect(page.locator(".arag-bulkbar [data-bulk-count]")).toContainText("selected");
   const bulk = page.waitForEvent("download");
   await page.click('[data-bulk="csv"]');
   expect((await bulk).suggestedFilename()).toMatch(/^documents-\d{4}-\d{2}-\d{2}\.csv$/);
@@ -133,13 +136,13 @@ test("the list searches, filters, sorts and exports a selection in bulk", async 
 test("the upload drawer publishes the accepted types from the API and is a route", async ({ page }) => {
   await page.goto("/#/documents");
   await page.click("#uploadBtn");
-  await expect(page.locator(".dip-drawer")).toBeVisible();
+  await expect(page.locator(".arag-drawer")).toBeVisible();
   await expect(page).toHaveURL(/#\/documents\/upload/);
-  await expect(page.locator(".dip-drawer .arag-help").first()).toContainText("PDF");
-  await expect(page.locator(".dip-drawer .arag-help").first()).toContainText("MB each");
+  await expect(page.locator(".arag-drawer .arag-help").first()).toContainText("PDF");
+  await expect(page.locator(".arag-drawer .arag-help").first()).toContainText("MB each");
   await expect(page.locator("#cfg option")).not.toHaveCount(0);
-  await page.click(".dip-drawer [data-close]");
-  await expect(page.locator(".dip-drawer")).toHaveCount(0);
+  await page.click(".arag-drawer [data-close]");
+  await expect(page.locator(".arag-drawer")).toHaveCount(0);
   await expect(page).toHaveURL(/#\/documents/);
 });
 
@@ -172,7 +175,7 @@ test("configs list the built-ins and the field builder creates a custom config",
   await expect(page).toHaveURL(new RegExp(`#/configs/${id}$`), { timeout: 20_000 });
 
   await page.click("#delCfg");
-  await page.click(".dip-confirm [data-ok]");
+  await page.click(".arag-confirm [data-ok]");
   await expect(page).toHaveURL(/#\/configs$/, { timeout: 20_000 });
   await expect(page.locator("body")).not.toContainText("E2E Insurance Card");
 });
@@ -196,18 +199,18 @@ test("jobs are listed and a finished job explains itself in a drawer", async ({ 
   await expect(page.locator("table tbody tr")).not.toHaveCount(0, { timeout: 20_000 });
   await page.uncheck("#auto");
   await page.click("table tbody tr");
-  await expect(page.locator(".dip-drawer")).toBeVisible();
-  await expect(page.locator(".dip-drawer")).toContainText("process-document");
-  await expect(page.locator(".dip-drawer .arag-steps li").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".arag-drawer")).toBeVisible();
+  await expect(page.locator(".arag-drawer")).toContainText("process-document");
+  await expect(page.locator(".arag-drawer .arag-steps li").first()).toBeVisible({ timeout: 20_000 });
   await page.keyboard.press("Escape");
-  await expect(page.locator(".dip-drawer")).toHaveCount(0);
+  await expect(page.locator(".arag-drawer")).toHaveCount(0);
 });
 
 test("ask is reachable on its own and scoped to one document", async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto("/#/ask");
   await expect(page.locator("#docPick option")).not.toHaveCount(0, { timeout: 20_000 });
-  await expect(page.locator(".dip-pagehead__sub")).toContainText("no cross-document search");
+  await expect(page.locator(".arag-pagehead .sub")).toContainText("no cross-document search");
   await page.click(".dip-suggestions button >> nth=0");
   await expect(page.locator(".arag-bubble.assistant").last()).not.toContainText("Thinking", {
     timeout: 30_000,
@@ -258,7 +261,32 @@ test("extracted values are escaped before they reach the page", async ({ page })
   await page.goto("/#/documents");
   await expect(page.locator("#docsTable tbody tr")).toHaveCount(1);
   // The payload is text, not markup: it is visible verbatim and no element was created.
-  await expect(page.locator(".dip-datatable__sub").first()).toContainText(payload);
+  await expect(page.locator(".cell-sub").first()).toContainText(payload);
   expect(await page.locator("#docsTable img").count()).toBe(0);
   expect(await page.evaluate(() => "__xss" in window)).toBe(false);
+});
+
+test("the shell holds at 1440 px and collapses to a drawer at 390 px", async ({ page }) => {
+  // The platform's product-experience bar checks the shell at both widths (STANDARDS § 8b).
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/#/documents");
+  await expect(page.locator(".arag-railnav a").first()).toBeVisible();
+  await expect(page.locator(".arag-rail-menu")).toBeHidden();
+  // The rail can be collapsed to an icon column and the choice is remembered.
+  await page.click(".arag-rail-toggle");
+  await expect(page.locator(".arag-app")).toHaveAttribute("data-rail", "collapsed");
+  await page.click(".arag-rail-toggle");
+  await expect(page.locator(".arag-app")).toHaveAttribute("data-rail", "expanded");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  // Below 900 px the rail becomes a scrim-backed drawer behind the band's menu button.
+  await expect(page.locator(".arag-rail-menu")).toBeVisible();
+  await expect(page.locator(".arag-appband .wordmark img")).toBeVisible();
+  // The page itself never scrolls sideways; a wide table scrolls inside its own container.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+  await page.click(".arag-rail-menu");
+  await expect(page.locator(".arag-scrim")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".arag-scrim")).toHaveCount(0);
 });

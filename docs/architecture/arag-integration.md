@@ -448,6 +448,41 @@ Consequences for this product:
   being broken on integers (an earlier write of `7` was still indexed) and `gte` being loose
   on dates (an earlier write of `2026-02-02`).
 
+### The required-key trap, and why this product provisions nothing as required
+
+The second place the platform's behaviour forces a design choice. Two verified facts combine
+badly:
+
+1. a kv write is a **full replace** of that schema's data — keys absent from `data` are
+   dropped, not merged; and
+2. a write missing any `required` key is rejected **whole**, with
+   `422 {"detail": "Missing required keys for schema 'dip_verify_all': ['v_text']"}`. There
+   is no partial success: the other keys in the same write do not land.
+
+Taken together, one un-extracted required field costs the resource *every* value the
+extraction did produce. That is not a hypothetical — a faded scan with an unreadable total is
+an ordinary Tuesday, and marking `total` required in the kv schema would mean such an invoice
+gets **no** filterable vendor, number or date either. A generator agent hits the same wall:
+its own write is rejected in full when the model cannot find a required field, so the agent
+silently produces nothing rather than producing most of it.
+
+A required flag that turns a partial success into a total loss is not a safety property.
+So the rule this product follows:
+
+- `schemaToKvSchema()` keeps projecting `required` **faithfully** — the mapper stays truthful
+  and is the shape the extraction schema really describes;
+- `provisionable()` (`src/services/configs.ts`) strips it, and is the single place the policy
+  lives: **the kv schema in the Knowledge Box marks nothing required**;
+- the requirement is kept where it is useful. The extraction config still lists the field as
+  required, so the visual LLM is still asked for it and the record's confidence still
+  reflects it, and `writeRecordKv()` reports the gap itself as a skip on the record —
+  `meta.kv.skipped[] = { field, reason: "required by the extraction config but not
+  extracted" }` — so the honest signal survives without the blast radius.
+
+The same `provisionable()` mapping is what the pipeline writes against and what a generator
+agent is bound to, so nothing downstream can quietly re-tighten the schema underneath the
+others.
+
 ### The Data Augmentation generator agent
 
 A generator agent writes kv fields **asynchronously, platform-side**: ARAG schedules a task

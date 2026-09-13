@@ -33,6 +33,16 @@ Parameters:
 | `degraded` | query | boolean |  | `true` returns only records that finished with a failed stage (`meta.stageErrors`); `false` excludes them. |
 | `has_issues` | query | boolean |  | `true` returns only records carrying at least one validation issue |
 | `min_grounding` | query | number |  | Only records whose `meta.groundingScore` is at least this. Records with no score are excluded — an unmeasured record is not a well-grounded one. |
+| `kv` | query | array of string |  | Filter by an **extracted value**, through the Knowledge Box rather than this workspace's store. Shape: `kv=<schemaId>:<field>:<op>:<value>` — for example `kv=dip_invoice_extraction:total:gte:10000`. Repeat the parameter to narrow further; several `kv` filters are ANDed.
+
+`schemaId` is an extraction configuration's `kvSchemaId` and `field` is one of its `kvFields`. Only the first three colons separate, so a value may contain them — which an RFC 3339 instant does.
+
+Operators are per field kind and are checked before the call, because ARAG enforces them with a 412 that says nothing useful:
+- `eq` — any scalar field (text, integer, float, boolean, date)
+- `gte` / `lte` — integer, float and date scalars only
+- `contains` — `repeated` fields (is this a member?) and `range` fields (is this point inside the interval?)
+
+A filter naming an unknown schema or field, or using an operator that field does not accept, answers **400** with the operators it does accept. Resolved as a `/find` with an empty query (key-value filter expressions are rejected by `/catalog`), whose matching resource ids are intersected with the local list; the response's `filters` block says which filters ran where. |
 
 Responses:
 
@@ -102,7 +112,7 @@ Auth: ApiKey or Bearer
 
 ### `GET /api/v1/documents/{id}`
 
-**Get the canonical record for one document**
+**Get the canonical record for one document** — The full record: classification, extracted fields with their confidence, the quotes supporting them and how each was verified, entities, summary, tags, validation issues and the pipeline metadata (schema, model, per-stage timings, grounding score).
 
 Parameters:
 
@@ -148,7 +158,7 @@ Auth: ApiKey or Bearer
 
 ### `GET /api/v1/documents/{id}/export`
 
-**Download the record as JSON, XML or CSV**
+**Download the record as JSON, XML or CSV** — Serialises the same record `GET /documents/{id}` returns into the requested format and sends it as an attachment. CSV flattens the extracted fields to one row per field.
 
 Parameters:
 
@@ -399,7 +409,7 @@ Auth: public
 
 ### `POST /api/v1/session`
 
-**Issue a same-origin session cookie for the demo UI**
+**Issue a same-origin session cookie for the demo UI** — Sets a signed, SameSite=Lax `arag_session` cookie so a same-origin front end can call the API when API keys are enforced, and can satisfy the writer guard DP-12 applies to deletes and config creation. It is not a login: it carries no identity and grants no admin access.
 
 Responses:
 
@@ -417,7 +427,7 @@ Auth: public
 
 ### `GET /api/v1/jobs`
 
-**List processing jobs**
+**List processing jobs** — Newest first, with paging, a status filter and a search over the job's document and config. Each job carries its stage events, so a client can render a pipeline history without opening the stream.
 
 Parameters:
 
@@ -447,7 +457,7 @@ Auth: ApiKey or Bearer
 
 ### `GET /api/v1/jobs/{id}`
 
-**Get a job**
+**Get a job** — One job with its full event list: every stage start, progress, success, skip or error, with per-stage durations. This is what the pipeline view replays after a reload.
 
 Parameters:
 
@@ -518,7 +528,7 @@ Auth: ApiKey or Bearer
 
 ### `GET /api/v1/extraction-configs`
 
-**List built-in and custom extraction configurations**
+**List built-in and custom extraction configurations** — Every configuration an upload can be processed with, built-in and custom, each with the fields it extracts, whether it is provisioned in the Knowledge Box, and how many stored documents were processed with it (the question that decides whether it can be deleted).
 
 Responses:
 
@@ -555,7 +565,7 @@ Auth: ApiKey or Bearer
 
 ### `GET /api/v1/extraction-configs/{id}`
 
-**Get one extraction configuration**
+**Get one extraction configuration** — The configuration's fields, its ARAG search-configuration name, its provisioning state and the number of documents processed with it.
 
 Parameters:
 
@@ -629,7 +639,7 @@ Auth: ApiKey or Bearer
 
 ### `POST /api/v1/extraction-configs/{id}/provision`
 
-**Re-provision one configuration's stored ARAG search configuration** — Idempotent. `POST /api/v1/admin/provision` re-provisions all of them and needs the admin token; this is the granularity an operator needs to fix the one config that did not take. Requires a writer credential.
+**Re-provision one configuration's Knowledge Box objects** — Re-provisions both the stored ARAG search configuration and the key-value schema this configuration writes into, and reports each separately. Idempotent. `POST /api/v1/admin/provision` re-provisions all of them and needs the admin token; this is the granularity an operator needs to fix the one config that did not take. Requires a writer credential.
 
 Parameters:
 
@@ -653,7 +663,7 @@ Auth: ApiKey or Bearer
 
 ### `GET /api/v1/schemas`
 
-**List document types and the fields each extraction schema captures**
+**List document types and the fields each extraction schema captures** — The read-only catalogue behind auto-classification: every document type this product recognises and the fields its built-in schema extracts, with types and required flags. Use it to see what a document of a given type will yield before uploading one.
 
 Responses:
 
@@ -671,7 +681,7 @@ Auth: ApiKey or Bearer
 
 ### `POST /api/v1/admin/login`
 
-**Exchange the admin token for an HttpOnly cookie**
+**Exchange the admin token for an HttpOnly cookie** — Verifies ADMIN_TOKEN in constant time and sets the HttpOnly `arag_admin` cookie the admin panel uses, so the token itself is not held in browser storage. Returns 403 when no admin token is configured (admin is disabled) and 401 when the token is wrong.
 
 Request body (`application/json`): object
 
@@ -694,7 +704,7 @@ Auth: public
 
 ### `GET /api/v1/admin/health`
 
-**Service health, KB connection test, extract strategy and model**
+**Service health, KB connection test, extract strategy and model** — A live round trip to the Knowledge Box plus the operator's view of this process: uptime, the effective extract strategy and generative model, document counts by status (including `degraded`, records that finished but lost a stage) and the mean grounding score across stored records.
 
 Responses:
 
@@ -711,7 +721,7 @@ Auth: AdminToken
 
 ### `GET /api/v1/admin/config`
 
-**Effective configuration (secrets redacted)**
+**Effective configuration (secrets redacted)** — What this process is running with: the environment with every secret redacted, the effective branding and how to change it, the extraction configurations and their provisioning state, the JSON stores on disk, and the registered route table. For the editable view of the same configuration, use `GET /api/v1/admin/settings`.
 
 Responses:
 
@@ -728,7 +738,7 @@ Auth: AdminToken
 
 ### `GET /api/v1/admin/usage`
 
-**Usage counters (requests, ARAG calls, jobs, documents)**
+**Usage counters (requests, ARAG calls, jobs, documents)** — Counters since boot: HTTP requests, calls to ARAG split into failures, expected provisioning conflicts and other client errors, total ARAG time, plus document and job counts. Intended for an operator's dashboard, not for billing.
 
 Responses:
 
@@ -745,19 +755,21 @@ Auth: AdminToken
 
 ### `GET /api/v1/admin/logs`
 
-**Recent log records**
+**Page the runtime log ring buffer** — Records are returned oldest first. Without a cursor you get the newest `limit` records (the tail, as before). With `cursor` and `direction` you walk the buffer in either direction on a stable sequence number, so records arriving while an operator reads cannot duplicate or hide a row. Follow `prevCursor` with `direction=older` to read back, and `nextCursor` with `direction=newer` to tail.
 
 Parameters:
 
 | Name | In | Type | Required | Description |
 |---|---|---|---|---|
-| `level` | query | string |  |  |
-| `contains` | query | string |  |  |
+| `level` | query | string |  | Minimum level to include. |
+| `contains` | query | string |  | Case-insensitive substring match over the whole record. |
 | `limit` | query | integer |  |  |
+| `cursor` | query | string |  | Opaque cursor from a previous page's `nextCursor`/`prevCursor`. |
+| `direction` | query | string |  | Which way to walk from the cursor. Ignored when no cursor is given. |
 
 Responses:
 
-- `200` OK — `application/json` object
+- `200` OK — `application/json` [LogPage](#logpage)
 - `400` Validation failed — `application/problem+json` [Problem](#problem)
 - `401` Authentication required — `application/problem+json` [Problem](#problem)
 - `403` Forbidden — `application/problem+json` [Problem](#problem)
@@ -804,7 +816,7 @@ Auth: AdminToken
 
 ### `POST /api/v1/admin/provision`
 
-**Re-provision every extraction configuration as an ARAG search configuration**
+**Re-provision every extraction configuration's Knowledge Box objects** — Idempotent: safe to re-run after a Knowledge Box reset, a model change or an upgrade. Each configuration is POSTed and, when it already exists, PATCHed — so the stored search configurations end up carrying the current model, reranker, prompt and JSON schema whatever state they were in. Each configuration's key-value schema is ensured in the same pass and reported as `keyValueSchema`; the 20-schemas-per-Knowledge-Box ceiling is checked once for the whole run rather than per config.
 
 Responses:
 
@@ -841,6 +853,436 @@ Responses:
 - `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
 
 Auth: AdminToken
+
+
+### `GET /api/v1/admin/settings`
+
+**Every setting, with its effective value, source and secret state** — The settings screen reads this. For each field it reports the effective value, whether that value came from an in-product edit (`store`), the deployment's environment (`env`) or the built-in default, and whether the field is a secret — secrets report `{ set, hint }` and never their value. `applied` reports what the running process is actually using (the ARAG client's KB and timeout, the live rate limiter, the upload ceiling, the retention scheduler), which is how the UI shows that an edit took effect without a restart.
+
+Responses:
+
+- `200` OK — `application/json` [SettingsDocument](#settingsdocument)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+
+### `PATCH /api/v1/admin/settings`
+
+**Change settings; they take effect immediately, with no restart** — Validates every field before writing anything: a colour outside the platform's strict grammar, a Knowledge Box id that is not a UUID or a number outside its range fails the whole patch with an RFC 9457 problem naming each offending key. Applied changes are persisted in the product's store (so they survive a restart and override the environment), pushed into the live objects — the ARAG client is rebuilt when a connection field changes — and written to the audit log with who, what and when. Secrets are accepted here and never returned anywhere.
+
+Request body (`application/json`): [SettingsPatch](#settingspatch)
+
+
+Responses:
+
+- `200` OK — `application/json` [SettingsPatchResult](#settingspatchresult)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+
+### `POST /api/v1/admin/settings/reset`
+
+**Drop in-product overrides and fall back to the environment default** — The other half of “environment variables are defaults that the store overrides”: this removes the stored override for the named keys, so each field's `source` returns to `env` (or `default`). Audited like any other settings change.
+
+Request body (`application/json`): [SettingsResetRequest](#settingsresetrequest)
+
+
+Responses:
+
+- `200` OK — `application/json` [SettingsPatchResult](#settingspatchresult)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+
+### `POST /api/v1/admin/branding/logo`
+
+**Upload a logo and point branding at it** — Accepts a `multipart/form-data` body with a `file` part (SVG, PNG, JPEG, WebP or GIF, up to 2 MB), writes it into `DATA_DIR/branding/` — a mounted volume in production, so rebranding never needs a rebuild — and sets `branding.logoUrl` to the `/branding/…` path it is served from. Returns the new asset and the updated settings document.
+
+Request body (`multipart/form-data`): object
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file` | string | yes |  |
+
+Responses:
+
+- `201` Created — `application/json` [BrandingAsset](#brandingasset)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `413` The file is larger than the 2 MB brand-asset ceiling — `application/problem+json` [Problem](#problem)
+- `415` Not an image type this product will serve — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+
+### `GET /api/v1/admin/api-keys`
+
+**List API keys with their last use** — Never returns a key or its digest: an operator identifies a key by its name and prefix. `lastUsedAt` is updated on successful authentication (in memory, folded into the store at most once a minute per key, so authentication never costs a write). Revoked keys stay listed so the history is readable.
+
+Responses:
+
+- `200` OK — `application/json` object
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+
+### `POST /api/v1/admin/api-keys`
+
+**Create an API key (the plaintext is returned once)** — Mints `dip_<id>_<secret>` and stores only a salted SHA-256 digest of the secret. The response is the one and only place the key appears — it cannot be recovered afterwards, only revoked and replaced. The key authenticates exactly like an `API_KEYS` entry: as `X-API-Key`, as a bearer token, and as a writer credential for the operations DP-12 protects.
+
+Request body (`application/json`): [ApiKeyCreateRequest](#apikeycreaterequest)
+
+
+Responses:
+
+- `201` Created — `application/json` [ApiKeyCreated](#apikeycreated)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+
+### `DELETE /api/v1/admin/api-keys/{id}`
+
+**Revoke an API key** — The key stops authenticating on the next request. The record is kept (with `revokedAt`) so the audit trail still explains what that key did.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+Responses:
+
+- `200` OK — `application/json` [ApiKey](#apikey)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+
+### `GET /api/v1/admin/audit`
+
+**Page the audited-change log** — Who changed what, and when — every settings edit, API-key creation and revocation, extraction-config create/edit/delete/provision, purge and document delete, newest first. Secret values are redacted to `***` before the entry is written. Paging is by a stable sequence number: follow `nextCursor` with `direction=older` to read back through history and `prevCursor` with `direction=newer` to return, with no duplicates or gaps however many entries arrive in between.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `action` | query | string |  | Exact action, or a prefix such as `settings` to match `settings.update` and `settings.reset`. |
+| `actor` | query | string |  | Actor name or type (`admin`, `api-key`, `session`, `anonymous`, `system`). |
+| `target` | query | string |  | Exact target: a setting key, key id, config id or document id. |
+| `limit` | query | integer |  |  |
+| `cursor` | query | string |  | Opaque cursor from a previous page. |
+| `direction` | query | string |  | Walk older (further back) or newer (back towards the top) from the cursor. |
+
+Responses:
+
+- `200` OK — `application/json` [AuditPage](#auditpage)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: AdminToken
+
+## review
+
+### `PUT /api/v1/documents/{id}/fields/{key}`
+
+**Correct one extracted field** — Records a correction rather than overwriting the model's output: the original value, the original quote and who changed it are all kept. The corrected value is re-checked against the document's own text with the same evidence contract the pipeline uses — a human typing a value does not make it grounded, but if the value they typed *is* in the document that is worth knowing, so the correction earns a new quote and the field's model confidence is dropped (the model did not produce this value and claiming its confidence would be a lie on the most-read number in the record view).
+
+The corrected record is also written back into the resource's key-value field. Because a key-value write replaces the whole schema's data, the *entire* current record is sent, not just the one field — and because the Knowledge Box's filter index keeps every value ever written, this second write leaves the resource still matching a filter on the value it replaced. That is reported on `correction.kv.filterIndexStale` and `meta.kv.superseded` rather than hidden.
+
+A write against shared state, so it needs a credential even when `API_KEYS` is unset: an API key, the admin token, or a same-origin session cookie.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+| `key` | path | string | yes | The `ExtractedField.key` being corrected, e.g. `invoice_number` |
+
+Request body (`application/json`): [FieldCorrectionRequest](#fieldcorrectionrequest)
+
+
+Responses:
+
+- `200` OK — `application/json` [FieldCorrectionResult](#fieldcorrectionresult)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+
+### `DELETE /api/v1/documents/{id}/fields/{key}`
+
+**Undo the most recent correction to a field** — Restores the value the last correction replaced — as a *new* correction, so the history stays append-only and the revert is as attributable as the change it undoes. The restored value is re-verified against the document like any other correction, and written back to the Knowledge Box the same way (with the same filter-index consequence). Answers 400 when the field has never been corrected.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+| `key` | path | string | yes | The `ExtractedField.key` being corrected, e.g. `invoice_number` |
+
+Responses:
+
+- `200` OK — `application/json` [FieldCorrectionResult](#fieldcorrectionresult)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+
+### `GET /api/v1/documents/{id}/corrections`
+
+**The corrections made to one record, newest first** — The record's review history: every value a person changed, what it was before, why they say they changed it, whether the new value could be verified against the document, and whether it reached the Knowledge Box. The same list is on the record itself as `corrections` (oldest first); this is the reading order a review panel wants.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+Responses:
+
+- `200` OK — `application/json` object
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+
+### `POST /api/v1/ask`
+
+**Ask one grounded question across a filtered set of documents** — The same grounded ask the record view offers, with the scope widened from one document to a filtered set of them — and the filter is the Documents list's own, so “ask the twelve invoices from last week” is the list already on screen. Citations come back mapped to this product's document ids, so “show me where” still works across documents.
+
+Retrieval over the set, not `full_resource`: across dozens of documents that would be an enormous prompt and a slow, expensive call. Every ask is a real generative call against the Knowledge Box, so this route has its own tight rate-limit bucket.
+
+Request body (`application/json`): [CorpusAskRequest](#corpusaskrequest)
+
+
+Responses:
+
+- `200` OK — `application/json` [CorpusAnswer](#corpusanswer)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+## generators
+
+### `POST /api/v1/extraction-configs/{id}/generator`
+
+**Provision and start a Data Augmentation generator agent for this configuration** — The alternative extraction path: instead of this product asking the document a question per upload, ARAG runs a task of its own that sweeps resources and writes the values it extracts straight into this configuration's key-value schema. The schema's field descriptions are the instructions, which is why they are carried across verbatim when the schema is provisioned.
+
+ARAG allows only one running `ask` task per destination and the destination is the key-value schema, so starting again replaces the existing agent (stopped first — a running task cannot be deleted). Answers 400 when the configuration's key-value schema is not provisioned, because there would be nothing to write into.
+
+Note on what is verified: provisioning, the start → stop → delete lifecycle and reading generated values back were all confirmed against the live Knowledge Box. End-to-end write latency was **not** — every run started there was still scheduled after 20 minutes — so this returns as soon as the task is accepted and the caller polls.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+Request body (`application/json`): object
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `model` | string |  | Generative model for the agent. Defaults to the configured one. |
+
+Responses:
+
+- `202` Started — `application/json` [GeneratorAgent](#generatoragent)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+
+### `GET /api/v1/extraction-configs/{id}/generator`
+
+**The generator agent running for this configuration, if any** — There is no per-task GET on the platform (it answers 405), so the state is found by locating the task id in the buckets of the Knowledge Box's task list. `agent` is null when this workspace has not started one.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+Responses:
+
+- `200` OK — `application/json` object
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+
+### `DELETE /api/v1/extraction-configs/{id}/generator`
+
+**Stop and delete this configuration's generator agent** — Stops the task first and then deletes it, because ARAG refuses to delete a running task. The values the agent has already written stay on their resources — deleting the agent stops future writes, it does not retract past ones. Requires a writer credential.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+Responses:
+
+- `204` Deleted
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+
+### `POST /api/v1/extraction-configs/{id}/generator/stop`
+
+**Stop a running generator agent without deleting it** — Halts a sweep in progress while keeping the task, so it can be inspected in the ARAG dashboard before it is removed. Stopping is idempotent: a task that is already stopped, or already gone, is not an error. Requires a writer credential.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+Responses:
+
+- `200` OK — `application/json` [GeneratorAgent](#generatoragent)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+
+### `POST /api/v1/documents/{id}/generator-run`
+
+**Run the generator agent over this one document** — There is no “run this task on that document” call on the platform, so a single-document run is a task filtered to one resource id — which is also the only safe way to keep a run from sweeping the whole Knowledge Box. Returns 202 with the task; poll `GET /api/v1/extraction-configs/{id}/generator` for its state and read the result with the comparison endpoint. Requires a writer credential: it starts real model work against the Knowledge Box.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+Request body (`application/json`): object
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `model` | string |  |  |
+
+Responses:
+
+- `202` Started — `application/json` [GeneratorAgent](#generatoragent)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
+
+
+### `GET /api/v1/documents/{id}/generator-comparison`
+
+**This product's extraction beside the generator agent's, field by field** — The record view's answer to “which path should I use?”, with agreement or disagreement marked per field.
+
+The two columns are **not** equivalent and the payload says so rather than leaving it to be inferred from a layout: the evidence contract applies to this product's path only. Its values carry a verbatim quote checked against the document's own text; a generator agent returns values and no quote, so every `generator.evidence` is `null` and `evidenceContract.generator` states that those values are not grounded to the same standard.
+
+`observed` is the same honesty about this product's own testing: provisioning, the task lifecycle and reading values back were verified against the live Knowledge Box; end-to-end write latency was not.
+
+Parameters:
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+Responses:
+
+- `200` OK — `application/json` [GeneratorComparison](#generatorcomparison)
+- `400` Validation failed — `application/problem+json` [Problem](#problem)
+- `401` Authentication required — `application/problem+json` [Problem](#problem)
+- `403` Forbidden — `application/problem+json` [Problem](#problem)
+- `404` Not found — `application/problem+json` [Problem](#problem)
+- `429` Rate limited — `application/problem+json` [Problem](#problem)
+- `502` Upstream (ARAG) error — `application/problem+json` [Problem](#problem)
+
+Auth: ApiKey or Bearer
 
 ## Schemas
 
@@ -966,6 +1408,7 @@ Canonical, format-agnostic record for one document.
 | `tags` | array of string | yes |  |
 | `issues` | array of [ValidationIssue](#validationissue) | yes |  |
 | `evidence` | array of [Evidence](#evidence) | yes |  |
+| `corrections` | array of [FieldCorrection](#fieldcorrection) |  | Human corrections to extracted fields, oldest first. Never discarded — a correction is recorded alongside the model's original value, not in place of it. |
 | `error` | string |  |  |
 | `meta` | object | yes |  |
 | `createdAt` | string | yes |  |
@@ -981,6 +1424,7 @@ Canonical, format-agnostic record for one document.
 | `total` | integer | yes |  |
 | `next_page` | boolean |  |  |
 | `facets` | [Facets](#facets) |  |  |
+| `filters` | [AppliedFilters](#appliedfilters) |  |  |
 
 ### DocumentAccepted
 
@@ -1124,6 +1568,9 @@ What is protecting this deployment. Values only — never a key or a token.
 | `type` | string (`string`, `number`, `array`) | yes |  |
 | `description` | string |  |  |
 | `required` | boolean |  |  |
+| `kvType` | string (`text`, `integer`, `float`, `boolean`, `date`) |  | Knowledge Box type for this field's key-value projection, overriding the type derived from `type`. Use it when the value is captured as text but should be filtered as a number or a date — an invoice total, an issue date. Validated on provisioning. |
+| `kvRepeated` | boolean |  | Store a list of values. ARAG accepts `repeated` on `text` only. |
+| `kvRange` | boolean |  | Store an interval (`{lower, upper}`) rather than a point. ARAG accepts `range` on integer, float and date only. |
 
 ### ExtractionConfig
 
@@ -1135,7 +1582,10 @@ What is protecting this deployment. Values only — never a key or a token.
 | `description` | string | yes |  |
 | `builtin` | boolean | yes | Built-in configs cannot be deleted |
 | `aragConfig` | string | yes | Stored ARAG search configuration (kind: ask) backing this config |
-| `provisioned` | boolean |  |  |
+| `provisioned` | boolean |  | Whether the stored ARAG search configuration is in place (see `provisioning`) |
+| `kvSchemaId` | string |  | Key-value schema this configuration's extracted records are written into, and the `schemaId` half of a `kv=` filter on `GET /api/v1/documents` |
+| `kvFields` | object |  | Property name → key-value field key. They differ only where a property name contains `/` or `.`, which ARAG's `^[^/.]{1,64}$` forbids. |
+| `provisioning` | [ConfigProvisioning](#configprovisioning) |  |  |
 | `documentCount` | integer |  | Documents in this workspace extracted with this configuration |
 | `fields` | array of [ConfigField](#configfield) | yes |  |
 | `createdAt` | string |  |  |
@@ -1161,12 +1611,15 @@ What is protecting this deployment. Values only — never a key or a token.
 
 ### ProvisionResult
 
+Provisioning one configuration. `ok` is the stored ARAG search configuration; `keyValueSchema` is the key-value schema provisioned alongside it — the two are provisioned together, and either can fail without the other.
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `schema` | string | yes |  |
 | `aragConfig` | string | yes |  |
 | `ok` | boolean | yes |  |
 | `error` | string |  |  |
+| `keyValueSchema` | [ProvisioningStatus](#provisioningstatus) |  |  |
 
 ### Branding
 
@@ -1181,4 +1634,304 @@ What is protecting this deployment. Values only — never a key or a token.
 | `footerText` | string |  |  |
 | `docsUrl` | string |  |  |
 | `supportUrl` | string |  |  |
+
+### SettingField
+
+One editable setting: its effective value, which layer that value came from, and whether it is a secret. A UI renders `source: "env"` as “from the environment default”, `source: "store"` as “edited in the product” (with a reset), and a secret as “set · rotate”.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | string | yes | Dotted key, e.g. `branding.tagline`. Also the patch path. |
+| `group` | string (`branding`, `connection`, `limits`, `security`, `retention`, `operations`) | yes |  |
+| `label` | string | yes |  |
+| `description` | string |  |  |
+| `type` | string (`string`, `number`, `boolean`, `color`, `uuid`, `enum`, `url`, `list`) | yes | How the field is edited and validated. `color` uses the platform's strict grammar. |
+| `envVar` | string | yes | Environment variable that supplies this field's default |
+| `secret` | boolean | yes | True when the value is write-only and never returned |
+| `adminOnly` | boolean | yes | True when the value never appears on the viewer-facing `GET /api/v1/settings` (DP-40) |
+| `source` | string (`store`, `env`, `default`) | yes | Which layer the effective value came from: an in-product edit, the environment, or the built-in default |
+| `value` | object | yes | Effective value. Always `null` for a secret. |
+| `set` | boolean |  | Secrets only: whether a value is in force |
+| `hint` | string |  | Secrets only: the last four characters, to tell two apart |
+| `envSet` | boolean | yes | Whether the environment sets this field, so a reset has a target |
+| `constraints` | object |  | Bounds the API enforces: min, max, maxLength, values. |
+| `note` | string |  | Operator-facing caveat shown next to the field |
+
+### SettingsDocument
+
+Every setting this deployment reads, grouped for the settings screen, plus `applied`: the values the running process is actually using, read back from the live objects rather than from the stored document. `applied` is how a UI proves an edit took effect without a restart.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `version` | integer | yes | Bumped on every applied change; usable as an ETag-ish guard |
+| `updatedAt` | string,null |  |  |
+| `groups` | array of object | yes |  |
+| `applied` | object | yes | Live values in force right now: the ARAG client's KB id, base URL and timeout, the rate limiter's numbers, the upload and body ceilings, whether API keys are enforced, and the state of the retention scheduler. |
+
+### SettingsPatch
+
+Settings to change, either nested (`{ "branding": { "tagline": "…" } }`) or flat (`{ "branding.tagline": "…" }`). Only the keys present are touched. Every value is validated before anything is written: a bad colour, a non-UUID Knowledge Box id or an out-of-range number fails the whole patch with an RFC 9457 problem listing each field.
+
+_object_
+
+### SettingsChange
+
+One applied change. `before`/`after` are null for a secret — that it changed is the record.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | string | yes |  |
+| `secret` | boolean | yes |  |
+| `before` | object |  |  |
+| `after` | object |  |  |
+
+### SettingsPatchResult
+
+The changes that were actually applied, plus the new settings document.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changed` | array of [SettingsChange](#settingschange) | yes |  |
+| `settings` | [SettingsDocument](#settingsdocument) | yes |  |
+
+### SettingsResetRequest
+
+Drop in-product overrides so the named settings fall back to their environment default.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `keys` | array of string | yes | Dotted setting keys, e.g. `["branding.primaryColor"]` |
+
+### BrandingAsset
+
+A brand asset written into `DATA_DIR/branding/` and served from `/branding/`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | yes | Path the asset is served from, e.g. `/branding/logo.svg` |
+| `filename` | string | yes |  |
+| `bytes` | integer | yes |  |
+| `contentType` | string |  |  |
+| `settings` | [SettingsDocument](#settingsdocument) |  |  |
+
+### ApiKey
+
+A stored API key. The key itself is never returned — only a salted digest is kept, and the prefix is what an operator matches against the value they saved at creation.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes |  |
+| `name` | string | yes |  |
+| `prefix` | string | yes | Non-secret leading part of the key, e.g. `dip_3f9c1a2b` |
+| `createdAt` | string | yes |  |
+| `createdBy` | string |  | Who created it: the admin token, a key's name, or a session |
+| `lastUsedAt` | string,null |  |  |
+| `revokedAt` | string,null |  |  |
+| `revoked` | boolean | yes |  |
+
+### ApiKeyCreateRequest
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What this key is for, e.g. `ingest-worker` |
+
+### ApiKeyCreated
+
+The only response that ever contains the key. It is shown once and cannot be recovered: the store keeps a salted SHA-256 digest, not the value.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | string | yes | The plaintext key. Copy it now — it is never returned again. |
+| `apiKey` | [ApiKey](#apikey) | yes |  |
+
+### AuditEntry
+
+One audited change: who, what, when, and what it changed from and to. Secret values are replaced with `***` before the entry is written, so the log is safe to read.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes |  |
+| `seq` | integer | yes | Monotonic ordering key; the page cursor encodes it |
+| `ts` | string | yes |  |
+| `actor` | object | yes |  |
+| `action` | string | yes | Dotted verb: `settings.update`, `settings.reset`, `apikey.create`, `apikey.revoke`, `config.create`, `config.update`, `config.delete`, `config.provision`, `document.delete`, `documents.purge`, `branding.logo` |
+| `target` | string | yes | Setting key, key id, config id, document id, or `*` for a sweep |
+| `before` | object |  |  |
+| `after` | object |  |  |
+| `requestId` | string,null |  | Correlates with the request log |
+| `detail` | string |  |  |
+
+### AuditPage
+
+A page of audited changes, newest first. Paging is by sequence number, not offset, so an entry written while an operator is reading cannot duplicate or hide a row.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | array of [AuditEntry](#auditentry) | yes |  |
+| `actions` | array of string |  | Distinct actions seen, for the filter |
+| `nextCursor` | string,null | yes | Opaque cursor for the next page in the reading direction; null at the end. |
+| `prevCursor` | string,null | yes | Opaque cursor for the page you came from; null at the start. |
+| `hasMore` | boolean | yes |  |
+| `hasPrev` | boolean |  |  |
+| `total` | integer | yes | Rows matching the filter across every page |
+
+### LogPage
+
+A page of runtime log records, oldest first (the ring buffer has always read like a terminal), with the same stable cursor contract as the audit log.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | array of [LogRecord](#logrecord) | yes |  |
+| `nextCursor` | string,null | yes | Opaque cursor for the next page in the reading direction; null at the end. |
+| `prevCursor` | string,null | yes | Opaque cursor for the page you came from; null at the start. |
+| `hasMore` | boolean | yes |  |
+| `hasPrev` | boolean |  |  |
+| `total` | integer | yes | Rows matching the filter across every page |
+
+### KvRejection
+
+One value the Knowledge Box refused, normalised out of ARAG's two different 422 dialects. This is the product's own “the KB rejected this value” signal: it names the field, what the schema expected and what was supplied, so a reviewer can see why a field is missing from the Knowledge Box.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `field` | string |  | Product property name, when the error identifies one |
+| `kind` | string (`type_mismatch`, `missing_required`, `unknown_key`, `range_bounds`, `too_many_fields`, `too_many_schemas`, `invalid_name`, `invalid_modifier`, `duplicate_key`, `unknown`) | yes |  |
+| `message` | string | yes |  |
+| `expected` | string |  | Declared key-value type for the field |
+| `got` | string |  | What was actually supplied |
+
+### KvWriteRecord
+
+What reached the resource's key-value field for this document, and what did not.
+
+**The overwrite trap.** A key-value write replaces the whole schema's data, and overwriting a value does *not* remove the old one from the Knowledge Box's filter index — the index accumulates every value ever written to that field on that resource and there is no purge call. Values are therefore written once per resource; when a second write is unavoidable (a human correction, a reprocess) `writes` counts it, `filterIndexStale` goes true and `superseded` lists the values this resource still matches a filter on despite having replaced them. It is reported rather than hidden.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `schemaId` | string | yes | Key-value schema the values were written under |
+| `written` | boolean | yes | True when the Knowledge Box accepted the write |
+| `at` | string | yes |  |
+| `fields` | integer | yes | Keys actually written |
+| `keys` | object |  | Product property name → key-value field key, so the JSON tab can render both |
+| `values` | object |  | Key-value field key → the value exactly as it reached the Knowledge Box |
+| `skipped` | array of object |  | Extracted values that could not be represented in the schema, each with the reason |
+| `rejected` | array of [KvRejection](#kvrejection) |  |  |
+| `error` | string |  | Why the write did not happen, or did not land |
+| `writes` | integer |  | How many times this resource's key-value field has been written |
+| `filterIndexStale` | boolean |  | True once this resource has been written more than once: the Knowledge Box filter index also matches every superseded value, so a filter on an old value still returns this document. |
+| `superseded` | array of object |  | Values this resource still matches a filter on although they have been replaced |
+
+### ProvisioningStatus
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `state` | string (`provisioned`, `failed`, `not provisioned`) | yes |  |
+| `error` | string |  | Why it failed, in a sentence an operator can act on |
+| `at` | string |  |  |
+
+### ConfigProvisioning
+
+What this configuration has in the Knowledge Box. A config needs two objects there: a stored search configuration (how a document is read) and a key-value schema (how the result is kept and filtered). `state` is `provisioned` only when both are in place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `state` | string (`provisioned`, `failed`, `not provisioned`) | yes |  |
+| `searchConfiguration` | object | yes |  |
+| `keyValueSchema` | object | yes |  |
+
+### AppliedFilters
+
+Which half of the query was answered by which system. `kv` filters are resolved **in the Knowledge Box** (a `/find` with the key-value filter expression, whose matching resource ids are then intersected with this workspace's own list); everything else is a predicate over the local store. A list screen should label them differently because they are not interchangeable.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `knowledgeBox` | object | yes |  |
+| `local` | array of string | yes | Parameters applied against this workspace's own store |
+
+### FieldCorrection
+
+One human correction to one extracted field, kept on the record forever. The model's original value and the reviewer are both preserved: a correction is recorded, never a silent overwrite. `verified` is the corrected value re-checked against the document's own text with the same contract the pipeline uses — a human typing a value does not make it grounded, but if the value they typed *is* in the document, that is worth showing.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `field` | string | yes |  |
+| `label` | string | yes |  |
+| `previousValue` | object | yes |  |
+| `value` | object | yes |  |
+| `reason` | string |  |  |
+| `actor` | string | yes | `admin`, `api-key` or `session`. Never a credential. |
+| `at` | string | yes |  |
+| `verified` | string (`exact`, `normalised`, `unverified`) | yes |  |
+| `kv` | object |  | Whether the corrected value reached the Knowledge Box key-value field. |
+
+### FieldCorrectionRequest
+
+The value a reviewer is setting the field to, and why.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `value` | object | yes | The corrected value. `null` clears the field. |
+| `reason` | string |  | Why the value was wrong, in the reviewer's words |
+
+### FieldCorrectionResult
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `document` | [Document](#document) | yes |  |
+| `correction` | [FieldCorrection](#fieldcorrection) | yes |  |
+
+### CorpusAskRequest
+
+A question asked across a filtered set of documents rather than one. The filter is the Documents list's own filter, so “ask the twelve invoices from last week” is the list already on screen.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `question` | string | yes |  |
+| `maxResources` | integer |  | Ceiling on documents retrieved over, so one ask cannot fan out over the whole corpus |
+| `filters` | object |  | The same filters `GET /api/v1/documents` accepts, by their query-parameter names. |
+
+### CorpusAnswer
+
+One grounded answer over many documents. Citations carry this product's own document ids, so “show me where” still works across the corpus.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `answer` | string | yes |  |
+| `scope` | object | yes |  |
+| `citations` | array of object | yes |  |
+| `documents` | array of object | yes | Distinct documents the citations came from, in citation order |
+| `ms` | integer | yes |  |
+
+### GeneratorAgent
+
+A Data Augmentation generator agent this workspace started: an ARAG-side task (kind `ask`, `store_as_key_value: true`) that extracts into the configuration's key-value schema on the platform's own schedule. One per configuration — ARAG allows only one running `ask` task per destination, and the destination is the key-value schema.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `configId` | string | yes |  |
+| `kvSchemaId` | string | yes |  |
+| `taskId` | string | yes | ARAG task id |
+| `name` | string | yes | Task name as it appears in the ARAG dashboard |
+| `resourceId` | string |  | Set when the run was scoped to one document |
+| `startedAt` | string | yes |  |
+| `state` | string (`running`, `done`, `failed`, `stopped`, `absent`) | yes |  |
+
+### GeneratorComparison
+
+This product's extraction beside the generator agent's, field by field.
+
+**The two columns are not equivalent and the payload says so.** The evidence contract applies to the product's path only: its values carry a verbatim quote checked against the document's own text. A generator agent returns values and no quote, so every `generator.evidence` is `null` and `evidenceContract.generator` spells out that these values are not grounded to the same standard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `documentId` | string | yes |  |
+| `resourceId` | string | yes |  |
+| `configId` | string | yes |  |
+| `kvSchemaId` | string | yes |  |
+| `agent` | object |  | The agent started for this configuration, or null when none is running. |
+| `generatorHasWritten` | boolean |  | True once the agent has written values onto this resource |
+| `fields` | array of object | yes |  |
+| `summary` | object | yes |  |
+| `evidenceContract` | object | yes |  |
+| `observed` | object | yes | What this product has actually seen of the generator path against a live Knowledge Box, and what it has not. |
 
