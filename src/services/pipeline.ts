@@ -13,10 +13,11 @@
  * best record it has rather than dying, and the failure is surfaced as a stage error.
  */
 import type { AragClient, JobContext, Logger } from "../../vendor/arag-platform/src/index.ts";
-import type { DocumentRecord, StageName } from "../types.ts";
+import type { DocumentRecord, FieldValue, KvRejection, KvWriteRecord, StageName } from "../types.ts";
 import type { Agents } from "./agents.ts";
 import { buildQuerySeed, fieldsFromObject, groundingScore, validateNormalize } from "./agents.ts";
 import type { ConfigsService } from "./configs.ts";
+import { type KvData, type KvService, KvValidationError, kvErrorFrom, toKvData } from "./kv.ts";
 import { type ExtractionSchema, schemaFor } from "./schemas.ts";
 
 /** Input persisted on the job (so a job can be inspected long after it ran). */
@@ -34,6 +35,188 @@ export interface PipelineDeps {
   agents: Agents;
   configs: ConfigsService;
   log: Logger;
+  /** Key-value writer. Absent means "do not persist the record into the Knowledge Box". */
+  kv?: KvService;
+}
+
+// ─── key-value write-back ─────────────────────────────────────────────────────
+
+/** What `writeRecordKv` needs. The pipeline and human review both hand it the same things. */
+export interface KvWriteDeps {
+  kv?: KvService;
+  configs: ConfigsService;
+  log: Logger;
+}
+
+/** The record's extracted fields as a plain object, keyed by the config's property names. */
+function recordValues(record: DocumentRecord): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of record.fields) out[field.key] = field.value;
+  return out;
+}
+
+/** A `KvValidationError` reduced to the per-field message the record view shows. */
+function toRejection(err: KvValidationError, names: Record<string, string>): KvRejection {
+  const rejection: KvRejection = { kind: err.kind, message: err.message };
+  if (err.field) rejection.field = names[err.field] ?? err.field;
+  if (err.expected) rejection.expected = err.expected;
+  if (err.got) rejection.got = err.got;
+  return rejection;
+}
+
+/**
+ * Write a finished record's fields into its resource's key-value field, and record on the
+ * document exactly what happened.
+ *
+ * ### The overwrite trap
+ *
+ * A kv write is a **full replace** of the schema's data, and — this is the part that has to
+ * be designed around rather than papered over — overwriting a value does **not** remove the
+ * old one from the Knowledge Box's filter index. The index accumulates every value ever
+ * written to that field on that resource, and there is no purge call. A resource whose
+ * `vendor` was corrected from "Acme" to "Acme Pty Ltd" keeps matching a filter on "Acme"
+ * forever.
+ *
+ * So the rule is **write once per resource**: the pipeline writes when the record is
+ * finished, and nothing writes again unless a human corrects a field or the document is
+ * reprocessed. When a second write is unavoidable, it is not hidden — `writes` counts them,
+ * `filterIndexStale` goes true, and `superseded` keeps the values the resource still
+ * wrongly matches, so the UI can say so in as many words.
+ *
+ * Never throws: a Knowledge Box that refuses the values is a degraded record, not a failed
+ * document. The caller records a `stageErrors` entry from the returned `error`.
+ */
+export async function writeRecordKv(
+  record: DocumentRecord,
+  schema: ExtractionSchema,
+  deps: KvWriteDeps,
+  opts: { configId?: string } = {},
+): Promise<KvWriteRecord> {
+  const previous = record.meta.kv;
+  const at = new Date().toISOString();
+  const writes = (previous?.writes ?? 0) + 1;
+  const base = (schemaId: string): KvWriteRecord => ({
+    schemaId,
+    written: false,
+    at,
+    fields: 0,
+    writes,
+    ...(previous?.filterIndexStale ? { filterIndexStale: true, superseded: previous.superseded } : {}),
+  });
+
+  const projection = deps.configs.kvForSchema(schema, opts.configId ?? schema.docType);
+  if (!projection) {
+    return { ...base(""), error: `no key-value schema could be derived for "${schema.name}"` };
+  }
+  const { mapping } = projection;
+  const schemaId = mapping.schema.id;
+  if (!deps.kv) return { ...base(schemaId), error: "key-value writes are not configured" };
+  if (projection.status.state !== "provisioned") {
+    return {
+      ...base(schemaId),
+      error: `key-value schema "${schemaId}" is ${projection.status.state}${projection.status.error ? `: ${projection.status.error}` : ""}`,
+    };
+  }
+
+  const { data, skipped } = toKvData(recordValues(record), mapping);
+  // The provisioned kv schema marks nothing required — ARAG would otherwise refuse the whole
+  // write for one field a faded scan did not yield (see `provisionable` in configs.ts) — so
+  // the config's own required list is checked here instead. The gap is reported, not enforced.
+  for (const name of schema.required) {
+    const key = mapping.fieldIds[name];
+    if (key && !(key in data) && !skipped.some((s) => s.field === name)) {
+      skipped.push({ field: name, reason: "required by the extraction config but not extracted" });
+    }
+  }
+  const out: KvWriteRecord = {
+    ...base(schemaId),
+    fields: Object.keys(data).length,
+    keys: mapping.fieldIds,
+    values: data,
+  };
+  if (skipped.length) out.skipped = skipped;
+
+  if (out.fields === 0) {
+    out.error = "nothing to write: no extracted value could be represented in the key-value schema";
+    return out;
+  }
+
+  try {
+    await deps.kv.writeResourceKeyValues(record.resourceId, { [schemaId]: data });
+    out.written = true;
+  } catch (err) {
+    const kvErr = err instanceof KvValidationError ? err : kvErrorFrom(err, schemaId);
+    if (kvErr) out.rejected = [toRejection(kvErr, mapping.names)];
+    out.error = (err as Error).message;
+    deps.log.warn("kv.write.rejected", { rid: record.resourceId, schemaId, message: out.error });
+    return out;
+  }
+
+  // Only a write that actually landed can have superseded anything.
+  if (writes > 1 && previous?.values) {
+    out.filterIndexStale = true;
+    out.superseded = mergeSuperseded(previous, data, mapping.names);
+  }
+  deps.log.info("kv.write.ok", {
+    rid: record.resourceId,
+    schemaId,
+    fields: out.fields,
+    skipped: skipped.length,
+    writes,
+  });
+  return out;
+}
+
+/** Values this resource still matches a filter on although they have been replaced. */
+function mergeSuperseded(
+  previous: KvWriteRecord,
+  next: KvData,
+  names: Record<string, string>,
+): Array<{ field: string; value: unknown }> {
+  const kept = [...(previous.superseded ?? [])];
+  for (const [key, old] of Object.entries(previous.values ?? {})) {
+    if (JSON.stringify(next[key]) === JSON.stringify(old)) continue;
+    const field = names[key] ?? key;
+    if (kept.some((s) => s.field === field && JSON.stringify(s.value) === JSON.stringify(old))) continue;
+    kept.push({ field, value: old });
+  }
+  return kept;
+}
+
+/**
+ * Build the write-back `ReviewService` calls when a reviewer corrects a field.
+ *
+ * A kv write replaces the whole schema's data, so a one-field correction still has to send
+ * **every** current value of the record — sending only the corrected key would drop every
+ * other field from the Knowledge Box and fail on the required ones. The record handed in
+ * already carries the corrected value (review applies the correction before writing back),
+ * so what goes out is simply the whole current record.
+ */
+export function makeKvWriteback(
+  deps: KvWriteDeps & { schemaOf: (record: DocumentRecord) => ExtractionSchema },
+) {
+  type CorrectionKv = NonNullable<NonNullable<DocumentRecord["corrections"]>[number]["kv"]>;
+  return async (
+    record: DocumentRecord,
+    correction: { field: string; value: FieldValue },
+  ): Promise<CorrectionKv> => {
+    const schema = deps.schemaOf(record);
+    const written = await writeRecordKv(record, schema, deps, { configId: record.meta.config });
+    // The record is saved by the caller, so stamping it here is what carries the staleness
+    // and the rejected values through to the API response.
+    record.meta = { ...record.meta, kv: written };
+    const out: CorrectionKv = {
+      written: written.written,
+      schemaId: written.schemaId || undefined,
+      fieldId: written.keys?.[correction.field],
+    };
+    if (written.error) out.error = written.error;
+    if (written.rejected?.length) {
+      out.error = written.rejected.map((r) => r.message).join("; ");
+    }
+    if (written.filterIndexStale) out.filterIndexStale = true;
+    return out;
+  };
 }
 
 /**
@@ -253,7 +436,34 @@ export async function runPipeline(
     { soft: true, progress: 0.95 },
   );
 
-  // 6. Standardise — the record is ready for JSON/XML/CSV serialisation.
+  // 6. Persist the verified record into the resource's key-value field, so the values are
+  //    filterable in the Knowledge Box rather than only in this service's own store. This
+  //    runs inside `standardize` rather than as a new stage: it is part of producing the
+  //    canonical record, and the pipeline's stage list is a published contract.
+  //
+  //    A failure here degrades, it never fails the document — the extraction succeeded, and
+  //    a record the KB would not index is still a record. The reason lands in `stageErrors`
+  //    exactly like any other soft failure, and the detail (which fields were skipped, which
+  //    the KB rejected and why) lands on `meta.kv` where the record view reads it.
+  //
+  //    Skipped on the DA-agent path: those fields were written as key-values by an ARAG
+  //    agent in the first place, and they have no fixed schema to project onto.
+  if (!agentHandled && deps.kv) {
+    const t0 = performance.now();
+    try {
+      record.meta.kv = await writeRecordKv(record, schema, deps, { configId: record.meta.config });
+      if (record.meta.kv.error) stageErrors.push(`standardize: key-value write — ${record.meta.kv.error}`);
+    } catch (err) {
+      // `writeRecordKv` is written not to throw; this is the belt to its braces.
+      stageErrors.push(`standardize: key-value write — ${(err as Error).message}`);
+    } finally {
+      // Folded into `standardize` rather than added as a key of its own: `meta.durationsMs`
+      // is keyed by the published stage names and a client may render exactly those.
+      durations.standardize = (durations.standardize ?? 0) + Math.round(performance.now() - t0);
+    }
+  }
+
+  // 7. Standardise — the record is ready for JSON/XML/CSV serialisation.
   record.meta.processedAt = new Date().toISOString();
   record.status = "ready";
   // A soft stage failure must not look like "this document simply had no fields":
@@ -266,7 +476,9 @@ export async function runPipeline(
     }
   }
 
-  durations.standardize = 0;
+  // Serialisation itself costs nothing; the key-value write-back above is the only work
+  // this stage does, so whatever it took is what `standardize` took.
+  durations.standardize ??= 0;
   ctx.emit("standardize", "ok", {
     message: "Canonical record ready (JSON · XML · CSV)",
     data: { fields: record.fields.length },

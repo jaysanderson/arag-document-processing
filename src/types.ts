@@ -46,6 +46,50 @@ export interface Evidence {
   end?: number;
 }
 
+/** The value shapes an extracted field can hold. */
+export type FieldValue = ExtractedField["value"];
+
+/**
+ * One human correction to one extracted field, kept forever on the record.
+ *
+ * Declared here rather than in `services/review.ts` because the record type carries it:
+ * a correction is part of the canonical record, not a side table. `verified` is the
+ * corrected value re-checked against the document's extracted text with the same three
+ * outcomes the pipeline's evidence contract uses — a corrected value that cannot be found
+ * in the document is `unverified`, which is the truth and is what the record view shows.
+ */
+export interface FieldCorrection {
+  /** `ExtractedField.key` that was corrected. */
+  field: string;
+  /** Human label at the time of the correction. */
+  label: string;
+  /** What the pipeline (or an earlier correction) had. */
+  previousValue: FieldValue;
+  /** What the reviewer set it to. */
+  value: FieldValue;
+  /** Why, in the reviewer's words. Optional but strongly encouraged by the UI. */
+  reason?: string;
+  /** Who: an API key name, `session`, or `admin`. Never a credential. */
+  actor: string;
+  /** ISO instant. */
+  at: string;
+  /** How the corrected value matched the document's own text. */
+  verified: EvidenceVerification;
+  /** Whether the corrected value reached the Knowledge Box key-value field. */
+  kv?: {
+    written: boolean;
+    schemaId?: string;
+    fieldId?: string;
+    error?: string;
+    /**
+     * True when this write superseded a value already written for this resource. The
+     * Knowledge Box's filter index keeps every value ever written to a field, so the
+     * resource still matches a filter on the value this correction replaced.
+     */
+    filterIndexStale?: boolean;
+  };
+}
+
 /** A named entity surfaced by the entity-enrichment agent. */
 export interface Entity {
   text: string;
@@ -85,6 +129,62 @@ export type DocType = (typeof DOC_TYPE_VALUES)[number];
 /** Lifecycle of a document in this service (not the ARAG resource status). */
 export type DocumentStatus = "pending" | "processing" | "ready" | "failed";
 
+/**
+ * One value the Knowledge Box refused, normalised out of ARAG's two 422 dialects by
+ * `kvErrorFrom()`. This is the product's own "the KB rejected this value" signal: it names
+ * the field, what the schema expected and what was supplied, so the record view can say
+ * why a field is missing from the Knowledge Box rather than showing an upstream blob.
+ */
+export interface KvRejection {
+  /** Product property name, when the error identifies one. */
+  field?: string;
+  /** Normalised `KvErrorKind` — `type_mismatch`, `missing_required`, `unknown_key`, … */
+  kind: string;
+  message: string;
+  expected?: string;
+  got?: string;
+}
+
+/**
+ * What the pipeline (or a reviewer's correction) wrote into the resource's key-value field.
+ *
+ * `values` is the data exactly as it reached the Knowledge Box, keyed by kv field key;
+ * `fields` maps the product's property names onto those keys, so the JSON tab can render
+ * the kv schema and the written values side by side without a second call.
+ *
+ * `filterIndexStale` is the honest half. Overwriting a kv value does not remove the old
+ * value from the Knowledge Box's filter index — the index accumulates every value ever
+ * written to that field on that resource, and there is no purge call. Once a second write
+ * has happened, a filter on a superseded value still matches this resource, and the UI is
+ * told so rather than being left to imply the index is clean.
+ */
+export interface KvWriteRecord {
+  /** kv schema the values were written under. */
+  schemaId: string;
+  /** True when ARAG accepted the write. */
+  written: boolean;
+  /** ISO instant of the last write attempt. */
+  at: string;
+  /** Number of keys actually written. */
+  fields: number;
+  /** product property name → kv field key. */
+  keys?: Record<string, string>;
+  /** kv field key → value, exactly as written. */
+  values?: Record<string, unknown>;
+  /** Extracted values that could not be represented in the schema, and why. */
+  skipped?: Array<{ field: string; reason: string }>;
+  /** Values the Knowledge Box refused with a 422. */
+  rejected?: KvRejection[];
+  /** Why the write did not happen at all (no schema provisioned, transport failure, …). */
+  error?: string;
+  /** How many times this resource's kv field has been written. */
+  writes?: number;
+  /** True once `writes > 1`: the KB filter index also matches every superseded value. */
+  filterIndexStale?: boolean;
+  /** The values this resource still matches a filter on despite having been replaced. */
+  superseded?: Array<{ field: string; value: unknown }>;
+}
+
 /** Metadata about how the record was produced. */
 export interface RecordMeta {
   processedAt: string;
@@ -122,6 +222,16 @@ export interface RecordMeta {
    * still be missing the output of a stage that errored.
    */
   stageErrors?: string[];
+  /**
+   * How many of this record's fields a reviewer has corrected. A corrected field stays in
+   * `groundingScore`'s denominator and counts in its numerator only when the corrected
+   * value is itself verified against the document — so the headline number never moves
+   * because someone edited a field. This count is what lets the record view say
+   * "12 of 12 fields carry a verified quote · 1 corrected by a reviewer".
+   */
+  correctedFields?: number;
+  /** What reached the Knowledge Box's key-value field for this resource. */
+  kv?: KvWriteRecord;
 }
 
 /** The canonical, format-agnostic record produced by a full pipeline run. */
@@ -156,6 +266,8 @@ export interface DocumentRecord extends StoredDoc {
   issues: ValidationIssue[];
   /** Verbatim quotes supporting the extracted fields, each checked against the document. */
   evidence: Evidence[];
+  /** Human corrections to extracted fields, oldest first. Never discarded. */
+  corrections?: FieldCorrection[];
   /** Error detail when `status === "failed"`. */
   error?: string;
   /** Pipeline + source metadata. */

@@ -18,7 +18,10 @@ import { unauthorized } from "../../vendor/arag-platform/src/index.ts";
  * Any of these satisfies the guard:
  *
  *   - `ADMIN_TOKEN` (bearer or the `arag_admin` cookie)
- *   - an `X-API-Key` / bearer API key, when `API_KEYS` is configured
+ *   - an `X-API-Key` / bearer API key: one created in the product (Settings → API keys,
+ *     `POST /api/v1/admin/api-keys`) or one seeded by `API_KEYS`. `server.ts` extends the
+ *     platform's authentication so a stored key — verified against its salted digest —
+ *     arrives here as `ctx.auth.apiKey`, exactly like an environment key
  *   - a same-origin session cookie from `POST /api/v1/session` (SameSite=Lax, so a
  *     cross-site form or fetch cannot replay it)
  *

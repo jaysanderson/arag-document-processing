@@ -20,56 +20,32 @@
  */
 
 import type { AragClient, Logger, PlatformEnv } from "../../vendor/arag-platform/src/index.ts";
-import type { DocumentRecord, Evidence, EvidenceVerification, ExtractedField } from "../types.ts";
+import type {
+  DocumentRecord,
+  Evidence,
+  EvidenceVerification,
+  FieldCorrection,
+  FieldValue,
+} from "../types.ts";
 import { groundingScore, normaliseQuote } from "./agents.ts";
 import type { DocumentsService } from "./documents.ts";
 
-/** The value shapes an extracted field can hold (mirrors `ExtractedField.value`). */
-export type FieldValue = ExtractedField["value"];
+export type { FieldCorrection, FieldValue };
 
 /**
- * One human correction to one extracted field, kept forever on the record.
+ * A `DocumentRecord` that has been through review.
  *
- * `verified` is the corrected value re-checked against the document's extracted text with
- * the same three outcomes the pipeline's evidence contract uses. A corrected value that
- * cannot be found in the document is `unverified` — which is the truth, and is what the
- * record view shows.
+ * `corrections` now lives on `DocumentRecord` itself (a correction is part of the
+ * canonical record, not a side table), so this is a plain alias kept for the call sites
+ * and tests that name the reviewed shape explicitly.
  */
-export interface FieldCorrection {
-  /** `ExtractedField.key` that was corrected. */
-  field: string;
-  /** Human label at the time of the correction. */
-  label: string;
-  /** What the pipeline (or an earlier correction) had. */
-  previousValue: FieldValue;
-  /** What the reviewer set it to. */
-  value: FieldValue;
-  /** Why, in the reviewer's words. Optional but strongly encouraged by the UI. */
-  reason?: string;
-  /** Who: an API key name, `session`, or `admin`. Never a credential. */
-  actor: string;
-  /** ISO instant. */
-  at: string;
-  /** How the corrected value matched the document's own text. */
-  verified: EvidenceVerification;
-  /** Whether the corrected value reached the Knowledge Box key-value field. */
-  kv?: { written: boolean; schemaId?: string; fieldId?: string; error?: string };
-}
-
-/**
- * A `DocumentRecord` that has been through review. `corrections` is declared here as well
- * as on the record type so this module compiles against either shape while the record
- * type is being extended.
- */
-export interface ReviewedRecord extends DocumentRecord {
-  corrections?: FieldCorrection[];
-}
+export type ReviewedRecord = DocumentRecord;
 
 /** Written back to the Knowledge Box when a correction lands, if a kv schema exists. */
 export type KvWriteback = (
   record: DocumentRecord,
   correction: Pick<FieldCorrection, "field" | "value">,
-) => Promise<{ written: boolean; schemaId?: string; fieldId?: string; error?: string }>;
+) => Promise<NonNullable<FieldCorrection["kv"]>>;
 
 export interface ReviewDeps {
   arag: AragClient;
@@ -242,7 +218,17 @@ export class ReviewService {
       .catch(() => "");
 
     const { record, correction } = applyCorrection(current, input, { sourceText });
-    record.meta = { ...record.meta, groundingScore: groundingScore(record.fields, record.evidence) };
+    // Ruling: a corrected field is NOT excluded from the grounding score — that would
+    // silently move the number the product quotes. It stays in the denominator and counts
+    // in the numerator only when the corrected value is itself verified against the
+    // document, which `applyCorrection` has already decided by rebuilding the evidence.
+    // `correctedFields` is reported alongside so the record view can say "12 of 12 carry a
+    // verified quote · 1 corrected by a reviewer" instead of quietly changing the goalposts.
+    record.meta = {
+      ...record.meta,
+      groundingScore: groundingScore(record.fields, record.evidence),
+      correctedFields: new Set((record.corrections ?? []).map((c) => c.field)).size,
+    };
 
     if (this.d.kvWriteback) {
       correction.kv = await this.d

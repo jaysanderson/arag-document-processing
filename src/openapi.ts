@@ -127,6 +127,13 @@ const Document = {
     tags: { type: "array", items: { type: "string" } },
     issues: { type: "array", items: { $ref: "#/components/schemas/ValidationIssue" } },
     evidence: { type: "array", items: { $ref: "#/components/schemas/Evidence" } },
+    corrections: {
+      type: "array",
+      description:
+        "Human corrections to extracted fields, oldest first. Never discarded — a correction " +
+        "is recorded alongside the model's original value, not in place of it.",
+      items: { $ref: "#/components/schemas/FieldCorrection" },
+    },
     error: { type: "string" },
     meta: {
       type: "object",
@@ -157,6 +164,16 @@ const Document = {
             "failed: the pipeline degrades gracefully, so a `ready` record can still be missing the " +
             "output of a stage that errored. The same failures also appear in `issues`.",
         },
+        correctedFields: {
+          type: "integer",
+          description:
+            "Fields a reviewer has corrected. A corrected field is NOT excluded from " +
+            "`groundingScore`: it stays in the denominator and counts in the numerator only " +
+            "when the corrected value is itself verified against the document, so editing a " +
+            "field never moves the headline number. This count is what lets a record view say " +
+            "“12 of 12 fields carry a verified quote · 1 corrected by a reviewer”.",
+        },
+        kv: { $ref: "#/components/schemas/KvWriteRecord" },
       },
       additionalProperties: true,
     },
@@ -207,6 +224,33 @@ const AskResponse = {
   },
 };
 
+/**
+ * The key-value override is the same three properties wherever a field is described, so it
+ * is declared once. A money field is captured as a `string` (the original formatting is
+ * worth keeping) but has to be a `float` in the Knowledge Box or "every invoice over $10k"
+ * cannot be a filter — that mismatch is what these exist for.
+ */
+const kvFieldOverride = {
+  kvType: {
+    type: "string",
+    enum: ["text", "integer", "float", "boolean", "date"],
+    description:
+      "Knowledge Box type for this field's key-value projection, overriding the type derived " +
+      "from `type`. Use it when the value is captured as text but should be filtered as a " +
+      "number or a date — an invoice total, an issue date. Validated on provisioning.",
+  },
+  kvRepeated: {
+    type: "boolean",
+    description: "Store a list of values. ARAG accepts `repeated` on `text` only.",
+  },
+  kvRange: {
+    type: "boolean",
+    description:
+      "Store an interval (`{lower, upper}`) rather than a point. ARAG accepts `range` on " +
+      "integer, float and date only.",
+  },
+};
+
 const ConfigField = {
   type: "object",
   required: ["key", "label", "type"],
@@ -216,6 +260,7 @@ const ConfigField = {
     type: { type: "string", enum: ["string", "number", "array"] },
     description: { type: "string" },
     required: { type: "boolean" },
+    ...kvFieldOverride,
   },
 };
 
@@ -232,7 +277,24 @@ const ExtractionConfig = {
       type: "string",
       description: "Stored ARAG search configuration (kind: ask) backing this config",
     },
-    provisioned: { type: "boolean" },
+    provisioned: {
+      type: "boolean",
+      description: "Whether the stored ARAG search configuration is in place (see `provisioning`)",
+    },
+    kvSchemaId: {
+      type: "string",
+      description:
+        "Key-value schema this configuration's extracted records are written into, and the " +
+        "`schemaId` half of a `kv=` filter on `GET /api/v1/documents`",
+    },
+    kvFields: {
+      type: "object",
+      additionalProperties: { type: "string" },
+      description:
+        "Property name → key-value field key. They differ only where a property name " +
+        "contains `/` or `.`, which ARAG's `^[^/.]{1,64}$` forbids.",
+    },
+    provisioning: { $ref: "#/components/schemas/ConfigProvisioning" },
     documentCount: {
       type: "integer",
       description: "Documents in this workspace extracted with this configuration",
@@ -262,6 +324,7 @@ const ExtractionConfigCreate = {
           type: { type: "string", enum: ["string", "number", "array"] },
           description: { type: "string", maxLength: 300 },
           required: { type: "boolean" },
+          ...kvFieldOverride,
         },
         additionalProperties: false,
       },
@@ -284,12 +347,17 @@ const Schema = {
 
 const ProvisionResult = {
   type: "object",
+  description:
+    "Provisioning one configuration. `ok` is the stored ARAG search configuration; " +
+    "`keyValueSchema` is the key-value schema provisioned alongside it — the two are " +
+    "provisioned together, and either can fail without the other.",
   required: ["schema", "aragConfig", "ok"],
   properties: {
     schema: { type: "string" },
     aragConfig: { type: "string" },
     ok: { type: "boolean" },
     error: { type: "string" },
+    keyValueSchema: { $ref: "#/components/schemas/ProvisioningStatus" },
   },
 };
 
@@ -518,9 +586,780 @@ const Sample = {
   },
 };
 
+// ─── settings, API keys and audit ─────────────────────────────────────────────
+// Everything between this banner and the next one is the operator surface added by the
+// full-implementation pass: editable settings (env is a default, the store overrides it),
+// a real API-key store, and the audited-change log. Kept together so it merges cleanly
+// alongside the key-value-field and API-explorer work landing in the same document.
+
+const SettingField = {
+  type: "object",
+  description:
+    "One editable setting: its effective value, which layer that value came from, and whether " +
+    'it is a secret. A UI renders `source: "env"` as “from the environment default”, ' +
+    '`source: "store"` as “edited in the product” (with a reset), and a secret as “set · rotate”.',
+  required: ["key", "group", "label", "type", "envVar", "secret", "adminOnly", "source", "value", "envSet"],
+  properties: {
+    key: { type: "string", description: "Dotted key, e.g. `branding.tagline`. Also the patch path." },
+    group: {
+      type: "string",
+      enum: ["branding", "connection", "limits", "security", "retention", "operations"],
+    },
+    label: { type: "string" },
+    description: { type: "string" },
+    type: {
+      type: "string",
+      enum: ["string", "number", "boolean", "color", "uuid", "enum", "url", "list"],
+      description: "How the field is edited and validated. `color` uses the platform's strict grammar.",
+    },
+    envVar: { type: "string", description: "Environment variable that supplies this field's default" },
+    secret: { type: "boolean", description: "True when the value is write-only and never returned" },
+    adminOnly: {
+      type: "boolean",
+      description: "True when the value never appears on the viewer-facing `GET /api/v1/settings` (DP-40)",
+    },
+    source: {
+      type: "string",
+      enum: ["store", "env", "default"],
+      description:
+        "Which layer the effective value came from: an in-product edit, the environment, or the built-in default",
+    },
+    value: {
+      description: "Effective value. Always `null` for a secret.",
+      anyOf: [
+        { type: "string" },
+        { type: "number" },
+        { type: "boolean" },
+        { type: "array", items: { type: "string" } },
+        { type: "null" },
+      ],
+    },
+    set: { type: "boolean", description: "Secrets only: whether a value is in force" },
+    hint: { type: "string", description: "Secrets only: the last four characters, to tell two apart" },
+    envSet: {
+      type: "boolean",
+      description: "Whether the environment sets this field, so a reset has a target",
+    },
+    constraints: {
+      type: "object",
+      description: "Bounds the API enforces: min, max, maxLength, values.",
+      additionalProperties: true,
+    },
+    note: { type: "string", description: "Operator-facing caveat shown next to the field" },
+  },
+};
+
+const SettingsDocument = {
+  type: "object",
+  description:
+    "Every setting this deployment reads, grouped for the settings screen, plus `applied`: the " +
+    "values the running process is actually using, read back from the live objects rather than " +
+    "from the stored document. `applied` is how a UI proves an edit took effect without a restart.",
+  required: ["version", "groups", "applied"],
+  properties: {
+    version: { type: "integer", description: "Bumped on every applied change; usable as an ETag-ish guard" },
+    updatedAt: { type: ["string", "null"], format: "date-time" },
+    groups: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "label", "fields"],
+        properties: {
+          id: { type: "string" },
+          label: { type: "string" },
+          description: { type: "string" },
+          fields: { type: "array", items: { $ref: "#/components/schemas/SettingField" } },
+        },
+      },
+    },
+    applied: {
+      type: "object",
+      description:
+        "Live values in force right now: the ARAG client's KB id, base URL and timeout, the rate " +
+        "limiter's numbers, the upload and body ceilings, whether API keys are enforced, and the " +
+        "state of the retention scheduler.",
+      additionalProperties: true,
+    },
+  },
+};
+
+const SettingsPatch = {
+  type: "object",
+  description:
+    'Settings to change, either nested (`{ "branding": { "tagline": "…" } }`) or flat ' +
+    '(`{ "branding.tagline": "…" }`). Only the keys present are touched. Every value is ' +
+    "validated before anything is written: a bad colour, a non-UUID Knowledge Box id or an " +
+    "out-of-range number fails the whole patch with an RFC 9457 problem listing each field.",
+  additionalProperties: true,
+};
+
+const SettingsChange = {
+  type: "object",
+  description: "One applied change. `before`/`after` are null for a secret — that it changed is the record.",
+  required: ["key", "secret"],
+  properties: {
+    key: { type: "string" },
+    secret: { type: "boolean" },
+    before: {},
+    after: {},
+  },
+};
+
+const SettingsPatchResult = {
+  type: "object",
+  description: "The changes that were actually applied, plus the new settings document.",
+  required: ["changed", "settings"],
+  properties: {
+    changed: { type: "array", items: { $ref: "#/components/schemas/SettingsChange" } },
+    settings: { $ref: "#/components/schemas/SettingsDocument" },
+  },
+};
+
+const SettingsResetRequest = {
+  type: "object",
+  description: "Drop in-product overrides so the named settings fall back to their environment default.",
+  required: ["keys"],
+  properties: {
+    keys: {
+      type: "array",
+      minItems: 1,
+      maxItems: 60,
+      items: { type: "string", maxLength: 80 },
+      description: 'Dotted setting keys, e.g. `["branding.primaryColor"]`',
+    },
+  },
+  additionalProperties: false,
+};
+
+const BrandingAsset = {
+  type: "object",
+  description: "A brand asset written into `DATA_DIR/branding/` and served from `/branding/`.",
+  required: ["url", "filename", "bytes"],
+  properties: {
+    url: { type: "string", description: "Path the asset is served from, e.g. `/branding/logo.svg`" },
+    filename: { type: "string" },
+    bytes: { type: "integer" },
+    contentType: { type: "string" },
+    settings: { $ref: "#/components/schemas/SettingsDocument" },
+  },
+};
+
+const ApiKey = {
+  type: "object",
+  description:
+    "A stored API key. The key itself is never returned — only a salted digest is kept, and the " +
+    "prefix is what an operator matches against the value they saved at creation.",
+  required: ["id", "name", "prefix", "createdAt", "revoked"],
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+    prefix: { type: "string", description: "Non-secret leading part of the key, e.g. `dip_3f9c1a2b`" },
+    createdAt: { type: "string", format: "date-time" },
+    createdBy: { type: "string", description: "Who created it: the admin token, a key's name, or a session" },
+    lastUsedAt: { type: ["string", "null"], format: "date-time" },
+    revokedAt: { type: ["string", "null"], format: "date-time" },
+    revoked: { type: "boolean" },
+  },
+};
+
+const ApiKeyCreateRequest = {
+  type: "object",
+  required: ["name"],
+  properties: {
+    name: {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      description: "What this key is for, e.g. `ingest-worker`",
+    },
+  },
+  additionalProperties: false,
+};
+
+const ApiKeyCreated = {
+  type: "object",
+  description:
+    "The only response that ever contains the key. It is shown once and cannot be recovered: " +
+    "the store keeps a salted SHA-256 digest, not the value.",
+  required: ["key", "apiKey"],
+  properties: {
+    key: { type: "string", description: "The plaintext key. Copy it now — it is never returned again." },
+    apiKey: { $ref: "#/components/schemas/ApiKey" },
+  },
+};
+
+const AuditEntry = {
+  type: "object",
+  description:
+    "One audited change: who, what, when, and what it changed from and to. Secret values are " +
+    "replaced with `***` before the entry is written, so the log is safe to read.",
+  required: ["id", "seq", "ts", "actor", "action", "target"],
+  properties: {
+    id: { type: "string" },
+    seq: { type: "integer", description: "Monotonic ordering key; the page cursor encodes it" },
+    ts: { type: "string", format: "date-time" },
+    actor: {
+      type: "object",
+      required: ["type", "name"],
+      properties: {
+        type: { type: "string", enum: ["admin", "api-key", "session", "anonymous", "system"] },
+        name: { type: "string", description: "Admin token, the API key's name, `session`, or `scheduler`" },
+      },
+    },
+    action: {
+      type: "string",
+      description:
+        "Dotted verb: `settings.update`, `settings.reset`, `apikey.create`, `apikey.revoke`, `config.create`, `config.update`, `config.delete`, `config.provision`, `document.delete`, `documents.purge`, `branding.logo`",
+    },
+    target: {
+      type: "string",
+      description: "Setting key, key id, config id, document id, or `*` for a sweep",
+    },
+    before: {},
+    after: {},
+    requestId: { type: ["string", "null"], description: "Correlates with the request log" },
+    detail: { type: "string" },
+  },
+};
+
+const CursorPageFields = {
+  nextCursor: {
+    type: ["string", "null"],
+    description: "Opaque cursor for the next page in the reading direction; null at the end.",
+  },
+  prevCursor: {
+    type: ["string", "null"],
+    description: "Opaque cursor for the page you came from; null at the start.",
+  },
+  hasMore: { type: "boolean" },
+  hasPrev: { type: "boolean" },
+  total: { type: "integer", description: "Rows matching the filter across every page" },
+};
+
+const AuditPage = {
+  type: "object",
+  description:
+    "A page of audited changes, newest first. Paging is by sequence number, not offset, so an " +
+    "entry written while an operator is reading cannot duplicate or hide a row.",
+  required: ["items", "nextCursor", "prevCursor", "hasMore", "total"],
+  properties: {
+    items: { type: "array", items: { $ref: "#/components/schemas/AuditEntry" } },
+    actions: {
+      type: "array",
+      items: { type: "string" },
+      description: "Distinct actions seen, for the filter",
+    },
+    ...CursorPageFields,
+  },
+};
+
+const LogPage = {
+  type: "object",
+  description:
+    "A page of runtime log records, oldest first (the ring buffer has always read like a " +
+    "terminal), with the same stable cursor contract as the audit log.",
+  required: ["items", "nextCursor", "prevCursor", "hasMore", "total"],
+  properties: {
+    items: { type: "array", items: { $ref: "#/components/schemas/LogRecord" } },
+    ...CursorPageFields,
+  },
+};
+
+// ─── end settings, API keys and audit ─────────────────────────────────────────
+
+// ─── key-value fields, generator agents and human review ─────────────────────
+// The second half of the full-implementation pass: extracted values written back into the
+// Knowledge Box as typed key-value fields (so they can be filtered on rather than re-read),
+// the Data Augmentation generator agent as an alternative extraction path with an honest
+// comparison against this product's own, and the review surface that corrects a field and
+// asks one question across the corpus.
+
+const KvRejection = {
+  type: "object",
+  description:
+    "One value the Knowledge Box refused, normalised out of ARAG's two different 422 " +
+    "dialects. This is the product's own “the KB rejected this value” signal: it names the " +
+    "field, what the schema expected and what was supplied, so a reviewer can see why a " +
+    "field is missing from the Knowledge Box.",
+  required: ["kind", "message"],
+  properties: {
+    field: { type: "string", description: "Product property name, when the error identifies one" },
+    kind: {
+      type: "string",
+      enum: [
+        "type_mismatch",
+        "missing_required",
+        "unknown_key",
+        "range_bounds",
+        "too_many_fields",
+        "too_many_schemas",
+        "invalid_name",
+        "invalid_modifier",
+        "duplicate_key",
+        "unknown",
+      ],
+    },
+    message: { type: "string" },
+    expected: { type: "string", description: "Declared key-value type for the field" },
+    got: { type: "string", description: "What was actually supplied" },
+  },
+};
+
+const KvWriteRecord = {
+  type: "object",
+  description:
+    "What reached the resource's key-value field for this document, and what did not.\n\n" +
+    "**The overwrite trap.** A key-value write replaces the whole schema's data, and " +
+    "overwriting a value does *not* remove the old one from the Knowledge Box's filter " +
+    "index — the index accumulates every value ever written to that field on that resource " +
+    "and there is no purge call. Values are therefore written once per resource; when a " +
+    "second write is unavoidable (a human correction, a reprocess) `writes` counts it, " +
+    "`filterIndexStale` goes true and `superseded` lists the values this resource still " +
+    "matches a filter on despite having replaced them. It is reported rather than hidden.",
+  required: ["schemaId", "written", "at", "fields"],
+  properties: {
+    schemaId: { type: "string", description: "Key-value schema the values were written under" },
+    written: { type: "boolean", description: "True when the Knowledge Box accepted the write" },
+    at: { type: "string", format: "date-time" },
+    fields: { type: "integer", description: "Keys actually written" },
+    keys: {
+      type: "object",
+      additionalProperties: { type: "string" },
+      description: "Product property name → key-value field key, so the JSON tab can render both",
+    },
+    values: {
+      type: "object",
+      additionalProperties: true,
+      description: "Key-value field key → the value exactly as it reached the Knowledge Box",
+    },
+    skipped: {
+      type: "array",
+      description: "Extracted values that could not be represented in the schema, each with the reason",
+      items: {
+        type: "object",
+        required: ["field", "reason"],
+        properties: { field: { type: "string" }, reason: { type: "string" } },
+      },
+    },
+    rejected: { type: "array", items: { $ref: "#/components/schemas/KvRejection" } },
+    error: { type: "string", description: "Why the write did not happen, or did not land" },
+    writes: {
+      type: "integer",
+      description: "How many times this resource's key-value field has been written",
+    },
+    filterIndexStale: {
+      type: "boolean",
+      description:
+        "True once this resource has been written more than once: the Knowledge Box filter " +
+        "index also matches every superseded value, so a filter on an old value still " +
+        "returns this document.",
+    },
+    superseded: {
+      type: "array",
+      description: "Values this resource still matches a filter on although they have been replaced",
+      items: {
+        type: "object",
+        required: ["field"],
+        properties: { field: { type: "string" }, value: {} },
+      },
+    },
+  },
+};
+
+const ProvisioningStatus = {
+  type: "object",
+  required: ["state"],
+  properties: {
+    state: { type: "string", enum: ["provisioned", "failed", "not provisioned"] },
+    error: { type: "string", description: "Why it failed, in a sentence an operator can act on" },
+    at: { type: "string", format: "date-time" },
+  },
+};
+
+const ConfigProvisioning = {
+  type: "object",
+  description:
+    "What this configuration has in the Knowledge Box. A config needs two objects there: a " +
+    "stored search configuration (how a document is read) and a key-value schema (how the " +
+    "result is kept and filtered). `state` is `provisioned` only when both are in place.",
+  required: ["state", "searchConfiguration", "keyValueSchema"],
+  properties: {
+    state: { type: "string", enum: ["provisioned", "failed", "not provisioned"] },
+    searchConfiguration: {
+      allOf: [
+        { $ref: "#/components/schemas/ProvisioningStatus" },
+        { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+      ],
+    },
+    keyValueSchema: {
+      allOf: [
+        { $ref: "#/components/schemas/ProvisioningStatus" },
+        {
+          type: "object",
+          required: ["schemaId", "fields"],
+          properties: {
+            schemaId: { type: "string" },
+            fields: { type: "integer", description: "Fields declared in the key-value schema (max 50)" },
+          },
+        },
+      ],
+    },
+  },
+};
+
+const AppliedFilters = {
+  type: "object",
+  description:
+    "Which half of the query was answered by which system. `kv` filters are resolved **in " +
+    "the Knowledge Box** (a `/find` with the key-value filter expression, whose matching " +
+    "resource ids are then intersected with this workspace's own list); everything else is a " +
+    "predicate over the local store. A list screen should label them differently because " +
+    "they are not interchangeable.",
+  required: ["knowledgeBox", "local"],
+  properties: {
+    knowledgeBox: {
+      type: "object",
+      required: ["applied", "matchedResources"],
+      properties: {
+        applied: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["schemaId", "key", "op", "value"],
+            properties: {
+              schemaId: { type: "string" },
+              key: { type: "string" },
+              op: { type: "string", enum: ["eq", "gte", "lte", "contains"] },
+              value: { type: "string" },
+            },
+          },
+        },
+        matchedResources: {
+          type: "integer",
+          description: "Resources the Knowledge Box matched, before local filters and paging",
+        },
+        error: {
+          type: "string",
+          description:
+            "Present when the Knowledge Box could not answer. The key-value filters were then " +
+            "NOT applied — the page is the local list, not an empty result.",
+        },
+      },
+    },
+    local: {
+      type: "array",
+      items: { type: "string" },
+      description: "Parameters applied against this workspace's own store",
+    },
+  },
+};
+
+const FieldCorrection = {
+  type: "object",
+  description:
+    "One human correction to one extracted field, kept on the record forever. The model's " +
+    "original value and the reviewer are both preserved: a correction is recorded, never a " +
+    "silent overwrite. `verified` is the corrected value re-checked against the document's " +
+    "own text with the same contract the pipeline uses — a human typing a value does not " +
+    "make it grounded, but if the value they typed *is* in the document, that is worth showing.",
+  required: ["field", "label", "previousValue", "value", "actor", "at", "verified"],
+  properties: {
+    field: { type: "string" },
+    label: { type: "string" },
+    previousValue: {},
+    value: {},
+    reason: { type: "string" },
+    actor: {
+      type: "string",
+      description: "`admin`, `api-key` or `session`. Never a credential.",
+    },
+    at: { type: "string", format: "date-time" },
+    verified: { type: "string", enum: ["exact", "normalised", "unverified"] },
+    kv: {
+      type: "object",
+      description: "Whether the corrected value reached the Knowledge Box key-value field.",
+      required: ["written"],
+      properties: {
+        written: { type: "boolean" },
+        schemaId: { type: "string" },
+        fieldId: { type: "string" },
+        error: { type: "string" },
+        filterIndexStale: {
+          type: "boolean",
+          description:
+            "True when this write superseded an earlier one: the Knowledge Box filter index " +
+            "still matches the value the correction replaced.",
+        },
+      },
+    },
+  },
+};
+
+const FieldCorrectionRequest = {
+  type: "object",
+  description: "The value a reviewer is setting the field to, and why.",
+  required: ["value"],
+  properties: {
+    value: {
+      description: "The corrected value. `null` clears the field.",
+      anyOf: [
+        { type: "string" },
+        { type: "number" },
+        { type: "boolean" },
+        { type: "null" },
+        { type: "array", items: {} },
+      ],
+    },
+    reason: {
+      type: "string",
+      maxLength: 400,
+      description: "Why the value was wrong, in the reviewer's words",
+    },
+  },
+  additionalProperties: false,
+};
+
+const FieldCorrectionResult = {
+  type: "object",
+  required: ["document", "correction"],
+  properties: {
+    document: { $ref: "#/components/schemas/Document" },
+    correction: { $ref: "#/components/schemas/FieldCorrection" },
+  },
+};
+
+const CorpusAskRequest = {
+  type: "object",
+  description:
+    "A question asked across a filtered set of documents rather than one. The filter is the " +
+    "Documents list's own filter, so “ask the twelve invoices from last week” is the list " +
+    "already on screen.",
+  required: ["question"],
+  properties: {
+    question: { type: "string", minLength: 1, maxLength: 1200 },
+    maxResources: {
+      type: "integer",
+      minimum: 1,
+      maximum: 200,
+      default: 50,
+      description: "Ceiling on documents retrieved over, so one ask cannot fan out over the whole corpus",
+    },
+    filters: {
+      type: "object",
+      description: "The same filters `GET /api/v1/documents` accepts, by their query-parameter names.",
+      properties: {
+        q: { type: "string", maxLength: 200 },
+        config: { type: "string", maxLength: 80 },
+        doc_type: { type: "array", items: { type: "string", enum: [...DOC_TYPES] } },
+        date_from: { type: "string", maxLength: 40 },
+        date_to: { type: "string", maxLength: 40 },
+        has_issues: { type: "boolean" },
+        degraded: { type: "boolean" },
+        min_grounding: { type: "number", minimum: 0, maximum: 1 },
+        sort: {
+          type: "string",
+          enum: ["created_at", "filename", "doc_type", "status", "fields", "grounding"],
+        },
+        order: { type: "string", enum: ["asc", "desc"] },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const CorpusAnswer = {
+  type: "object",
+  description:
+    "One grounded answer over many documents. Citations carry this product's own document " +
+    "ids, so “show me where” still works across the corpus.",
+  required: ["answer", "scope", "citations", "documents", "ms"],
+  properties: {
+    answer: { type: "string" },
+    scope: {
+      type: "object",
+      required: ["documents", "filters"],
+      properties: {
+        documents: { type: "integer", description: "Documents the question was asked over" },
+        filters: { type: "object", additionalProperties: true },
+      },
+    },
+    citations: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["documentId", "filename", "docType", "paragraphId", "text"],
+        properties: {
+          documentId: { type: "string" },
+          filename: { type: "string" },
+          docType: { type: "string" },
+          paragraphId: { type: "string" },
+          text: { type: "string" },
+          start: { type: "integer" },
+          end: { type: "integer" },
+        },
+      },
+    },
+    documents: {
+      type: "array",
+      description: "Distinct documents the citations came from, in citation order",
+      items: {
+        type: "object",
+        required: ["id", "filename", "docType", "citations"],
+        properties: {
+          id: { type: "string" },
+          filename: { type: "string" },
+          docType: { type: "string" },
+          citations: { type: "integer" },
+        },
+      },
+    },
+    ms: { type: "integer" },
+  },
+};
+
+const GeneratorAgent = {
+  type: "object",
+  description:
+    "A Data Augmentation generator agent this workspace started: an ARAG-side task (kind " +
+    "`ask`, `store_as_key_value: true`) that extracts into the configuration's key-value " +
+    "schema on the platform's own schedule. One per configuration — ARAG allows only one " +
+    "running `ask` task per destination, and the destination is the key-value schema.",
+  required: ["configId", "kvSchemaId", "taskId", "name", "startedAt", "state"],
+  properties: {
+    configId: { type: "string" },
+    kvSchemaId: { type: "string" },
+    taskId: { type: "string", description: "ARAG task id" },
+    name: { type: "string", description: "Task name as it appears in the ARAG dashboard" },
+    resourceId: { type: "string", description: "Set when the run was scoped to one document" },
+    startedAt: { type: "string", format: "date-time" },
+    state: { type: "string", enum: ["running", "done", "failed", "stopped", "absent"] },
+  },
+};
+
+const GeneratorComparison = {
+  type: "object",
+  description:
+    "This product's extraction beside the generator agent's, field by field.\n\n" +
+    "**The two columns are not equivalent and the payload says so.** The evidence contract " +
+    "applies to the product's path only: its values carry a verbatim quote checked against " +
+    "the document's own text. A generator agent returns values and no quote, so every " +
+    "`generator.evidence` is `null` and `evidenceContract.generator` spells out that these " +
+    "values are not grounded to the same standard.",
+  required: [
+    "documentId",
+    "resourceId",
+    "configId",
+    "kvSchemaId",
+    "fields",
+    "summary",
+    "evidenceContract",
+    "observed",
+  ],
+  properties: {
+    documentId: { type: "string" },
+    resourceId: { type: "string" },
+    configId: { type: "string" },
+    kvSchemaId: { type: "string" },
+    agent: {
+      description: "The agent started for this configuration, or null when none is running.",
+      anyOf: [{ $ref: "#/components/schemas/GeneratorAgent" }, { type: "null" }],
+    },
+    generatorHasWritten: {
+      type: "boolean",
+      description: "True once the agent has written values onto this resource",
+    },
+    fields: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["field", "label", "pipeline", "generator", "agreement"],
+        properties: {
+          field: { type: "string" },
+          label: { type: "string" },
+          pipeline: {
+            type: "object",
+            required: ["present", "value", "evidence"],
+            properties: {
+              present: { type: "boolean" },
+              value: {},
+              confidence: { type: "number" },
+              evidence: {
+                description: "The verified quote behind this value, or null when it has none.",
+                anyOf: [
+                  {
+                    type: "object",
+                    required: ["quote", "verified"],
+                    properties: {
+                      quote: { type: "string" },
+                      verified: { type: "string", enum: ["exact", "normalised", "unverified"] },
+                    },
+                  },
+                  { type: "null" },
+                ],
+              },
+            },
+          },
+          generator: {
+            type: "object",
+            required: ["present", "value", "evidence"],
+            properties: {
+              present: { type: "boolean" },
+              value: {},
+              evidence: {
+                type: "null",
+                description: "Always null — a generator agent returns no quote to verify.",
+              },
+            },
+          },
+          agreement: {
+            type: "string",
+            enum: ["agree", "differ", "pipeline-only", "generator-only", "neither"],
+          },
+        },
+      },
+    },
+    summary: { type: "object", additionalProperties: { type: "integer" } },
+    evidenceContract: {
+      type: "object",
+      required: ["pipeline", "generator"],
+      properties: { pipeline: { type: "string" }, generator: { type: "string" } },
+    },
+    observed: {
+      type: "object",
+      description:
+        "What this product has actually seen of the generator path against a live Knowledge " +
+        "Box, and what it has not.",
+      required: ["provisioning", "lifecycle", "readBack", "endToEndLatency", "note"],
+      properties: {
+        provisioning: { type: "boolean" },
+        lifecycle: { type: "boolean" },
+        readBack: { type: "boolean" },
+        endToEndLatency: {
+          type: "boolean",
+          description:
+            "False: every run started against the live Knowledge Box on 2026-09-13 was still " +
+            "`scheduled` after 20 minutes, so the time from starting a generator to values " +
+            "appearing on a resource has never been observed.",
+        },
+        note: { type: "string" },
+      },
+    },
+  },
+};
+
+// ─── end key-value fields, generator agents and human review ──────────────────
+
 const apiSecurity = [{ ApiKey: [] }, { Bearer: [] }];
 const adminSecurity = [{ AdminToken: [] }];
 const idParam = { name: "id", in: "path", required: true, schema: { type: "string", maxLength: 128 } };
+const fieldKeyParam = {
+  name: "key",
+  in: "path",
+  required: true,
+  description: "The `ExtractedField.key` being corrected, e.g. `invoice_number`",
+  schema: { type: "string", maxLength: 128 },
+};
 
 export const openapi = buildOpenApi({
   info: {
@@ -538,6 +1377,29 @@ export const openapi = buildOpenApi({
     { name: "extraction-configs", description: "Built-in and custom extraction configurations" },
     { name: "schemas", description: "Document types and their extraction fields" },
     { name: "admin", description: "Operator endpoints (ADMIN_TOKEN)" },
+    {
+      name: "settings",
+      description:
+        "Every setting this deployment reads, editable in the product. Environment variables are " +
+        "defaults; an edit is stored and takes effect without a restart. Secrets are write-only.",
+    },
+    {
+      name: "api-keys",
+      description: "Create, list and revoke the API keys that authenticate callers of this API",
+    },
+    { name: "audit", description: "Who changed what, and when — the audited-change log" },
+    {
+      name: "review",
+      description:
+        "Human review: correcting an extracted value (recorded, never a silent overwrite) and " +
+        "asking one grounded question across a filtered set of documents",
+    },
+    {
+      name: "generators",
+      description:
+        "Data Augmentation generator agents — the platform's own asynchronous extraction path, " +
+        "and an honest field-by-field comparison against this product's",
+    },
     { name: "system", description: "Health and session" },
   ],
   schemas: {
@@ -552,6 +1414,9 @@ export const openapi = buildOpenApi({
       const base = pageSchema("#/components/schemas/Document");
       const props = base.properties as Record<string, unknown>;
       props.facets = { $ref: "#/components/schemas/Facets" };
+      // Which filters ran in the Knowledge Box and which ran locally — the list screen
+      // labels them differently because they are answered by different systems.
+      props.filters = { $ref: "#/components/schemas/AppliedFilters" };
       return base;
     })(),
     DocumentAccepted,
@@ -573,6 +1438,33 @@ export const openapi = buildOpenApi({
     Schema,
     ProvisionResult,
     Branding: BrandingSchema,
+    // settings / API keys / audit
+    SettingField,
+    SettingsDocument,
+    SettingsPatch,
+    SettingsChange,
+    SettingsPatchResult,
+    SettingsResetRequest,
+    BrandingAsset,
+    ApiKey,
+    ApiKeyCreateRequest,
+    ApiKeyCreated,
+    AuditEntry,
+    AuditPage,
+    LogPage,
+    // key-value fields, generator agents and human review
+    KvRejection,
+    KvWriteRecord,
+    ProvisioningStatus,
+    ConfigProvisioning,
+    AppliedFilters,
+    FieldCorrection,
+    FieldCorrectionRequest,
+    FieldCorrectionResult,
+    CorpusAskRequest,
+    CorpusAnswer,
+    GeneratorAgent,
+    GeneratorComparison,
   },
   paths: {
     "/api/v1/documents": {
@@ -666,6 +1558,31 @@ export const openapi = buildOpenApi({
               "are excluded — an unmeasured record is not a well-grounded one.",
             schema: { type: "number", minimum: 0, maximum: 1 },
           },
+          {
+            name: "kv",
+            in: "query",
+            description:
+              "Filter by an **extracted value**, through the Knowledge Box rather than this " +
+              "workspace's store. Shape: `kv=<schemaId>:<field>:<op>:<value>` — for example " +
+              "`kv=dip_invoice_extraction:total:gte:10000`. Repeat the parameter to narrow " +
+              "further; several `kv` filters are ANDed.\n\n" +
+              "`schemaId` is an extraction configuration's `kvSchemaId` and `field` is one of " +
+              "its `kvFields`. Only the first three colons separate, so a value may contain " +
+              "them — which an RFC 3339 instant does.\n\n" +
+              "Operators are per field kind and are checked before the call, because ARAG " +
+              "enforces them with a 412 that says nothing useful:\n" +
+              "- `eq` — any scalar field (text, integer, float, boolean, date)\n" +
+              "- `gte` / `lte` — integer, float and date scalars only\n" +
+              "- `contains` — `repeated` fields (is this a member?) and `range` fields (is " +
+              "this point inside the interval?)\n\n" +
+              "A filter naming an unknown schema or field, or using an operator that field " +
+              "does not accept, answers **400** with the operators it does accept. Resolved as " +
+              "a `/find` with an empty query (key-value filter expressions are rejected by " +
+              "`/catalog`), whose matching resource ids are intersected with the local list; " +
+              "the response's `filters` block says which filters ran where.",
+            explode: true,
+            schema: { type: "array", items: { type: "string", maxLength: 300 }, maxItems: 10 },
+          },
         ],
         responses: {
           200: jsonResponse({ $ref: "#/components/schemas/DocumentPage" }),
@@ -736,6 +1653,10 @@ export const openapi = buildOpenApi({
         operationId: "getDocument",
         tags: ["documents"],
         summary: "Get the canonical record for one document",
+        description:
+          "The full record: classification, extracted fields with their confidence, the quotes " +
+          "supporting them and how each was verified, entities, summary, tags, validation issues " +
+          "and the pipeline metadata (schema, model, per-stage timings, grounding score).",
         responses: { 200: jsonResponse({ $ref: "#/components/schemas/Document" }), ...standardResponses },
         security: apiSecurity,
       },
@@ -755,6 +1676,9 @@ export const openapi = buildOpenApi({
         operationId: "exportDocument",
         tags: ["documents"],
         summary: "Download the record as JSON, XML or CSV",
+        description:
+          "Serialises the same record `GET /documents/{id}` returns into the requested format and " +
+          "sends it as an attachment. CSV flattens the extracted fields to one row per field.",
         parameters: [
           {
             name: "format",
@@ -978,6 +1902,10 @@ export const openapi = buildOpenApi({
         operationId: "listJobs",
         tags: ["jobs"],
         summary: "List processing jobs",
+        description:
+          "Newest first, with paging, a status filter and a search over the job's document and " +
+          "config. Each job carries its stage events, so a client can render a pipeline history " +
+          "without opening the stream.",
         parameters: [
           {
             name: "status",
@@ -1033,6 +1961,9 @@ export const openapi = buildOpenApi({
         operationId: "getJob",
         tags: ["jobs"],
         summary: "Get a job",
+        description:
+          "One job with its full event list: every stage start, progress, success, skip or error, " +
+          "with per-stage durations. This is what the pipeline view replays after a reload.",
         responses: { 200: jsonResponse({ $ref: "#/components/schemas/Job" }), ...standardResponses },
         security: apiSecurity,
       },
@@ -1080,6 +2011,10 @@ export const openapi = buildOpenApi({
         operationId: "listExtractionConfigs",
         tags: ["extraction-configs"],
         summary: "List built-in and custom extraction configurations",
+        description:
+          "Every configuration an upload can be processed with, built-in and custom, each with the " +
+          "fields it extracts, whether it is provisioned in the Knowledge Box, and how many stored " +
+          "documents were processed with it (the question that decides whether it can be deleted).",
         responses: {
           200: jsonResponse({
             type: "object",
@@ -1116,6 +2051,9 @@ export const openapi = buildOpenApi({
         operationId: "getExtractionConfig",
         tags: ["extraction-configs"],
         summary: "Get one extraction configuration",
+        description:
+          "The configuration's fields, its ARAG search-configuration name, its provisioning state " +
+          "and the number of documents processed with it.",
         responses: {
           200: jsonResponse({ $ref: "#/components/schemas/ExtractionConfig" }),
           ...standardResponses,
@@ -1164,11 +2102,13 @@ export const openapi = buildOpenApi({
       post: {
         operationId: "provisionExtractionConfig",
         tags: ["extraction-configs"],
-        summary: "Re-provision one configuration's stored ARAG search configuration",
+        summary: "Re-provision one configuration's Knowledge Box objects",
         description:
-          "Idempotent. `POST /api/v1/admin/provision` re-provisions all of them and needs the " +
-          "admin token; this is the granularity an operator needs to fix the one config that " +
-          "did not take. Requires a writer credential.",
+          "Re-provisions both the stored ARAG search configuration and the key-value schema " +
+          "this configuration writes into, and reports each separately. Idempotent. " +
+          "`POST /api/v1/admin/provision` re-provisions all of them and needs the admin " +
+          "token; this is the granularity an operator needs to fix the one config that did " +
+          "not take. Requires a writer credential.",
         responses: {
           200: jsonResponse({ $ref: "#/components/schemas/ProvisionResult" }),
           ...standardResponses,
@@ -1181,6 +2121,10 @@ export const openapi = buildOpenApi({
         operationId: "listSchemas",
         tags: ["schemas"],
         summary: "List document types and the fields each extraction schema captures",
+        description:
+          "The read-only catalogue behind auto-classification: every document type this product " +
+          "recognises and the fields its built-in schema extracts, with types and required flags. " +
+          "Use it to see what a document of a given type will yield before uploading one.",
         responses: {
           200: jsonResponse({
             type: "object",
@@ -1213,6 +2157,11 @@ export const openapi = buildOpenApi({
         operationId: "createSession",
         tags: ["system"],
         summary: "Issue a same-origin session cookie for the demo UI",
+        description:
+          "Sets a signed, SameSite=Lax `arag_session` cookie so a same-origin front end can call " +
+          "the API when API keys are enforced, and can satisfy the writer guard DP-12 applies to " +
+          "deletes and config creation. It is not a login: it carries no identity and grants no " +
+          "admin access.",
         responses: {
           200: jsonResponse({
             type: "object",
@@ -1228,6 +2177,10 @@ export const openapi = buildOpenApi({
         operationId: "adminLogin",
         tags: ["admin"],
         summary: "Exchange the admin token for an HttpOnly cookie",
+        description:
+          "Verifies ADMIN_TOKEN in constant time and sets the HttpOnly `arag_admin` cookie the " +
+          "admin panel uses, so the token itself is not held in browser storage. Returns 403 when " +
+          "no admin token is configured (admin is disabled) and 401 when the token is wrong.",
         requestBody: jsonBody({
           type: "object",
           required: ["token"],
@@ -1245,6 +2198,11 @@ export const openapi = buildOpenApi({
         operationId: "adminHealth",
         tags: ["admin"],
         summary: "Service health, KB connection test, extract strategy and model",
+        description:
+          "A live round trip to the Knowledge Box plus the operator's view of this process: " +
+          "uptime, the effective extract strategy and generative model, document counts by status " +
+          "(including `degraded`, records that finished but lost a stage) and the mean grounding " +
+          "score across stored records.",
         responses: {
           200: jsonResponse({
             type: "object",
@@ -1280,6 +2238,11 @@ export const openapi = buildOpenApi({
         operationId: "adminConfig",
         tags: ["admin"],
         summary: "Effective configuration (secrets redacted)",
+        description:
+          "What this process is running with: the environment with every secret redacted, the " +
+          "effective branding and how to change it, the extraction configurations and their " +
+          "provisioning state, the JSON stores on disk, and the registered route table. For the " +
+          "editable view of the same configuration, use `GET /api/v1/admin/settings`.",
         responses: {
           200: jsonResponse({ type: "object", additionalProperties: true }),
           ...standardResponses,
@@ -1292,6 +2255,10 @@ export const openapi = buildOpenApi({
         operationId: "adminUsage",
         tags: ["admin"],
         summary: "Usage counters (requests, ARAG calls, jobs, documents)",
+        description:
+          "Counters since boot: HTTP requests, calls to ARAG split into failures, expected " +
+          "provisioning conflicts and other client errors, total ARAG time, plus document and job " +
+          "counts. Intended for an operator's dashboard, not for billing.",
         responses: {
           200: jsonResponse({ type: "object", additionalProperties: true }),
           ...standardResponses,
@@ -1303,22 +2270,42 @@ export const openapi = buildOpenApi({
       get: {
         operationId: "adminLogs",
         tags: ["admin"],
-        summary: "Recent log records",
+        summary: "Page the runtime log ring buffer",
+        description:
+          "Records are returned oldest first. Without a cursor you get the newest `limit` records " +
+          "(the tail, as before). With `cursor` and `direction` you walk the buffer in either " +
+          "direction on a stable sequence number, so records arriving while an operator reads " +
+          "cannot duplicate or hide a row. Follow `prevCursor` with `direction=older` to read " +
+          "back, and `nextCursor` with `direction=newer` to tail.",
         parameters: [
           {
             name: "level",
             in: "query",
+            description: "Minimum level to include.",
             schema: { type: "string", enum: ["debug", "info", "warn", "error"] },
           },
-          { name: "contains", in: "query", schema: { type: "string", maxLength: 200 } },
+          {
+            name: "contains",
+            in: "query",
+            description: "Case-insensitive substring match over the whole record.",
+            schema: { type: "string", maxLength: 200 },
+          },
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 500, default: 200 } },
+          {
+            name: "cursor",
+            in: "query",
+            description: "Opaque cursor from a previous page's `nextCursor`/`prevCursor`.",
+            schema: { type: "string", maxLength: 200 },
+          },
+          {
+            name: "direction",
+            in: "query",
+            description: "Which way to walk from the cursor. Ignored when no cursor is given.",
+            schema: { type: "string", enum: ["older", "newer"], default: "older" },
+          },
         ],
         responses: {
-          200: jsonResponse({
-            type: "object",
-            required: ["items"],
-            properties: { items: { type: "array", items: { $ref: "#/components/schemas/LogRecord" } } },
-          }),
+          200: jsonResponse({ $ref: "#/components/schemas/LogPage" }),
           ...standardResponses,
         },
         security: adminSecurity,
@@ -1382,7 +2369,14 @@ export const openapi = buildOpenApi({
       post: {
         operationId: "adminProvision",
         tags: ["admin"],
-        summary: "Re-provision every extraction configuration as an ARAG search configuration",
+        summary: "Re-provision every extraction configuration's Knowledge Box objects",
+        description:
+          "Idempotent: safe to re-run after a Knowledge Box reset, a model change or an upgrade. " +
+          "Each configuration is POSTed and, when it already exists, PATCHed — so the stored " +
+          "search configurations end up carrying the current model, reranker, prompt and JSON " +
+          "schema whatever state they were in. Each configuration's key-value schema is " +
+          "ensured in the same pass and reported as `keyValueSchema`; the 20-schemas-per-" +
+          "Knowledge-Box ceiling is checked once for the whole run rather than per config.",
         responses: {
           200: jsonResponse({
             type: "object",
@@ -1441,5 +2435,465 @@ export const openapi = buildOpenApi({
         security: adminSecurity,
       },
     },
+
+    // ─── settings, API keys and audit ─────────────────────────────────────────
+    // Operator surface for the full-implementation pass. Its own section so the
+    // key-value-field and API-explorer operations landing in this document merge cleanly.
+
+    "/api/v1/admin/settings": {
+      get: {
+        operationId: "adminGetSettings",
+        tags: ["admin", "settings"],
+        summary: "Every setting, with its effective value, source and secret state",
+        description:
+          "The settings screen reads this. For each field it reports the effective value, whether " +
+          "that value came from an in-product edit (`store`), the deployment's environment (`env`) " +
+          "or the built-in default, and whether the field is a secret — secrets report " +
+          "`{ set, hint }` and never their value. `applied` reports what the running process is " +
+          "actually using (the ARAG client's KB and timeout, the live rate limiter, the upload " +
+          "ceiling, the retention scheduler), which is how the UI shows that an edit took effect " +
+          "without a restart.",
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/SettingsDocument" }),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+      patch: {
+        operationId: "adminUpdateSettings",
+        tags: ["admin", "settings"],
+        summary: "Change settings; they take effect immediately, with no restart",
+        description:
+          "Validates every field before writing anything: a colour outside the platform's strict " +
+          "grammar, a Knowledge Box id that is not a UUID or a number outside its range fails the " +
+          "whole patch with an RFC 9457 problem naming each offending key. Applied changes are " +
+          "persisted in the product's store (so they survive a restart and override the " +
+          "environment), pushed into the live objects — the ARAG client is rebuilt when a " +
+          "connection field changes — and written to the audit log with who, what and when. " +
+          "Secrets are accepted here and never returned anywhere.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/SettingsPatch" }),
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/SettingsPatchResult" }),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+    },
+    "/api/v1/admin/settings/reset": {
+      post: {
+        operationId: "adminResetSettings",
+        tags: ["admin", "settings"],
+        summary: "Drop in-product overrides and fall back to the environment default",
+        description:
+          "The other half of “environment variables are defaults that the store overrides”: this " +
+          "removes the stored override for the named keys, so each field's `source` returns to " +
+          "`env` (or `default`). Audited like any other settings change.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/SettingsResetRequest" }),
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/SettingsPatchResult" }),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+    },
+    "/api/v1/admin/branding/logo": {
+      post: {
+        operationId: "adminUploadBrandingLogo",
+        tags: ["admin", "settings"],
+        summary: "Upload a logo and point branding at it",
+        description:
+          "Accepts a `multipart/form-data` body with a `file` part (SVG, PNG, JPEG, WebP or GIF, " +
+          "up to 2 MB), writes it into `DATA_DIR/branding/` — a mounted volume in production, so " +
+          "rebranding never needs a rebuild — and sets `branding.logoUrl` to the `/branding/…` " +
+          "path it is served from. Returns the new asset and the updated settings document.",
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                required: ["file"],
+                properties: { file: { type: "string", format: "binary" } },
+              },
+            },
+          },
+        },
+        responses: {
+          201: jsonResponse({ $ref: "#/components/schemas/BrandingAsset" }, "Created"),
+          413: {
+            description: "The file is larger than the 2 MB brand-asset ceiling",
+            content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
+          },
+          415: {
+            description: "Not an image type this product will serve",
+            content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
+          },
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+    },
+    "/api/v1/admin/api-keys": {
+      get: {
+        operationId: "adminListApiKeys",
+        tags: ["admin", "api-keys"],
+        summary: "List API keys with their last use",
+        description:
+          "Never returns a key or its digest: an operator identifies a key by its name and prefix. " +
+          "`lastUsedAt` is updated on successful authentication (in memory, folded into the store " +
+          "at most once a minute per key, so authentication never costs a write). Revoked keys stay " +
+          "listed so the history is readable.",
+        responses: {
+          200: jsonResponse({
+            type: "object",
+            required: ["items"],
+            properties: {
+              items: { type: "array", items: { $ref: "#/components/schemas/ApiKey" } },
+              enforced: {
+                type: "boolean",
+                description: "Whether reads currently require a credential (`security.requireApiKey`)",
+              },
+              seeded: {
+                type: "integer",
+                description: "Keys supplied by the `API_KEYS` environment variable, which still authenticate",
+              },
+            },
+          }),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+      post: {
+        operationId: "adminCreateApiKey",
+        tags: ["admin", "api-keys"],
+        summary: "Create an API key (the plaintext is returned once)",
+        description:
+          "Mints `dip_<id>_<secret>` and stores only a salted SHA-256 digest of the secret. The " +
+          "response is the one and only place the key appears — it cannot be recovered afterwards, " +
+          "only revoked and replaced. The key authenticates exactly like an `API_KEYS` entry: as " +
+          "`X-API-Key`, as a bearer token, and as a writer credential for the operations DP-12 " +
+          "protects.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/ApiKeyCreateRequest" }),
+        responses: {
+          201: jsonResponse({ $ref: "#/components/schemas/ApiKeyCreated" }, "Created"),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+    },
+    "/api/v1/admin/api-keys/{id}": {
+      delete: {
+        operationId: "adminRevokeApiKey",
+        tags: ["admin", "api-keys"],
+        summary: "Revoke an API key",
+        description:
+          "The key stops authenticating on the next request. The record is kept (with `revokedAt`) " +
+          "so the audit trail still explains what that key did.",
+        parameters: [idParam],
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/ApiKey" }),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+    },
+    "/api/v1/admin/audit": {
+      get: {
+        operationId: "adminAuditLog",
+        tags: ["admin", "audit"],
+        summary: "Page the audited-change log",
+        description:
+          "Who changed what, and when — every settings edit, API-key creation and revocation, " +
+          "extraction-config create/edit/delete/provision, purge and document delete, newest " +
+          "first. Secret values are redacted to `***` before the entry is written. Paging is by a " +
+          "stable sequence number: follow `nextCursor` with `direction=older` to read back through " +
+          "history and `prevCursor` with `direction=newer` to return, with no duplicates or gaps " +
+          "however many entries arrive in between.",
+        parameters: [
+          {
+            name: "action",
+            in: "query",
+            description:
+              "Exact action, or a prefix such as `settings` to match `settings.update` and `settings.reset`.",
+            schema: { type: "string", maxLength: 80 },
+          },
+          {
+            name: "actor",
+            in: "query",
+            description: "Actor name or type (`admin`, `api-key`, `session`, `anonymous`, `system`).",
+            schema: { type: "string", maxLength: 120 },
+          },
+          {
+            name: "target",
+            in: "query",
+            description: "Exact target: a setting key, key id, config id or document id.",
+            schema: { type: "string", maxLength: 200 },
+          },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 500, default: 50 } },
+          {
+            name: "cursor",
+            in: "query",
+            description: "Opaque cursor from a previous page.",
+            schema: { type: "string", maxLength: 200 },
+          },
+          {
+            name: "direction",
+            in: "query",
+            description: "Walk older (further back) or newer (back towards the top) from the cursor.",
+            schema: { type: "string", enum: ["older", "newer"], default: "older" },
+          },
+        ],
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/AuditPage" }),
+          ...standardResponses,
+        },
+        security: adminSecurity,
+      },
+    },
+
+    // ─── end settings, API keys and audit ─────────────────────────────────────
+
+    // ─── key-value fields, generator agents and human review ──────────────────
+
+    "/api/v1/documents/{id}/fields/{key}": {
+      parameters: [idParam, fieldKeyParam],
+      put: {
+        operationId: "correctDocumentField",
+        tags: ["review", "documents"],
+        summary: "Correct one extracted field",
+        description:
+          "Records a correction rather than overwriting the model's output: the original " +
+          "value, the original quote and who changed it are all kept. The corrected value is " +
+          "re-checked against the document's own text with the same evidence contract the " +
+          "pipeline uses — a human typing a value does not make it grounded, but if the value " +
+          "they typed *is* in the document that is worth knowing, so the correction earns a " +
+          "new quote and the field's model confidence is dropped (the model did not produce " +
+          "this value and claiming its confidence would be a lie on the most-read number in " +
+          "the record view).\n\n" +
+          "The corrected record is also written back into the resource's key-value field. " +
+          "Because a key-value write replaces the whole schema's data, the *entire* current " +
+          "record is sent, not just the one field — and because the Knowledge Box's filter " +
+          "index keeps every value ever written, this second write leaves the resource still " +
+          "matching a filter on the value it replaced. That is reported on " +
+          "`correction.kv.filterIndexStale` and `meta.kv.superseded` rather than hidden.\n\n" +
+          "A write against shared state, so it needs a credential even when `API_KEYS` is " +
+          "unset: an API key, the admin token, or a same-origin session cookie.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/FieldCorrectionRequest" }),
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/FieldCorrectionResult" }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+      delete: {
+        operationId: "revertDocumentField",
+        tags: ["review", "documents"],
+        summary: "Undo the most recent correction to a field",
+        description:
+          "Restores the value the last correction replaced — as a *new* correction, so the " +
+          "history stays append-only and the revert is as attributable as the change it " +
+          "undoes. The restored value is re-verified against the document like any other " +
+          "correction, and written back to the Knowledge Box the same way (with the same " +
+          "filter-index consequence). Answers 400 when the field has never been corrected.",
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/FieldCorrectionResult" }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/{id}/corrections": {
+      parameters: [idParam],
+      get: {
+        operationId: "listDocumentCorrections",
+        tags: ["review", "documents"],
+        summary: "The corrections made to one record, newest first",
+        description:
+          "The record's review history: every value a person changed, what it was before, why " +
+          "they say they changed it, whether the new value could be verified against the " +
+          "document, and whether it reached the Knowledge Box. The same list is on the record " +
+          "itself as `corrections` (oldest first); this is the reading order a review panel wants.",
+        responses: {
+          200: jsonResponse({
+            type: "object",
+            required: ["items"],
+            properties: {
+              items: { type: "array", items: { $ref: "#/components/schemas/FieldCorrection" } },
+            },
+          }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/ask": {
+      post: {
+        operationId: "askCorpus",
+        tags: ["review", "documents"],
+        summary: "Ask one grounded question across a filtered set of documents",
+        description:
+          "The same grounded ask the record view offers, with the scope widened from one " +
+          "document to a filtered set of them — and the filter is the Documents list's own, so " +
+          "“ask the twelve invoices from last week” is the list already on screen. Citations " +
+          "come back mapped to this product's document ids, so “show me where” still works " +
+          "across documents.\n\n" +
+          "Retrieval over the set, not `full_resource`: across dozens of documents that would " +
+          "be an enormous prompt and a slow, expensive call. Every ask is a real generative " +
+          "call against the Knowledge Box, so this route has its own tight rate-limit bucket.",
+        requestBody: jsonBody({ $ref: "#/components/schemas/CorpusAskRequest" }),
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/CorpusAnswer" }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/extraction-configs/{id}/generator": {
+      parameters: [idParam],
+      post: {
+        operationId: "startConfigGenerator",
+        tags: ["generators", "extraction-configs"],
+        summary: "Provision and start a Data Augmentation generator agent for this configuration",
+        description:
+          "The alternative extraction path: instead of this product asking the document a " +
+          "question per upload, ARAG runs a task of its own that sweeps resources and writes " +
+          "the values it extracts straight into this configuration's key-value schema. The " +
+          "schema's field descriptions are the instructions, which is why they are carried " +
+          "across verbatim when the schema is provisioned.\n\n" +
+          "ARAG allows only one running `ask` task per destination and the destination is the " +
+          "key-value schema, so starting again replaces the existing agent (stopped first — a " +
+          "running task cannot be deleted). Answers 400 when the configuration's key-value " +
+          "schema is not provisioned, because there would be nothing to write into.\n\n" +
+          "Note on what is verified: provisioning, the start → stop → delete lifecycle and " +
+          "reading generated values back were all confirmed against the live Knowledge Box. " +
+          "End-to-end write latency was **not** — every run started there was still scheduled " +
+          "after 20 minutes — so this returns as soon as the task is accepted and the caller polls.",
+        requestBody: jsonBody(
+          {
+            type: "object",
+            properties: {
+              model: {
+                type: "string",
+                maxLength: 80,
+                description: "Generative model for the agent. Defaults to the configured one.",
+              },
+            },
+            additionalProperties: false,
+          },
+          false,
+        ),
+        responses: {
+          202: jsonResponse({ $ref: "#/components/schemas/GeneratorAgent" }, "Started"),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+      get: {
+        operationId: "getConfigGenerator",
+        tags: ["generators", "extraction-configs"],
+        summary: "The generator agent running for this configuration, if any",
+        description:
+          "There is no per-task GET on the platform (it answers 405), so the state is found by " +
+          "locating the task id in the buckets of the Knowledge Box's task list. `agent` is " +
+          "null when this workspace has not started one.",
+        responses: {
+          200: jsonResponse({
+            type: "object",
+            required: ["agent"],
+            properties: {
+              agent: {
+                anyOf: [{ $ref: "#/components/schemas/GeneratorAgent" }, { type: "null" }],
+              },
+            },
+          }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+      delete: {
+        operationId: "deleteConfigGenerator",
+        tags: ["generators", "extraction-configs"],
+        summary: "Stop and delete this configuration's generator agent",
+        description:
+          "Stops the task first and then deletes it, because ARAG refuses to delete a running " +
+          "task. The values the agent has already written stay on their resources — deleting " +
+          "the agent stops future writes, it does not retract past ones. Requires a writer " +
+          "credential.",
+        responses: { 204: { description: "Deleted" }, ...standardResponses },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/extraction-configs/{id}/generator/stop": {
+      parameters: [idParam],
+      post: {
+        operationId: "stopConfigGenerator",
+        tags: ["generators", "extraction-configs"],
+        summary: "Stop a running generator agent without deleting it",
+        description:
+          "Halts a sweep in progress while keeping the task, so it can be inspected in the " +
+          "ARAG dashboard before it is removed. Stopping is idempotent: a task that is already " +
+          "stopped, or already gone, is not an error. Requires a writer credential.",
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/GeneratorAgent" }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/{id}/generator-run": {
+      parameters: [idParam],
+      post: {
+        operationId: "runDocumentGenerator",
+        tags: ["generators", "documents"],
+        summary: "Run the generator agent over this one document",
+        description:
+          "There is no “run this task on that document” call on the platform, so a " +
+          "single-document run is a task filtered to one resource id — which is also the only " +
+          "safe way to keep a run from sweeping the whole Knowledge Box. Returns 202 with the " +
+          "task; poll `GET /api/v1/extraction-configs/{id}/generator` for its state and read " +
+          "the result with the comparison endpoint. Requires a writer credential: it starts " +
+          "real model work against the Knowledge Box.",
+        requestBody: jsonBody(
+          {
+            type: "object",
+            properties: { model: { type: "string", maxLength: 80 } },
+            additionalProperties: false,
+          },
+          false,
+        ),
+        responses: {
+          202: jsonResponse({ $ref: "#/components/schemas/GeneratorAgent" }, "Started"),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+    "/api/v1/documents/{id}/generator-comparison": {
+      parameters: [idParam],
+      get: {
+        operationId: "compareDocumentGenerator",
+        tags: ["generators", "documents"],
+        summary: "This product's extraction beside the generator agent's, field by field",
+        description:
+          "The record view's answer to “which path should I use?”, with agreement or " +
+          "disagreement marked per field.\n\n" +
+          "The two columns are **not** equivalent and the payload says so rather than leaving " +
+          "it to be inferred from a layout: the evidence contract applies to this product's " +
+          "path only. Its values carry a verbatim quote checked against the document's own " +
+          "text; a generator agent returns values and no quote, so every `generator.evidence` " +
+          "is `null` and `evidenceContract.generator` states that those values are not " +
+          "grounded to the same standard.\n\n" +
+          "`observed` is the same honesty about this product's own testing: provisioning, the " +
+          "task lifecycle and reading values back were verified against the live Knowledge " +
+          "Box; end-to-end write latency was not.",
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/GeneratorComparison" }),
+          ...standardResponses,
+        },
+        security: apiSecurity,
+      },
+    },
+
+    // ─── end key-value fields, generator agents and human review ──────────────
   },
 });

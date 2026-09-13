@@ -2,12 +2,20 @@
  * App wiring for Document Processing. Everything HTTP lives here and in `routes/`;
  * domain logic lives in `services/`. Exported as a factory so tests (and `make smoke`)
  * can boot the whole product in-process against the mock ARAG server.
+ *
+ * Nothing here snapshots configuration into a closure. `SettingsService` owns the effective
+ * value of every setting (environment as the default, the product's store as the override),
+ * and this file hands the services *getters* rather than values — so an operator's edit is
+ * in force on the very next request, with no restart. The one object that cannot be mutated
+ * in place, `AragClient`, sits behind a proxy and is rebuilt when a connection setting
+ * changes; every holder keeps the same reference and transparently talks to the new client.
  */
 import { resolve } from "node:path";
 import {
   App,
   AragClient,
   type Branding,
+  constantTimeEqual,
   cors,
   log as defaultLog,
   healthRoutes,
@@ -15,7 +23,6 @@ import {
   type Logger,
   type MockAragServer,
   type PlatformEnv,
-  readBranding,
   Store,
   securityHeaders,
   startMockArag,
@@ -24,12 +31,23 @@ import { openapi, VERSION } from "./openapi.ts";
 import { registerAdminRoutes } from "./routes/admin.ts";
 import { registerConfigRoutes } from "./routes/configs.ts";
 import { registerDocumentRoutes } from "./routes/documents.ts";
+import { registerGeneratorRoutes } from "./routes/generators.ts";
 import { registerJobRoutes } from "./routes/jobs.ts";
+import { registerReviewRoutes } from "./routes/review.ts";
 import { registerWorkspaceRoutes } from "./routes/workspace.ts";
 import { Agents } from "./services/agents.ts";
+import { ApiKeysService } from "./services/apikeys.ts";
+import { AuditService, auditCalls, auditContext } from "./services/audit.ts";
 import { ConfigsService } from "./services/configs.ts";
+import { DaAgents } from "./services/da-agents.ts";
 import { DocumentsService } from "./services/documents.ts";
+import { GeneratorsService } from "./services/generators.ts";
+import { KvService } from "./services/kv.ts";
 import { mockEvidenceHook } from "./services/mock-evidence.ts";
+import { makeKvWriteback } from "./services/pipeline.ts";
+import { ReviewService } from "./services/review.ts";
+import { schemaFor } from "./services/schemas.ts";
+import { SettingsService, type SettingValue } from "./services/settings.ts";
 
 export interface Usage {
   startedAt: number;
@@ -52,7 +70,7 @@ export interface Usage {
 export interface Product {
   name: string;
   version: string;
-  /** Effective white-label branding (BRAND_* env, platform defaults). */
+  /** Effective white-label branding, read live from the settings service. */
   branding: Branding;
   app: App;
   arag: AragClient;
@@ -61,6 +79,15 @@ export interface Product {
   agents: Agents;
   configs: ConfigsService;
   documents: DocumentsService;
+  /** Key-value fields: typed, filterable metadata on the Knowledge Box's resources. */
+  kv: KvService;
+  /** Data Augmentation generator agents — the alternative extraction path. */
+  generators: GeneratorsService;
+  /** Human review: field corrections and the cross-document ask. */
+  review: ReviewService;
+  settings: SettingsService;
+  apikeys: ApiKeysService;
+  audit: AuditService;
   usage: Usage;
   /** The in-process mock ARAG server when ARAG_MOCK=1 (tests seed it); null when live. */
   mock: MockAragServer | null;
@@ -81,28 +108,8 @@ export interface CreateOptions {
 
 const HERE = resolve(import.meta.dirname ?? ".", "..");
 
-/** Product-specific env (prefixed per STANDARDS §6, with the legacy names honoured). */
-export function readProductEnv(src: NodeJS.ProcessEnv = process.env): {
-  extractStrategy: string;
-  maxUploadBytes: number;
-  generativeModel: string;
-} {
-  return {
-    extractStrategy: src.DIP_EXTRACT_STRATEGY || src.ARAG_EXTRACT_STRATEGY || "",
-    maxUploadBytes: Number(src.DIP_MAX_UPLOAD_BYTES || src.MAX_UPLOAD_BYTES || 26_214_400),
-    generativeModel: src.ARAG_GENERATIVE_MODEL || "",
-  };
-}
-
 export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}): Promise<Product> {
   const log = opts.log ?? defaultLog;
-  // White-label: a partner rebrands a deployment with environment variables alone.
-  // The OpenAPI document keeps its own title — the API contract is not the brand.
-  const branding = readBranding(process.env, {
-    productName: "Document Processing",
-    tagline: "Documents in, validated records out",
-    docsUrl: "/api/v1/docs",
-  });
   const usage: Usage = {
     startedAt: Date.now(),
     requests: 0,
@@ -112,90 +119,271 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     aragClientErrors: 0,
     aragMs: 0,
   };
-  const product = readProductEnv();
 
   // ARAG: live client, or the in-process mock when ARAG_MOCK=1 (no credentials needed).
   let mock: Awaited<ReturnType<typeof startMockArag>> | null = null;
-  let aragOpts = {
-    kbId: env.arag.kbId,
-    apiKey: env.arag.apiKey,
-    baseUrl: env.arag.baseUrl || undefined,
-    region: env.arag.region,
-  };
+  const baselineOverrides: Record<string, SettingValue> = { "operations.logLevel": log.level };
+  const ignoreEnv: string[] = [];
   if (env.arag.mock) {
     // The mock has no notion of our `evidence` contract; the hook teaches it to quote the
     // fixture text it extracted from, so the demo and the tests exercise real verification
     // instead of a grounding score of zero. Vendored files are never edited.
     mock = await startMockArag({ log, answerHook: mockEvidenceHook, ...opts.mock });
-    aragOpts = { kbId: mock.kbId, apiKey: mock.apiKey, baseUrl: mock.url, region: env.arag.region };
+    // The mock owns the connection while it is running: its ids are the baseline an operator
+    // edits from, and the deployment's real credentials are not the default here.
+    baselineOverrides["connection.kbId"] = mock.kbId;
+    baselineOverrides["connection.apiKey"] = mock.apiKey;
+    baselineOverrides["connection.baseUrl"] = mock.url;
+    ignoreEnv.push("connection.kbId", "connection.apiKey", "connection.baseUrl");
     log.warn("arag.mock", { url: mock.url });
   }
-  const arag = new AragClient({
-    ...aragOpts,
-    timeoutMs: env.arag.timeoutMs,
-    onRequest: (i) => {
-      usage.aragCalls++;
-      usage.aragMs += i.ms;
-      const status = i.status ?? 0;
-      if (i.error || status >= 500) usage.aragErrors++;
-      else if (status === 409 && i.path.includes("/search_configurations/")) usage.aragConflicts++;
-      else if (status >= 400) usage.aragClientErrors++;
-      log.debug("arag.request", {
-        method: i.method,
-        path: i.path,
-        status: i.status,
-        ms: Math.round(i.ms),
-        error: i.error,
-      });
-    },
-  });
 
   const store = new Store(env.dataDir, { persist: opts.persist ?? true });
+
+  // Settings first: every service below reads through it, and a stored override is in force
+  // from the first request rather than after the first edit.
+  const settings = new SettingsService({
+    store,
+    env,
+    log,
+    brandingDefaults: {
+      productName: "Document Processing",
+      tagline: "Documents in, validated records out",
+      docsUrl: "/api/v1/docs",
+    },
+    baselineOverrides,
+    ignoreEnv,
+  });
+  settings.apply();
+
+  const audit = new AuditService({ store, log });
+  const apikeys = new ApiKeysService({ store, log });
+
+  // ── the rebuildable ARAG client ────────────────────────────────────────────
+  // `AragClient` resolves its base URL and captures its credentials in the constructor, so a
+  // connection change means a new client. Everything downstream holds this proxy instead, and
+  // therefore never holds a stale one.
+  let aragError: string | null = null;
+  const buildArag = (): AragClient => {
+    const c = settings.effective().connection;
+    return new AragClient({
+      kbId: c.kbId,
+      apiKey: c.apiKey,
+      baseUrl: c.baseUrl || undefined,
+      region: c.region,
+      timeoutMs: c.timeoutMs,
+      onRequest: (i) => {
+        usage.aragCalls++;
+        usage.aragMs += i.ms;
+        const status = i.status ?? 0;
+        if (i.error || status >= 500) usage.aragErrors++;
+        else if (status === 409 && i.path.includes("/search_configurations/")) usage.aragConflicts++;
+        else if (status >= 400) usage.aragClientErrors++;
+        log.debug("arag.request", {
+          method: i.method,
+          path: i.path,
+          status: i.status,
+          ms: Math.round(i.ms),
+          error: i.error,
+        });
+      },
+    });
+  };
+  let live = buildArag();
+  const arag = new Proxy({} as AragClient, {
+    get(_t, prop) {
+      const value = Reflect.get(live as object, prop) as unknown;
+      return typeof value === "function" ? value.bind(live) : value;
+    },
+    has: (_t, prop) => prop in (live as object),
+    getPrototypeOf: () => Object.getPrototypeOf(live) as object,
+  });
+
   const jobs = new JobManager(store, log, { concurrency: 2 });
+  // Getters, not values: `Agents` and `DocumentsService` read these on every call, so an
+  // operator's edit reaches the next extraction without a restart.
   const agents = new Agents({
     arag,
     log,
-    generativeModel: product.generativeModel,
-    reranker: env.arag.reranker,
+    get generativeModel() {
+      return settings.effective().connection.generativeModel;
+    },
+    get reranker() {
+      return settings.effective().connection.reranker;
+    },
   });
-  const configs = new ConfigsService({ store, agents, log });
+  // Key-value fields have no support in the vendored client, so `KvService` drives the
+  // routes through its generic `request()` — and, under ARAG_MOCK, an in-memory registry
+  // that mirrors the live shapes and validation, so the same code paths run offline.
+  const kv = new KvService({ arag, log, mock: env.arag.mock });
+  const da = new DaAgents({
+    arag,
+    kv,
+    log,
+    mock: env.arag.mock,
+    get generativeModel() {
+      return settings.effective().connection.generativeModel;
+    },
+  });
+  const configs = new ConfigsService({ store, agents, kv, log });
   const documents = new DocumentsService({
     arag,
     store,
     jobs,
     configs,
     agents,
+    kv,
     env,
     log,
-    extractStrategy: product.extractStrategy,
-    maxUploadBytes: product.maxUploadBytes,
-    generativeModel: product.generativeModel,
+    get extractStrategy() {
+      return settings.effective().connection.extractStrategy;
+    },
+    get maxUploadBytes() {
+      return settings.effective().limits.maxUploadBytes;
+    },
+    get generativeModel() {
+      return settings.effective().connection.generativeModel;
+    },
     publicDir: resolve(HERE, "public"),
   });
 
+  const generators = new GeneratorsService({ da, kv, configs, documents, log });
+
+  // Human review. `kvWriteback` is the pipeline's own key-value writer, so a correction
+  // lands in the Knowledge Box by exactly the route an extraction does — including sending
+  // the whole record (a key-value write is a full replace) and reporting that the filter
+  // index now also matches the value the correction superseded.
+  const review = new ReviewService({
+    arag,
+    documents,
+    env,
+    log,
+    get generativeModel() {
+      return settings.effective().connection.generativeModel;
+    },
+    kvWriteback: makeKvWriteback({
+      kv,
+      configs,
+      log,
+      schemaOf: (record) => configs.resolve(record.meta.config)?.schema ?? schemaFor(record.docType),
+    }),
+    // The actor comes from the request scope (`auditContext`), which knows the API key's
+    // stored name; the string the review service offers would be a coarser answer.
+    audit: (entry) =>
+      void audit.record({
+        action: entry.action,
+        target: entry.target,
+        before: entry.before,
+        after: entry.after,
+      }),
+  });
+
+  // ── audited writes ─────────────────────────────────────────────────────────
+  // The services stay free of HTTP and of the audit log; the wrapper records who changed
+  // what, taking the actor from the request scope.
+  auditCalls(configs, audit, [
+    {
+      method: "create",
+      action: "config.create",
+      targetOf: (_a, r) => (r as { id: string }).id,
+      before: () => null,
+      after: (r) => r,
+    },
+    {
+      method: "update",
+      action: "config.update",
+      targetOf: (a) => String(a[0]),
+      before: (a) => configs.get(String(a[0])) ?? null,
+      after: (r) => (typeof r === "string" ? undefined : r),
+    },
+    {
+      method: "delete",
+      action: "config.delete",
+      targetOf: (a) => String(a[0]),
+      before: (a) => configs.get(String(a[0])) ?? null,
+      after: (r) => (r === "deleted" ? { deleted: true } : undefined),
+    },
+    {
+      method: "provision",
+      action: "config.provision",
+      targetOf: (a) => String(a[0]),
+      after: (r) => r ?? undefined,
+    },
+  ]);
+  auditCalls(documents, audit, [
+    {
+      method: "delete",
+      action: "document.delete",
+      targetOf: (a) => String(a[0]),
+      before: (a) => {
+        const rec = documents.get(String(a[0]));
+        return rec ? { filename: rec.filename, docType: rec.docType, resourceId: rec.resourceId } : null;
+      },
+      after: (r) => (r === true ? { deleted: true } : undefined),
+    },
+    {
+      method: "purge",
+      action: "documents.purge",
+      targetOf: () => "*",
+      before: (a) => ({ olderThanDays: Number(a[0]) }),
+      after: (r, a) => {
+        if (a[1] === true) return undefined; // a dry run changes nothing
+        const out = r as { deleted: string[]; failed: unknown[] };
+        return { deleted: out.deleted.length, failed: out.failed.length };
+      },
+    },
+  ]);
+
   const app = new App({ env, log });
+
+  // ── authentication: stored API keys authenticate exactly like `API_KEYS` ────
+  // The platform only knows the env list; a stored key is verified against its salted digest
+  // and reported the same way, so `auth: "api"` and `requireWriter` (DP-12) need no changes.
+  const platformAuthenticate = app.authenticate.bind(app);
+  app.authenticate = (ctx) => {
+    const info = platformAuthenticate(ctx);
+    if (info.via !== "anonymous") return info;
+    const authz = ctx.header("authorization") ?? "";
+    const bearer = authz.toLowerCase().startsWith("bearer ") ? authz.slice(7).trim() : "";
+    const presented = ctx.header("x-api-key") || bearer;
+    if (!presented) return info;
+    // Keys seeded by API_KEYS keep working even when enforcement is switched off (which
+    // empties `env.apiKeys`, the platform's only enforcement lever).
+    if (settings.seedApiKeys.some((k) => constantTimeEqual(presented, k)))
+      return { admin: false, apiKey: presented, session: false, via: "api-key" };
+    const stored = apikeys.verify(presented);
+    if (stored) return { admin: false, apiKey: presented, session: false, via: "api-key" };
+    return info;
+  };
+
   // The demo previews an uploaded PDF from a blob: URL in an <iframe>; the default CSP
   // allows only `frame-src 'self'` (and `object-src 'none'`, which rules out <embed>).
   app.use(securityHeaders({ frameSrc: ["blob:"] }), cors());
-  app.use(async (_ctx, next) => {
+  app.use(async (ctx, next) => {
     usage.requests++;
+    // Middlewares run before the platform authenticates, so resolve the caller here and let
+    // the audit log read it from the request scope rather than from every call site.
+    ctx.auth = app.authenticate(ctx);
     await next();
   });
+  app.use(auditContext((key) => apikeys.list().find((k) => key.startsWith(`${k.prefix}_`))?.name));
+
   // Every open browser tab polls /readyz every 15 s (the UI kit's status pill), and each
   // ARAG health check costs a catalog + configuration call. Cache it briefly so a handful
   // of demo viewers cannot turn readiness polling into steady Knowledge Box traffic.
-  let readyCache: { at: number; value: Record<string, unknown> } | null = null;
+  let readyCache: { at: number; version: number; value: Record<string, unknown> } | null = null;
   const READY_TTL_MS = 10_000;
   healthRoutes(app, async () => {
-    if (readyCache && Date.now() - readyCache.at < READY_TTL_MS) return readyCache.value;
+    if (readyCache && readyCache.version === settings.version && Date.now() - readyCache.at < READY_TTL_MS)
+      return readyCache.value;
     const value = {
       version: VERSION,
       arag: { ...(await arag.health()), mock: env.arag.mock },
       // Whether an ingestion-time visual-LLM extract strategy is configured — a boolean,
       // not the strategy id (that stays behind the admin token).
-      visualExtraction: Boolean(product.extractStrategy),
+      visualExtraction: Boolean(settings.effective().connection.extractStrategy),
     };
-    readyCache = { at: Date.now(), value };
+    readyCache = { at: Date.now(), version: settings.version, value };
     return value;
   });
   app.docs("/api/v1", openapi, { title: "Document Processing" });
@@ -208,20 +396,91 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     cancelled: jobs.count({ status: "cancelled" }),
   });
 
-  registerDocumentRoutes(app, { documents, jobCounts });
-  registerWorkspaceRoutes(app, {
-    arag,
-    env,
-    branding,
-    configs,
-    version: VERSION,
-    productName: branding.productName,
-    extractStrategy: product.extractStrategy,
-    generativeModel: product.generativeModel,
-    maxUploadBytes: product.maxUploadBytes,
+  // ── retention scheduler ────────────────────────────────────────────────────
+  let purgeTimer: NodeJS.Timeout | null = null;
+  let nextPurgeAt: string | null = null;
+  const applyRetention = (): void => {
+    const r = settings.effective().retention;
+    if (purgeTimer) {
+      clearInterval(purgeTimer);
+      purgeTimer = null;
+      nextPurgeAt = null;
+    }
+    if (!r.autoPurgeEnabled) return;
+    const everyMs = Math.max(1, r.purgeIntervalHours) * 3_600_000;
+    purgeTimer = setInterval(() => {
+      nextPurgeAt = new Date(Date.now() + everyMs).toISOString();
+      // The wrapper audits it as `documents.purge` with the `scheduler` actor.
+      documents
+        .purge(settings.effective().retention.days)
+        .catch((err) => log.warn("purge.scheduled.fail", { message: (err as Error).message }));
+    }, everyMs);
+    purgeTimer.unref?.();
+    nextPurgeAt = new Date(Date.now() + everyMs).toISOString();
+  };
+  applyRetention();
+
+  settings.onChange((changed) => {
+    if (changed.some((k) => k.startsWith("connection."))) {
+      try {
+        live = buildArag();
+        aragError = null;
+      } catch (err) {
+        // Keep serving with the previous client and say so, rather than 500ing the save.
+        aragError = (err as Error).message;
+        log.error("arag.rebuild.fail", { message: aragError });
+      }
+    }
+    if (changed.some((k) => k.startsWith("retention."))) applyRetention();
   });
+
+  /** What the running process is actually using — read from the live objects, not the store. */
+  const applied = (): Record<string, unknown> => {
+    const eff = settings.effective();
+    return {
+      settingsVersion: settings.version,
+      arag: {
+        kbId: live.kbId,
+        baseUrl: live.baseUrl,
+        timeoutMs: live.timeoutMs,
+        mock: env.arag.mock,
+        generativeModel: eff.connection.generativeModel || "KB default",
+        reranker: eff.connection.reranker,
+        visualExtraction: Boolean(eff.connection.extractStrategy),
+        error: aragError,
+      },
+      limits: {
+        maxUploadBytes: eff.limits.maxUploadBytes,
+        maxBodyBytes: env.maxBodyBytes,
+        rateLimitRps: env.rateLimitRps,
+        rateLimitBurst: env.rateLimitBurst,
+      },
+      security: {
+        apiKeysEnforced: env.apiKeys.length > 0,
+        storedApiKeys: apikeys.activeCount(),
+        seededApiKeys: settings.seedApiKeys.length,
+        adminEnabled: Boolean(env.adminToken),
+        allowedOrigins: [...env.allowedOrigins],
+        trustProxy: env.trustProxy,
+      },
+      retention: {
+        days: eff.retention.days,
+        autoPurgeEnabled: eff.retention.autoPurgeEnabled,
+        purgeIntervalHours: eff.retention.purgeIntervalHours,
+        schedulerActive: purgeTimer !== null,
+        nextRunAt: nextPurgeAt,
+      },
+      operations: { logLevel: log.level },
+      branding: settings.branding(),
+    };
+  };
+
+  registerDocumentRoutes(app, { documents, jobCounts });
+  registerWorkspaceRoutes(app, { arag, env, configs, settings, version: VERSION });
   registerJobRoutes(app, { jobs });
   registerConfigRoutes(app, { configs, documentCounts: () => documents.countsByConfig() });
+  registerReviewRoutes(app, { review, documents });
+  registerGeneratorRoutes(app, { generators });
   registerAdminRoutes(app, {
     arag,
     env,
@@ -231,16 +490,19 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     jobs,
     documents,
     configs,
+    settings,
+    apikeys,
+    audit,
     version: VERSION,
-    extractStrategy: product.extractStrategy,
-    generativeModel: product.generativeModel,
-    maxUploadBytes: product.maxUploadBytes,
-    branding,
+    applied,
   });
 
   // Branding is public: both UIs fetch it before they paint, and so may a partner's own
   // front end. It contains no secrets — only what a visitor already sees on the page.
-  app.get("/api/v1/branding", () => branding, { operationId: "getBranding", noRateLimit: true });
+  app.get("/api/v1/branding", () => settings.branding(), {
+    operationId: "getBranding",
+    noRateLimit: true,
+  });
 
   // Session for the demo UI when API keys are enforced (rate-limited like any public route).
   app.post(
@@ -254,8 +516,8 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
 
   // Static surfaces: UI kit, admin panel, demo app. Both UIs consume only /api/v1.
   app.static("/ui", resolve(HERE, "vendor/arag-platform/ui"), { cache: "public, max-age=300" });
-  // Partner logos and other brand assets, dropped into DATA_DIR/branding (a Fly volume in
-  // production) so rebranding never needs a rebuild. Missing directory is simply a 404.
+  // Partner logos and other brand assets, uploaded through Settings → Branding into
+  // DATA_DIR/branding (a Fly volume in production) so rebranding never needs a rebuild.
   app.static("/branding", resolve(env.dataDir, "branding"), { cache: "public, max-age=300" });
   app.static("/admin", resolve(HERE, "admin"));
   app.static("/", resolve(HERE, "public"));
@@ -270,7 +532,9 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
   return {
     name: "arag-doc-processing",
     version: VERSION,
-    branding,
+    get branding() {
+      return settings.branding();
+    },
     app,
     arag,
     store,
@@ -278,10 +542,18 @@ export async function createProduct(env: PlatformEnv, opts: CreateOptions = {}):
     agents,
     configs,
     documents,
+    kv,
+    generators,
+    review,
+    settings,
+    apikeys,
+    audit,
     usage,
     mock,
     provision,
     async close() {
+      if (purgeTimer) clearInterval(purgeTimer);
+      apikeys.flushUsage();
       store.flushAll();
       try {
         await app.close();

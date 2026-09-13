@@ -27,16 +27,52 @@ export interface ExtractionSchema {
   labels: Record<string, string>;
 }
 
+/**
+ * The five types an ARAG key-value field can have. Declared here rather than imported from
+ * `services/kv.ts` so the schema library stays free of the kv service; the two unions are
+ * identical and structurally interchangeable.
+ */
+export type KvTypeHint = "text" | "integer" | "float" | "boolean" | "date";
+
+/**
+ * How one property should be represented as a **key-value field** in the Knowledge Box,
+ * when the JSON-Schema type is not the right answer.
+ *
+ * `jsonPropToKvType()` is a good default but it cannot be right for everything: a money
+ * field is deliberately declared as a `string` on the record so the original formatting
+ * ("$96,000.00") survives, and mapping that to kv `text` means nobody can ever filter
+ * "invoices over $10,000". The annotation is the override — the extraction stays a string,
+ * the Knowledge Box gets a `float` — and the same applies to dates the model returns as
+ * text. It is stripped before the schema is sent to ARAG as `answer_json_schema`.
+ */
+export interface KvHint {
+  /** Knowledge Box field type. Overrides the type derived from the JSON-Schema type. */
+  type?: KvTypeHint;
+  /** Store a list of values. ARAG accepts `repeated` on `text` only. */
+  repeated?: boolean;
+  /** Store an interval (`{lower, upper}`). ARAG accepts `range` on integer/float/date only. */
+  range?: boolean;
+}
+
 export interface JsonProp {
   type: "string" | "number" | "boolean" | "array" | "object";
   description?: string;
   items?: { type: "string" | "number" } | Record<string, unknown>;
   properties?: Record<string, unknown>;
   required?: string[];
+  /** Key-value field override; not part of the JSON Schema sent to the model. */
+  kv?: KvHint;
 }
 
 function s(description: string): JsonProp {
   return { type: "string", description };
+}
+/**
+ * A date captured as text (models are far more reliable returning "2026-01-15" than a typed
+ * value), stored as a kv `date` so `gte`/`lte` filtering works on it.
+ */
+function date(description: string): JsonProp {
+  return { type: "string", description, kv: { type: "date" } };
 }
 /**
  * Money/amount fields are declared as STRINGS, not numbers. Forcing the model to emit
@@ -48,6 +84,9 @@ function money(description: string): JsonProp {
   return {
     type: "string",
     description: `${description} (capture exactly as written, including currency/symbols)`,
+    // …and a `float` in the Knowledge Box, so "every invoice over $10k" is a filter rather
+    // than a full re-read. The record keeps the string; only the kv projection is numeric.
+    kv: { type: "float" },
   };
 }
 function n(description: string): JsonProp {
@@ -67,8 +106,8 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
       vendor_address: s("Vendor postal address, if present"),
       bill_to: s("Customer / bill-to party"),
       invoice_number: s("Invoice number or identifier"),
-      invoice_date: s("Invoice issue date in ISO 8601 (YYYY-MM-DD) if determinable"),
-      due_date: s("Payment due date in ISO 8601 if determinable"),
+      invoice_date: date("Invoice issue date in ISO 8601 (YYYY-MM-DD) if determinable"),
+      due_date: date("Payment due date in ISO 8601 if determinable"),
       currency: s("ISO 4217 currency code, e.g. USD, AUD, EUR"),
       subtotal: money("Subtotal amount before tax"),
       tax: money("Total tax amount"),
@@ -99,7 +138,7 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
     description: "Structured fields from a retail or expense receipt.",
     properties: {
       merchant: s("Merchant / store name"),
-      transaction_date: s("Transaction date in ISO 8601 if determinable"),
+      transaction_date: date("Transaction date in ISO 8601 if determinable"),
       currency: s("ISO 4217 currency code"),
       subtotal: money("Subtotal before tax"),
       tax: money("Tax amount"),
@@ -127,7 +166,7 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
     properties: {
       title: s("Contract title / type, e.g. 'Master Services Agreement'"),
       parties: arr("Names of the contracting parties"),
-      effective_date: s("Effective date in ISO 8601 if determinable"),
+      effective_date: date("Effective date in ISO 8601 if determinable"),
       term: s("Contract term / duration"),
       governing_law: s("Governing law / jurisdiction"),
       total_value: s("Total contract value, with currency"),
@@ -184,7 +223,7 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
       po_number: s("Purchase order number"),
       buyer: s("Buyer / ordering organization"),
       supplier: s("Supplier / vendor"),
-      order_date: s("Order date in ISO 8601 if determinable"),
+      order_date: date("Order date in ISO 8601 if determinable"),
       currency: s("ISO 4217 currency code"),
       total: money("Order total"),
       line_items: arr("Ordered items, one per entry"),
@@ -213,7 +252,7 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
       member_number: s("Member / policy number"),
       patient_name: s("Patient name"),
       provider: s("Treating provider or facility that rendered the service"),
-      service_date: s("Date of service in ISO 8601 if determinable"),
+      service_date: date("Date of service in ISO 8601 if determinable"),
       diagnosis_code: s("Primary diagnosis code (e.g. ICD-10)"),
       procedure_code: s("Procedure / tariff code (e.g. CPT)"),
       currency: s("ISO 4217 currency code"),
@@ -253,7 +292,7 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
       patient_name: s("Patient name"),
       provider: s("Treating provider / practitioner"),
       facility: s("Hospital / facility name"),
-      admission_date: s("Proposed admission date in ISO 8601 if determinable"),
+      admission_date: date("Proposed admission date in ISO 8601 if determinable"),
       length_of_stay: s("Approved or requested length of stay"),
       procedure: s("Procedure description and/or code"),
       diagnosis_code: s("Primary diagnosis code (e.g. ICD-10)"),
@@ -314,7 +353,7 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
       form_title: s("Title or type of the form"),
       reference: s("Reference / case / application number"),
       submitted_by: s("Person or entity who submitted the form"),
-      submitted_date: s("Submission date in ISO 8601 if determinable"),
+      submitted_date: date("Submission date in ISO 8601 if determinable"),
       fields: arr("All field:value pairs found, formatted as 'Label: Value'"),
     },
     required: ["form_title"],
@@ -334,7 +373,7 @@ export const SCHEMAS: Record<DocType, ExtractionSchema> = {
     properties: {
       title: s("Report title"),
       author: s("Author or publishing organization"),
-      date: s("Publication date in ISO 8601 if determinable"),
+      date: date("Publication date in ISO 8601 if determinable"),
       key_findings: arr("Key findings / takeaways, one per entry"),
       metrics: arr("Notable metrics or figures, one per entry"),
     },
@@ -398,14 +437,24 @@ const EVIDENCE_PROPERTY: JsonProp = {
   },
 };
 
-/** Build the answer_json_schema payload ARAG expects for a given schema. */
+/**
+ * Build the answer_json_schema payload ARAG expects for a given schema.
+ *
+ * `kv` is the product's own annotation for the key-value projection, not JSON Schema, so
+ * it is stripped here: what the model is handed stays a valid function schema.
+ */
 export function toAnswerJsonSchema(schema: ExtractionSchema): unknown {
+  const properties: Record<string, unknown> = {};
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    const { kv: _kv, ...rest } = prop;
+    properties[key] = rest;
+  }
   return {
     name: schema.name,
     description: schema.description,
     parameters: {
       type: "object",
-      properties: { ...schema.properties, evidence: EVIDENCE_PROPERTY },
+      properties: { ...properties, evidence: EVIDENCE_PROPERTY },
       required: schema.required,
     },
   };
@@ -426,17 +475,31 @@ export interface ConfigField {
   type: "string" | "number" | "array";
   description?: string;
   required?: boolean;
+  /**
+   * Explicit Knowledge Box field type for this field's key-value projection. Absent means
+   * "use the type derived from `type`" — the default, not a silent one: the effective type
+   * is reported separately by the config's kv schema.
+   */
+  kvType?: KvTypeHint;
+  kvRepeated?: boolean;
+  kvRange?: boolean;
 }
 
 /** Project a schema to the flat field list the UI shows in the config manager. */
 export function schemaToFields(schema: ExtractionSchema): ConfigField[] {
-  return Object.entries(schema.properties).map(([key, prop]) => ({
-    key,
-    label: schema.labels[key] ?? key,
-    type: prop.type === "string" || prop.type === "number" || prop.type === "array" ? prop.type : "string",
-    description: prop.description,
-    required: schema.required.includes(key),
-  }));
+  return Object.entries(schema.properties).map(([key, prop]) => {
+    const field: ConfigField = {
+      key,
+      label: schema.labels[key] ?? key,
+      type: prop.type === "string" || prop.type === "number" || prop.type === "array" ? prop.type : "string",
+      description: prop.description,
+      required: schema.required.includes(key),
+    };
+    if (prop.kv?.type) field.kvType = prop.kv.type;
+    if (prop.kv?.repeated) field.kvRepeated = true;
+    if (prop.kv?.range) field.kvRange = true;
+    return field;
+  });
 }
 
 /** Sanitise an arbitrary label into a stable machine key. */
@@ -459,6 +522,10 @@ export interface CustomConfigInput {
     type?: "string" | "number" | "array";
     description?: string;
     required?: boolean;
+    /** Override the Knowledge Box type for this field's key-value projection. */
+    kvType?: KvTypeHint;
+    kvRepeated?: boolean;
+    kvRange?: boolean;
   }>;
 }
 
@@ -480,10 +547,19 @@ export function buildCustomSchema(input: CustomConfigInput): ExtractionSchema {
     while (usedKeys.has(key)) key = `${key}_2`;
     usedKeys.add(key);
     const type = f.type === "number" ? "number" : f.type === "array" ? "array" : "string";
-    properties[key] =
+    const prop: JsonProp =
       type === "array"
         ? { type: "array", description: f.description, items: { type: "string" } }
         : { type, description: f.description };
+    // The kv projection is the author's to decide per field: a "string" amount that should
+    // be filterable as a number says so here, and provisioning validates the choice against
+    // ARAG's own rules (repeated → text only, range → integer/float/date only).
+    const kv: KvHint = {};
+    if (f.kvType) kv.type = f.kvType;
+    if (f.kvRepeated) kv.repeated = true;
+    if (f.kvRange) kv.range = true;
+    if (Object.keys(kv).length) prop.kv = kv;
+    properties[key] = prop;
     labels[key] = f.label.trim();
     if (f.required) required.push(key);
   }

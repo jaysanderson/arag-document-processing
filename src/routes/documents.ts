@@ -11,6 +11,7 @@ import {
 import { openapi } from "../openapi.ts";
 import type { DocumentsService, SortKey } from "../services/documents.ts";
 import type { Format } from "../services/formats.ts";
+import { KvValidationError } from "../services/kv.ts";
 import { requireWriter } from "./guards.ts";
 
 const FORMATS = new Set(["json", "xml", "csv"]);
@@ -21,25 +22,34 @@ export function registerDocumentRoutes(
 ): void {
   app.get(
     "/api/v1/documents",
-    (ctx) =>
-      deps.documents.list({
-        page: Number(ctx.queryObj.page ?? 1),
-        pageSize: Number(ctx.queryObj.page_size ?? 50),
-        status: ctx.queryObj.status as string | undefined,
-        q: ctx.queryObj.q as string | undefined,
-        sort: ctx.queryObj.sort as SortKey | undefined,
-        order: ctx.queryObj.order as "asc" | "desc" | undefined,
-        dateFrom: ctx.queryObj.date_from as string | undefined,
-        dateTo: ctx.queryObj.date_to as string | undefined,
-        config: ctx.queryObj.config as string | undefined,
-        degraded: ctx.queryObj.degraded as boolean | undefined,
-        hasIssues: ctx.queryObj.has_issues as boolean | undefined,
-        minGrounding:
-          ctx.queryObj.min_grounding === undefined ? undefined : Number(ctx.queryObj.min_grounding),
-        // Declared in the spec as a repeatable parameter, so the platform hands back an
-        // array whether one type or several were asked for.
-        docTypes: ctx.queryObj.doc_type as string[] | undefined,
-      }),
+    async (ctx) => {
+      try {
+        return await deps.documents.listWithKv({
+          page: Number(ctx.queryObj.page ?? 1),
+          pageSize: Number(ctx.queryObj.page_size ?? 50),
+          status: ctx.queryObj.status as string | undefined,
+          q: ctx.queryObj.q as string | undefined,
+          sort: ctx.queryObj.sort as SortKey | undefined,
+          order: ctx.queryObj.order as "asc" | "desc" | undefined,
+          dateFrom: ctx.queryObj.date_from as string | undefined,
+          dateTo: ctx.queryObj.date_to as string | undefined,
+          config: ctx.queryObj.config as string | undefined,
+          degraded: ctx.queryObj.degraded as boolean | undefined,
+          hasIssues: ctx.queryObj.has_issues as boolean | undefined,
+          minGrounding:
+            ctx.queryObj.min_grounding === undefined ? undefined : Number(ctx.queryObj.min_grounding),
+          // Declared in the spec as repeatable parameters, so the platform hands back an
+          // array whether one value or several were asked for.
+          docTypes: ctx.queryObj.doc_type as string[] | undefined,
+          kv: ctx.queryObj.kv as string[] | undefined,
+        });
+      } catch (err) {
+        // A key-value filter the Knowledge Box would refuse with an opaque 412 is refused
+        // here instead, with the operators that field does accept.
+        if (err instanceof KvValidationError) throw badRequest(err.message);
+        throw err;
+      }
+    },
     {
       auth: "api",
       validate: operationSchemas(openapi, "/api/v1/documents", "get"),
