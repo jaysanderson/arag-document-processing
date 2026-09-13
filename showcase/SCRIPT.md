@@ -90,12 +90,12 @@ flagged.
 ### 00:42–00:56 — The record: a claim with a denominator
 
 **On screen:** the document detail's Record tab. The trust strip states "12 of 12 fields
-carry a quote found in this document," the exact/near/none breakdown, and — right below
-it — the reconciliation warning.
+carry a verified quote," the exact/near/none breakdown, and — right below it — the
+reconciliation warning.
 **Screenshot:** `05-record.png`
 
 > "Every record opens with this strip, and it never shows a bare percentage. '12 of 12
-> fields carry a quote found in this document' is a claim you can check, not just a score.
+> fields carry a verified quote' is a claim you can check, not just a score.
 > And here's the validation catch: the subtotal and tax on this invoice don't reconcile
 > with the printed total — flagged automatically, against the field it actually concerns."
 
