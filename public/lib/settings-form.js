@@ -122,9 +122,14 @@ export function operatorSignIn() {
 }
 
 /**
- * The rail's operator marker. There is no logout endpoint on this API, so the row states
- * the session rather than offering a sign-out it could not honour; the 12-hour cookie is
- * what ends it. (Reported to the lead as a missing `POST /api/v1/admin/logout`.)
+ * The rail's operator marker, and the way out of it.
+ *
+ * Signing in without being able to sign out is not a control: on a shared machine the only
+ * thing ending the session would be the twelve-hour cookie. `POST /api/v1/admin/logout`
+ * clears it, and the page is reloaded rather than patched because every settings group,
+ * every secret row and the API explorer's credential picker all change with the session —
+ * re-deriving that in place would be more code and more ways to leave a stale editable
+ * control on screen.
  */
 export function markOperator(signedIn) {
   const foot = document.querySelector(".arag-rail .foot");
@@ -135,12 +140,24 @@ export function markOperator(signedIn) {
     return;
   }
   if (!row) {
-    row = document.createElement("span");
+    row = document.createElement("div");
     row.className = "arag-status dip-operator";
     row.dataset.operator = "1";
     row.dataset.state = "ok";
-    row.innerHTML = '<span class="dot"></span><span>Signed in as operator</span>';
+    row.innerHTML =
+      '<span class="dot"></span><span>Signed in as operator</span>' +
+      '<button class="arag-btn ghost sm" id="signOutOp" type="button">Sign out</button>';
     foot.prepend(row);
+    $("#signOutOp", row).addEventListener("click", async () => {
+      try {
+        await api("/api/v1/admin/logout", { method: "POST" });
+      } catch {
+        // The cookie is the session; a failed call must not leave the operator stuck on a
+        // screen that still looks signed in.
+      }
+      announce("Signed out of the operator session.");
+      location.reload();
+    });
   }
 }
 

@@ -313,6 +313,23 @@ test("retention: the purge is previewed, and Delete does not exist until it has 
   await expect(page.locator("#purgeGo")).toHaveCount(0);
 });
 
+test("the operator can sign out again, and the settings lock behind them", async ({ page }) => {
+  // Sign-in without sign-out is not a control: on a shared machine the twelve-hour cookie
+  // would be the only thing ending the session.
+  await page.goto("/#/settings/connection");
+  await signedIn(page);
+  await expect(page.locator("[data-operator]")).toContainText("Signed in as operator");
+
+  await page.click("#signOutOp");
+  await expect(page.locator("[data-operator]")).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.locator("#panel")).toContainText("Editing these settings needs the operator token.");
+  // And it is the session that ended, not just the screen: a reload stays locked.
+  await page.reload();
+  await expect(page.locator("#panel")).toContainText("Editing these settings needs the operator token.", {
+    timeout: 20_000,
+  });
+});
+
 test("an unsaved change survives a stray click on another tab", async ({ page }) => {
   await page.goto("/#/settings/connection");
   await expect(page.locator("#panel")).toContainText("Knowledge Box id", { timeout: 20_000 });

@@ -725,7 +725,18 @@ mark.dip-hit.is-active {
 }
 
 .dip-operator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 6px;
+}
+/* Sign out sits with the marker rather than under it: the rail foot is narrow, and the
+   control belongs to the statement it ends. */
+.dip-operator .arag-btn.sm {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 0.75rem;
 }
 
 /* API keys */
