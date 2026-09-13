@@ -278,10 +278,25 @@ test("the explorer models every operation in this product's own OpenAPI document
       );
     }
   }
+});
 
-  // Every operation is reachable from the explorer — the coverage table's floor.
+test("coverage marks an operation the explorer did not render as a gap", () => {
+  // The floor for the coverage table. Passing no id set means "assume reachable", which is
+  // what the API-reference table wants; passing the ids the screen actually rendered is
+  // what turns the table into a check. The end-to-end proof that the real explorer renders
+  // every operation lives in test/e2e/api-explorer.spec.ts, which compares the rendered
+  // list against the server's own /api/v1/openapi.json — a unit test cannot see the DOM,
+  // and asserting a hardcoded `true` here would be a tautology dressed as a guarantee.
+  const rendered = new Set(["listDocuments", "deleteDocument"]);
+  const rows = coverage(DOC, { explorerIds: rendered, screens: { listDocuments: "Documents" } });
+  const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+  assert.equal(byId.listDocuments!.explorer, true);
+  assert.equal(byId.listDocuments!.screen, "Documents");
+  assert.equal(byId.askDocument!.explorer, false, "an unrendered operation is a gap");
+  assert.equal(byId.purge!.screen, null);
+  // No id set at all: every row is assumed reachable, and says so rather than checking.
   assert.equal(
-    coverage(openapi as unknown as Record<string, unknown>).every((c) => c.explorer),
+    coverage(DOC).every((c) => c.explorer),
     true,
   );
 });

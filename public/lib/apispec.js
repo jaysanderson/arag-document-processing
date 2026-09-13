@@ -298,17 +298,24 @@ export function operationRisk(op) {
 }
 
 /**
- * Every `/api/v1` operation in the document paired with whether the explorer covers it —
- * the data behind the API coverage table, and the assertion that keeps the explorer
- * honest: an operation that exists in the spec and is not reachable in the UI is a gap.
+ * Every `/api/v1` operation in the document paired with where it is reachable — the data
+ * behind the API coverage table.
+ *
+ * `explorerIds` is the set of operation ids the explorer **actually rendered**; pass it and
+ * an operation missing from the screen comes back `explorer: false`, which is the gap worth
+ * reporting. Without it every operation is assumed reachable, because that is what the
+ * explorer's construction implies — but an assumption is not a check, so the real proof
+ * that nothing is missing lives in `test/e2e/api-explorer.spec.ts`, which compares the
+ * rendered list against the server's own `/api/v1/openapi.json`.
  */
-export function coverage(doc, { screens = {} } = {}) {
+export function coverage(doc, { screens = {}, explorerIds = null } = {}) {
+  const ids = explorerIds instanceof Set ? explorerIds : explorerIds ? new Set(explorerIds) : null;
   return operations(doc).map((op) => ({
     id: op.id,
     method: op.method.toUpperCase(),
     path: op.path,
     tag: op.tags[0],
     screen: screens[op.id] ?? null,
-    explorer: true,
+    explorer: ids ? ids.has(op.id) : true,
   }));
 }

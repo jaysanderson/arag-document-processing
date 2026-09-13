@@ -88,7 +88,10 @@ export interface CoverageRow {
   tag: string;
   /** The product screen that exercises the operation, when one does. */
   screen: string | null;
-  /** Always true: every operation is reachable from the explorer. */
+  /**
+   * Whether the explorer rendered this operation. `true` by assumption when no
+   * `explorerIds` set is supplied — the check that actually proves it is the e2e spec.
+   */
   explorer: boolean;
 }
 
@@ -115,4 +118,7 @@ export function buildRequest(
 ): BuiltRequest;
 export function toCurl(req: BuiltRequest, opts?: { origin?: string; reveal?: boolean }): string;
 export function operationRisk(op: OperationModel): RiskModel;
-export function coverage(doc: OpenApiDoc, opts?: { screens?: Record<string, string> }): CoverageRow[];
+export function coverage(
+  doc: OpenApiDoc,
+  opts?: { screens?: Record<string, string>; explorerIds?: Iterable<string> | null },
+): CoverageRow[];

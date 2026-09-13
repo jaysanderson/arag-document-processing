@@ -126,8 +126,12 @@ Most document-extraction tools hand you a JSON blob and leave the structured dat
 in their own database. Document Processing writes it back where the documents already are.
 Every extraction config — the eleven built-ins and every custom one — provisions a matching
 **key-value schema** in the Progress Agentic RAG Knowledge Box: typed fields (text, integer,
-float, boolean, date), with required, range and repeated modifiers, and the field
-descriptions that give the extraction its intent. After a document is processed and its
+float, boolean, date) with range and repeated modifiers, and the field descriptions that
+give the extraction its intent. (The schema supports a *required* modifier, which this
+product deliberately does not use: the platform rejects an entire key-value write when one
+required key is missing, so a single unreadable line on a faded scan would cost that
+document every value the pipeline did read. The field is still asked for, and a document
+missing it still says so.) After a document is processed and its
 fields are verified against the document's own text, the record is written onto the resource
 as typed key-value fields, validated by the platform at write time — a value of the wrong
 type is rejected with a 422 and reported against the field that caused it, rather than
